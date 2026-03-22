@@ -30,7 +30,7 @@ export class TUI {
     '/new', '/load', '/sessions', '/delete', '/model', '/export',
     '/cost', '/retry', '/undo', '/search', '/lang', '/config', '/exit',
     '/briefing', '/news', '/open', '/openfile', '/openurl', '/apps',
-    '/sysinfo', '/calendar',
+    '/sysinfo', '/calendar', '/task', '/tasks', '/done', '/rmtask',
   ]
 
   private onSubmit: ((s: string) => void) | null = null

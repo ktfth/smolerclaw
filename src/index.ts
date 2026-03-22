@@ -21,6 +21,7 @@ import { extractImages } from './images'
 import { openApp, openFile, openUrl, getRunningApps, getSystemInfo, getDateTimeInfo, getOutlookEvents, getKnownApps } from './windows'
 import { fetchNews, getNewsCategories, type NewsCategory } from './news'
 import { generateBriefing } from './briefing'
+import { initTasks, stopTasks, addTask, completeTask, removeTask, listTasks, formatTaskList, parseTime, type Task } from './tasks'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Message, ToolCall } from './types'
@@ -163,6 +164,11 @@ async function runInteractive(
   const tui = new TUI(config.model, sessions.session.name, authLabel(auth), config.dataDir)
   let currentPersona = 'default'
   let activeSystemPrompt = systemPrompt
+
+  // Initialize task/reminder system
+  initTasks(config.dataDir, (task: Task) => {
+    tui.showSystem(`\n*** LEMBRETE: ${task.title} ***\n`)
+  })
 
   // Wire tool approval callback
   if (config.toolApproval !== 'auto' && claude.setApprovalCallback) {
@@ -497,6 +503,12 @@ async function runInteractive(
             '  /sysinfo       System resources (CPU, RAM, disk)',
             '  /calendar      Today\'s Outlook calendar',
             '',
+            'Tarefas:',
+            '  /task <texto>  Criar tarefa (ex: /task 18h buscar pao)',
+            '  /tasks [all]   Listar tarefas pendentes',
+            '  /done <ref>    Marcar tarefa como concluida',
+            '  /rmtask <ref>  Remover tarefa',
+            '',
             'Tab completes commands. Use \\ at end of line for multi-line.',
             '',
             'Keys:',
@@ -826,12 +838,83 @@ async function runInteractive(
         break
       }
 
+      // ── Task/reminder commands ────────────────────────────
+
+      case 'task': {
+        const text = args.join(' ')
+        if (!text) {
+          // Show pending tasks
+          const tasks = listTasks()
+          tui.showSystem(formatTaskList(tasks))
+          break
+        }
+
+        // Parse time from the text (look for time patterns)
+        const dueTime = parseTime(text)
+
+        // Remove time-related parts from the title
+        let title = text
+          .replace(/\b(para\s+(as\s+)?)?\d{1,2}\s*[h:]\s*\d{0,2}\b/gi, '')
+          .replace(/\b(em\s+\d+\s*(min|minutos?|h|horas?))\b/gi, '')
+          .replace(/\b(amanha|amanhã)\b/gi, '')
+          .replace(/\s{2,}/g, ' ')
+          .trim()
+
+        // If title became empty, use the original text
+        if (!title) title = text
+
+        const task = addTask(title, dueTime || undefined)
+        const dueStr = dueTime
+          ? ` — lembrete: ${dueTime.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+          : ''
+        tui.showSystem(`Tarefa criada: "${task.title}"${dueStr}  [${task.id}]`)
+        break
+      }
+
+      case 'tasks': {
+        const showAll = args[0] === 'all' || args[0] === 'todas'
+        const tasks = listTasks(showAll)
+        tui.showSystem(formatTaskList(tasks))
+        break
+      }
+
+      case 'done': {
+        const ref = args.join(' ')
+        if (!ref) {
+          tui.showError('Uso: /done <id ou parte do titulo>')
+          break
+        }
+        const task = completeTask(ref)
+        if (task) {
+          tui.showSystem(`Concluida: "${task.title}"`)
+        } else {
+          tui.showError(`Tarefa nao encontrada: "${ref}"`)
+        }
+        break
+      }
+
+      case 'rmtask': {
+        const ref = args.join(' ')
+        if (!ref) {
+          tui.showError('Uso: /rmtask <id ou parte do titulo>')
+          break
+        }
+        const removed = removeTask(ref)
+        if (removed) {
+          tui.showSystem('Tarefa removida.')
+        } else {
+          tui.showError(`Tarefa nao encontrada: "${ref}"`)
+        }
+        break
+      }
+
       default:
         tui.showError(`Unknown command: /${cmd}. Try /help`)
     }
   }
 
   function cleanup(): void {
+    stopTasks()
     tui.stop()
     process.exit(0)
   }
