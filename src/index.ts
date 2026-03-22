@@ -26,6 +26,9 @@ import { initPeople, addPerson, findPerson, listPeople, logInteraction, delegate
 import { initMemos, saveMemo, searchMemos, listMemos, deleteMemo, formatMemoList, formatMemoDetail, formatMemoTags } from './memos'
 import { isFirstRunToday, markMorningDone, generateMorningBriefing } from './morning'
 import { openEmailDraft, formatDraftPreview } from './email'
+import { initPomodoro, startPomodoro, stopPomodoro, pomodoroStatus, stopPomodoroTimer } from './pomodoro'
+import { initFinance, addTransaction, getMonthSummary, getRecentTransactions, removeTransaction } from './finance'
+import { initDecisions, logDecision, searchDecisions, listDecisions, formatDecisionList, formatDecisionDetail } from './decisions'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Message, ToolCall } from './types'
@@ -172,6 +175,9 @@ async function runInteractive(
   // Initialize people, task, and memo systems
   initPeople(config.dataDir)
   initMemos(config.dataDir)
+  initFinance(config.dataDir)
+  initDecisions(config.dataDir)
+  initPomodoro((msg) => tui.showSystem(`\n*** ${msg} ***\n`))
   initTasks(config.dataDir, (task: Task) => {
     tui.showSystem(`\n*** LEMBRETE: ${task.title} ***\n`)
   })
@@ -529,6 +535,19 @@ async function runInteractive(
             '  /delegations /delegacoes Listar delegacoes',
             '  /followups              Follow-ups pendentes',
             '  /dashboard /painel      Painel geral',
+            '',
+            'Pomodoro:',
+            '  /pomodoro /foco      Iniciar (ex: /foco revisar codigo)',
+            '  /pomodoro status     Ver tempo restante',
+            '  /pomodoro stop       Parar',
+            '',
+            'Financas / Finance:',
+            '  /entrada <$> <cat>   Registrar entrada',
+            '  /saida <$> <cat>     Registrar saida',
+            '  /finance /balanco    Resumo mensal',
+            '',
+            'Decisoes / Decisions:',
+            '  /decisoes [busca]    Listar/buscar decisoes',
             '',
             'Email:',
             '  /email /rascunho     Rascunho (ex: /email joao@x.com oi | texto)',
@@ -890,6 +909,80 @@ async function runInteractive(
         break
       }
 
+      // ── Pomodoro commands ─────────────────────────────────
+
+      case 'pomodoro':
+      case 'foco': {
+        const sub = args[0]?.toLowerCase()
+        if (sub === 'stop' || sub === 'parar') {
+          tui.showSystem(stopPomodoro())
+        } else if (sub === 'status') {
+          tui.showSystem(pomodoroStatus())
+        } else if (!sub) {
+          tui.showSystem(pomodoroStatus())
+        } else {
+          // Start with label
+          const label = args.join(' ')
+          const workMin = 25
+          const breakMin = 5
+          tui.showSystem(startPomodoro(label, workMin, breakMin))
+        }
+        break
+      }
+
+      // ── Finance commands ────────────────────────────────────
+
+      case 'entrada':
+      case 'income': {
+        // /entrada 500 salario descricao
+        const amount = parseFloat(args[0])
+        if (isNaN(amount) || args.length < 3) {
+          tui.showSystem('Uso: /entrada <valor> <categoria> <descricao>')
+          break
+        }
+        const tx = addTransaction('entrada', amount, args[1], args.slice(2).join(' '))
+        tui.showSystem(`+ R$ ${tx.amount.toFixed(2)} (${tx.category}) — ${tx.description}`)
+        break
+      }
+
+      case 'saida':
+      case 'expense': {
+        const amount = parseFloat(args[0])
+        if (isNaN(amount) || args.length < 3) {
+          tui.showSystem('Uso: /saida <valor> <categoria> <descricao>')
+          break
+        }
+        const tx = addTransaction('saida', amount, args[1], args.slice(2).join(' '))
+        tui.showSystem(`- R$ ${tx.amount.toFixed(2)} (${tx.category}) — ${tx.description}`)
+        break
+      }
+
+      case 'finance':
+      case 'financas':
+      case 'balanco': {
+        const sub = args[0]
+        if (sub === 'recent' || sub === 'recentes') {
+          tui.showSystem(getRecentTransactions())
+        } else {
+          tui.showSystem(getMonthSummary() + '\n\n' + getRecentTransactions(5))
+        }
+        break
+      }
+
+      // ── Decision commands ───────────────────────────────────
+
+      case 'decisions':
+      case 'decisoes': {
+        const query = args.join(' ')
+        if (query) {
+          const results = searchDecisions(query)
+          tui.showSystem(formatDecisionList(results))
+        } else {
+          tui.showSystem(formatDecisionList(listDecisions()))
+        }
+        break
+      }
+
       // ── Email command ──────────────────────────────────────
 
       case 'email':
@@ -1161,6 +1254,7 @@ async function runInteractive(
 
   function cleanup(): void {
     stopTasks()
+    stopPomodoroTimer()
     tui.stop()
     process.exit(0)
   }

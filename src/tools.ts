@@ -18,6 +18,9 @@ import { fetchNews, type NewsCategory } from './news'
 import { addTask, completeTask, listTasks, formatTaskList, parseTime } from './tasks'
 import { saveMemo, searchMemos, listMemos, deleteMemo, formatMemoList, formatMemoDetail } from './memos'
 import { openEmailDraft, formatDraftPreview, type EmailDraft } from './email'
+import { startPomodoro, stopPomodoro, pomodoroStatus } from './pomodoro'
+import { addTransaction, getMonthSummary, getRecentTransactions } from './finance'
+import { logDecision, searchDecisions, listDecisions, formatDecisionList, formatDecisionDetail } from './decisions'
 import {
   addPerson, findPerson, listPeople, updatePerson, removePerson,
   logInteraction, getInteractions, delegateTask, updateDelegation,
@@ -469,6 +472,64 @@ export const EMAIL_TOOL: Anthropic.Tool = {
   },
 }
 
+// ─── Tier 2 Tools ───────────────────────────────────────────
+
+export const TIER2_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'record_transaction',
+    description:
+      'Record a financial transaction (income or expense). ' +
+      'Use when user mentions spending, receiving money, or financial tracking.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        type: { type: 'string', enum: ['entrada', 'saida'], description: 'Transaction type: entrada (income) or saida (expense)' },
+        amount: { type: 'number', description: 'Amount in BRL (always positive)' },
+        category: { type: 'string', description: 'Category (e.g. alimentacao, transporte, salario, freelance)' },
+        description: { type: 'string', description: 'Description of the transaction' },
+      },
+      required: ['type', 'amount', 'category', 'description'],
+    },
+  },
+  {
+    name: 'financial_summary',
+    description: 'Show monthly financial summary with income, expenses, and balance by category.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'log_decision',
+    description:
+      'Record an important decision with context and rationale. ' +
+      'Use when the user says "decidi", "optei por", "escolhi", or discusses a major choice.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        title: { type: 'string', description: 'Decision title (short)' },
+        context: { type: 'string', description: 'Why this decision was needed' },
+        chosen: { type: 'string', description: 'What was decided' },
+        alternatives: { type: 'string', description: 'What was considered but rejected. Optional.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization. Optional.' },
+      },
+      required: ['title', 'context', 'chosen'],
+    },
+  },
+  {
+    name: 'search_decisions',
+    description: 'Search past decisions by keyword or tag.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string', description: 'Search query' },
+      },
+      required: ['query'],
+    },
+  },
+]
+
 /** get_news tool definition (cross-platform, extracted for reference by name) */
 const NEWS_TOOL = WINDOWS_TOOLS.find((t) => t.name === 'get_news')!
 
@@ -491,6 +552,7 @@ export function registerWindowsTools(): void {
   TOOLS.push(...PEOPLE_TOOLS)
   TOOLS.push(...MEMO_TOOLS)
   TOOLS.push(EMAIL_TOOL)
+  TOOLS.push(...TIER2_TOOLS)
 }
 
 // ─── Tool Execution ──────────────────────────────────────────
@@ -630,6 +692,34 @@ export async function executeTool(
         if (!query?.trim()) return formatMemoList(listMemos())
         const results = searchMemos(query)
         return formatMemoList(results)
+      }
+      // Email tool
+      // Finance tools
+      case 'record_transaction': {
+        const type = input.type as 'entrada' | 'saida'
+        const amount = input.amount as number
+        const category = input.category as string
+        const description = input.description as string
+        if (!type || !amount || !category || !description) return 'Error: all fields required.'
+        const tx = addTransaction(type, amount, category, description)
+        const sign = tx.type === 'entrada' ? '+' : '-'
+        return `${sign} R$ ${tx.amount.toFixed(2)} (${tx.category}) — ${tx.description} [${tx.id}]`
+      }
+      case 'financial_summary':
+        return getMonthSummary()
+      // Decision tools
+      case 'log_decision': {
+        const title = input.title as string
+        const context = input.context as string
+        const chosen = input.chosen as string
+        if (!title || !context || !chosen) return 'Error: title, context, and chosen are required.'
+        const d = logDecision(title, context, chosen, input.alternatives as string, (input.tags as string[]) || [])
+        return `Decisao registrada: "${d.title}" {${d.id}}`
+      }
+      case 'search_decisions': {
+        const query = input.query as string
+        if (!query?.trim()) return formatDecisionList(listDecisions())
+        return formatDecisionList(searchDecisions(query))
       }
       // Email tool
       case 'draft_email': {
