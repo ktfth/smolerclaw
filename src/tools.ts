@@ -16,6 +16,7 @@ import { type Plugin, executePlugin } from './plugins'
 import { openApp, openFile, openUrl, getRunningApps, getSystemInfo, getOutlookEvents } from './windows'
 import { fetchNews, type NewsCategory } from './news'
 import { addTask, completeTask, listTasks, formatTaskList, parseTime } from './tasks'
+import { saveMemo, searchMemos, listMemos, deleteMemo, formatMemoList, formatMemoDetail } from './memos'
 import {
   addPerson, findPerson, listPeople, updatePerson, removePerson,
   logInteraction, getInteractions, delegateTask, updateDelegation,
@@ -409,6 +410,44 @@ export const PEOPLE_TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+// ─── Memo Tools (cross-platform) ────────────────────────────
+
+export const MEMO_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'save_memo',
+    description:
+      'Save a note/memo to the user\'s personal knowledge base. ' +
+      'Use #hashtags in the content to auto-tag. ' +
+      'Use when the user says "anota", "lembra disso", "salva isso", or shares important information.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        content: { type: 'string', description: 'The memo content. Use #tags for categorization.' },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional additional tags (without #). Auto-extracted #tags from content are always included.',
+        },
+      },
+      required: ['content'],
+    },
+  },
+  {
+    name: 'search_memos',
+    description:
+      'Search the user\'s memos by keyword or tag. ' +
+      'Use #tag to search by tag only. Use plain text for content search. ' +
+      'Use when the user asks "o que eu anotei sobre...", "qual era aquela nota...", etc.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string', description: 'Search query. Use #tag for tag search, or plain text for content search.' },
+      },
+      required: ['query'],
+    },
+  },
+]
+
 /** get_news tool definition (cross-platform, extracted for reference by name) */
 const NEWS_TOOL = WINDOWS_TOOLS.find((t) => t.name === 'get_news')!
 
@@ -426,9 +465,10 @@ export function registerWindowsTools(): void {
     TOOLS.push(NEWS_TOOL)
   }
 
-  // Task and people tools are cross-platform
+  // Task, people, and memo tools are cross-platform
   TOOLS.push(...TASK_TOOLS)
   TOOLS.push(...PEOPLE_TOOLS)
+  TOOLS.push(...MEMO_TOOLS)
 }
 
 // ─── Tool Execution ──────────────────────────────────────────
@@ -554,6 +594,21 @@ export async function executeTool(
       }
       case 'get_people_dashboard':
         return generatePeopleDashboard()
+      // Memo tools
+      case 'save_memo': {
+        const content = input.content as string
+        if (!content?.trim()) return 'Error: content is required.'
+        const tags = (input.tags as string[]) || []
+        const memo = saveMemo(content, tags)
+        const tagStr = memo.tags.length > 0 ? ` [${memo.tags.map((t) => '#' + t).join(' ')}]` : ''
+        return `Memo salvo${tagStr}  {${memo.id}}`
+      }
+      case 'search_memos': {
+        const query = input.query as string
+        if (!query?.trim()) return formatMemoList(listMemos())
+        const results = searchMemos(query)
+        return formatMemoList(results)
+      }
       default: {
         // Check plugins
         const plugin = _plugins.find((p) => p.name === name)

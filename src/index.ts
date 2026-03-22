@@ -23,6 +23,7 @@ import { fetchNews, getNewsCategories, type NewsCategory } from './news'
 import { generateBriefing } from './briefing'
 import { initTasks, stopTasks, addTask, completeTask, removeTask, listTasks, formatTaskList, parseTime, type Task } from './tasks'
 import { initPeople, addPerson, findPerson, listPeople, logInteraction, delegateTask, getDelegations, getPendingFollowUps, markFollowUpDone, formatPeopleList, formatPersonDetail, formatDelegationList, formatFollowUps, generatePeopleDashboard, type PersonGroup, type InteractionType } from './people'
+import { initMemos, saveMemo, searchMemos, listMemos, deleteMemo, formatMemoList, formatMemoDetail, formatMemoTags } from './memos'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Message, ToolCall } from './types'
@@ -166,8 +167,9 @@ async function runInteractive(
   let currentPersona = 'default'
   let activeSystemPrompt = systemPrompt
 
-  // Initialize people and task systems
+  // Initialize people, task, and memo systems
   initPeople(config.dataDir)
+  initMemos(config.dataDir)
   initTasks(config.dataDir, (task: Task) => {
     tui.showSystem(`\n*** LEMBRETE: ${task.title} ***\n`)
   })
@@ -526,6 +528,12 @@ async function runInteractive(
             '  /followups              Follow-ups pendentes',
             '  /dashboard /painel      Painel geral',
             '',
+            'Memos / Notes:',
+            '  /memo /anotar        Salvar memo (ex: /memo senha wifi #casa)',
+            '  /memos /notas        Buscar memos (ex: /memos docker)',
+            '  /tags /memotags      Listar tags',
+            '  /rmmemo /rmnota      Remover memo',
+            '',
             'Tarefas / Tasks:',
             '  /task /tarefa           Criar tarefa (ex: /tarefa 18h buscar pao)',
             '  /tasks /tarefas         Listar pendentes',
@@ -874,6 +882,58 @@ async function runInteractive(
           tui.showError(`Calendar: ${err instanceof Error ? err.message : String(err)}`)
         }
         tui.enableInput()
+        break
+      }
+
+      // ── Memo commands ─────────────────────────────────────
+
+      case 'memo':
+      case 'anotar':
+      case 'note': {
+        const text = args.join(' ')
+        if (!text) {
+          // Show recent memos
+          const memos = listMemos()
+          tui.showSystem(formatMemoList(memos))
+          break
+        }
+        const memo = saveMemo(text)
+        const tagStr = memo.tags.length > 0 ? ` [${memo.tags.map((t: string) => '#' + t).join(' ')}]` : ''
+        tui.showSystem(`Memo salvo${tagStr}  {${memo.id}}`)
+        break
+      }
+
+      case 'memos':
+      case 'notas': {
+        const query = args.join(' ')
+        if (query) {
+          const results = searchMemos(query)
+          tui.showSystem(formatMemoList(results))
+        } else {
+          const memos = listMemos()
+          tui.showSystem(formatMemoList(memos))
+        }
+        break
+      }
+
+      case 'memotags':
+      case 'tags': {
+        tui.showSystem(formatMemoTags())
+        break
+      }
+
+      case 'rmmemo':
+      case 'rmnota': {
+        const id = args[0]
+        if (!id) {
+          tui.showError('Uso: /rmmemo <id>')
+          break
+        }
+        if (deleteMemo(id)) {
+          tui.showSystem('Memo removido.')
+        } else {
+          tui.showError(`Memo nao encontrado: ${id}`)
+        }
         break
       }
 

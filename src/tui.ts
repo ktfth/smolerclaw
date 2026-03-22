@@ -35,8 +35,9 @@ export class TUI {
     '/task', '/tasks', '/done', '/rmtask',
     '/people', '/team', '/family', '/person', '/addperson',
     '/delegate', '/delegations', '/followups', '/dashboard', '/contacts',
+    '/memo', '/memos', '/note', '/notas', '/tags', '/memotags', '/rmmemo', '/rmnota',
     // Portugues
-    '/ajuda', '/limpar', '/commitar', '/modo', '/copiar',
+    '/anotar', '/ajuda', '/limpar', '/commitar', '/modo', '/copiar',
     '/novo', '/carregar', '/sessoes', '/deletar', '/modelo', '/exportar',
     '/custo', '/repetir', '/desfazer', '/buscar', '/idioma', '/sair',
     '/resumo', '/noticias', '/abrir', '/programas', '/sistema',
