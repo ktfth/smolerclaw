@@ -1,0 +1,136 @@
+import { readFileSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+
+export interface CliArgs {
+  help: boolean
+  version: boolean
+  model?: string
+  session?: string
+  maxTokens?: number
+  noTools: boolean
+  print: boolean
+  prompt?: string
+}
+
+/**
+ * Parse CLI arguments. Zero dependencies.
+ */
+export function parseArgs(argv: string[]): CliArgs {
+  const args: CliArgs = {
+    help: false,
+    version: false,
+    noTools: false,
+    print: false,
+  }
+
+  const positional: string[] = []
+  let i = 0
+
+  while (i < argv.length) {
+    const arg = argv[i]
+
+    switch (arg) {
+      case '-h':
+      case '--help':
+        args.help = true
+        break
+
+      case '-v':
+      case '--version':
+        args.version = true
+        break
+
+      case '-m':
+      case '--model':
+        args.model = argv[++i]
+        if (!args.model) die('--model requires a value')
+        break
+
+      case '-s':
+      case '--session':
+        args.session = argv[++i]
+        if (!args.session) die('--session requires a value')
+        break
+
+      case '--max-tokens':
+        const n = Number(argv[++i])
+        if (!n || n <= 0) die('--max-tokens requires a positive number')
+        args.maxTokens = n
+        break
+
+      case '--no-tools':
+        args.noTools = true
+        break
+
+      case '-p':
+      case '--print':
+        args.print = true
+        break
+
+      default:
+        if (arg.startsWith('-')) {
+          die(`Unknown option: ${arg}. Try --help`)
+        }
+        positional.push(arg)
+    }
+    i++
+  }
+
+  if (positional.length > 0) {
+    args.prompt = positional.join(' ')
+  }
+
+  return args
+}
+
+// BUILD_VERSION is injected at compile time via --define.
+// Falls back to reading package.json at runtime (dev mode).
+declare const BUILD_VERSION: string | undefined
+
+export function getVersion(): string {
+  if (typeof BUILD_VERSION !== 'undefined') return BUILD_VERSION
+  try {
+    const pkgPath = join(dirname(import.meta.dir), 'package.json')
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
+    return pkg.version || '0.0.0'
+  } catch {
+    return '0.0.0'
+  }
+}
+
+export function printHelp(): void {
+  const version = getVersion()
+  console.log(`tinyclaw v${version} — the micro AI assistant
+
+Usage:
+  tinyclaw [options] [prompt]
+
+Options:
+  -h, --help           Show this help
+  -v, --version        Show version
+  -m, --model <name>   Override model (e.g. claude-sonnet-4-20250514)
+  -s, --session <name> Start with a specific session
+  --max-tokens <n>     Override max tokens per response
+  --no-tools           Disable tool use for this session
+  -p, --print          Print response and exit (no TUI)
+
+Examples:
+  tinyclaw                        Interactive TUI mode
+  tinyclaw "explain this error"   Launch TUI with initial prompt
+  tinyclaw -p "what is 2+2"      Print answer and exit
+  echo "review" | tinyclaw -p     Pipe input, print response
+  tinyclaw -m claude-sonnet-4-20250514 -s work
+
+Commands (inside TUI):
+  /help     Show commands      /clear    Clear conversation
+  /new      New session        /load     Load session
+  /sessions List sessions      /delete   Delete session
+  /model    Show/set model     /skills   List skills
+  /export   Export to markdown /cost     Show token usage
+  /retry    Retry last message /exit     Quit`)
+}
+
+function die(msg: string): never {
+  console.error(`tinyclaw: ${msg}`)
+  process.exit(2)
+}

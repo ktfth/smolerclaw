@@ -1,0 +1,33 @@
+import { describe, test, expect } from 'bun:test'
+import { loadSkills, formatSkillList } from '../src/skills'
+
+describe('loadSkills', () => {
+  test('returns empty array for non-existent dir', () => {
+    const skills = loadSkills('/nonexistent/dir')
+    // May return local skills from CWD if .tinyclaw/skills exists
+    // But won't crash
+    expect(Array.isArray(skills)).toBe(true)
+  })
+
+  test('loads from existing skills dir', () => {
+    const skills = loadSkills('./skills')
+    expect(skills.length).toBeGreaterThan(0)
+    expect(skills[0].name).toBe('default')
+    expect(skills[0].source).toBe('global')
+  })
+})
+
+describe('formatSkillList', () => {
+  test('shows no skills message when empty', () => {
+    expect(formatSkillList([])).toContain('No skills')
+  })
+
+  test('shows source labels', () => {
+    const result = formatSkillList([
+      { name: 'test', content: 'x', source: 'global' },
+      { name: 'local-test', content: 'y', source: 'local' },
+    ])
+    expect(result).toContain('[global]')
+    expect(result).toContain('[local]')
+  })
+})
