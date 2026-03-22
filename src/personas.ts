@@ -69,6 +69,12 @@ Behavior:
 - Don't nitpick formatting unless it affects readability.
 - Praise good patterns when you see them.`,
   },
+
+  business: {
+    name: 'business',
+    description: 'Personal business assistant (Windows-focused)',
+    systemPrompt: '', // Uses the business skill
+  },
 }
 
 /**

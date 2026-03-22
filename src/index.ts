@@ -14,10 +14,13 @@ import { OpenAICompatProvider } from './openai-provider'
 import { gitDiff, gitStatus, gitStageAll, gitCommit, isGitRepo } from './git'
 import { getPersona, formatPersonaList, type Persona } from './personas'
 import { copyToClipboard } from './clipboard'
-import { undoStack, registerPlugins } from './tools'
+import { undoStack, registerPlugins, registerWindowsTools } from './tools'
 import { loadPlugins, pluginsToTools, formatPluginList, getPluginDir } from './plugins'
 import { formatApprovalPrompt, formatEditDiff } from './approval'
 import { extractImages } from './images'
+import { openApp, openFile, openUrl, getRunningApps, getSystemInfo, getDateTimeInfo, getOutlookEvents, getKnownApps } from './windows'
+import { fetchNews, getNewsCategories, type NewsCategory } from './news'
+import { generateBriefing } from './briefing'
 import { writeFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Message, ToolCall } from './types'
@@ -63,6 +66,9 @@ async function main(): Promise<void> {
   const skills = loadSkills(config.skillsDir)
   const systemPrompt = buildSystemPrompt(config.systemPrompt, skills, config.language)
   const enableTools = !cliArgs.noTools
+
+  // Register Windows/business tools
+  registerWindowsTools()
 
   // Load plugins
   const pluginDir = getPluginDir(join(config.dataDir, '..'))
@@ -480,6 +486,15 @@ async function runInteractive(
             '  /config        Show config path',
             '  /exit          Quit',
             '',
+            'Business:',
+            '  /briefing      Daily briefing (agenda + news + system)',
+            '  /news [cat]    News radar (business/tech/finance/brazil/world)',
+            '  /open <app>    Open Windows app (excel, word, outlook...)',
+            '  /openfile <p>  Open file with default app',
+            '  /apps          Show running applications',
+            '  /sysinfo       System resources (CPU, RAM, disk)',
+            '  /calendar      Today\'s Outlook calendar',
+            '',
             'Tab completes commands. Use \\ at end of line for multi-line.',
             '',
             'Keys:',
@@ -685,6 +700,101 @@ async function runInteractive(
         config.language = lang
         saveConfig(config)
         tui.showSystem(`Language -> ${lang}`)
+        break
+      }
+
+      // ── Business assistant commands ──────────────────────
+
+      case 'briefing': {
+        tui.showSystem('Carregando briefing...')
+        tui.disableInput()
+        try {
+          const briefing = await generateBriefing()
+          tui.showSystem(briefing)
+        } catch (err) {
+          tui.showError(`Briefing falhou: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        tui.enableInput()
+        break
+      }
+
+      case 'news': {
+        const category = args[0] as NewsCategory | undefined
+        const validCats: NewsCategory[] = ['business', 'tech', 'finance', 'brazil', 'world']
+        if (category && !validCats.includes(category)) {
+          tui.showSystem(getNewsCategories())
+          break
+        }
+        tui.showSystem('Buscando noticias...')
+        tui.disableInput()
+        try {
+          const news = await fetchNews(category ? [category] : undefined)
+          tui.showSystem(news)
+        } catch (err) {
+          tui.showError(`Falha ao buscar noticias: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        tui.enableInput()
+        break
+      }
+
+      case 'open': {
+        const appName = args.join(' ')
+        if (!appName) {
+          tui.showSystem(`Apps disponiveis: ${getKnownApps().join(', ')}\nUso: /open <app> ou /open <app> <arquivo>`)
+          break
+        }
+        // Check if second arg looks like a file path
+        const appArg = args.length > 1 ? args.slice(1).join(' ') : undefined
+        const result = await openApp(args[0], appArg)
+        tui.showSystem(result)
+        break
+      }
+
+      case 'openfile': {
+        const filePath = args.join(' ')
+        if (!filePath) {
+          tui.showError('Uso: /openfile <caminho>')
+          break
+        }
+        const result = await openFile(filePath)
+        tui.showSystem(result)
+        break
+      }
+
+      case 'openurl': {
+        const url = args[0]
+        if (!url) {
+          tui.showError('Uso: /openurl <url>')
+          break
+        }
+        const result = await openUrl(url)
+        tui.showSystem(result)
+        break
+      }
+
+      case 'apps': {
+        tui.disableInput()
+        const result = await getRunningApps()
+        tui.showSystem(result)
+        tui.enableInput()
+        break
+      }
+
+      case 'sysinfo': {
+        tui.disableInput()
+        const result = await getSystemInfo()
+        tui.showSystem(result)
+        tui.enableInput()
+        break
+      }
+
+      case 'calendar':
+      case 'cal': {
+        tui.disableInput()
+        const dateInfo = await getDateTimeInfo()
+        const events = await getOutlookEvents()
+        tui.showSystem(`${dateInfo}\n\n--- Agenda ---\n${events}`)
+        tui.enableInput()
         break
       }
 

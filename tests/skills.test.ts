@@ -12,8 +12,10 @@ describe('loadSkills', () => {
   test('loads from existing skills dir', () => {
     const skills = loadSkills('./skills')
     expect(skills.length).toBeGreaterThan(0)
-    expect(skills[0].name).toBe('default')
-    expect(skills[0].source).toBe('global')
+    const names = skills.map((s) => s.name)
+    expect(names).toContain('default')
+    expect(names).toContain('business')
+    expect(skills.every((s) => s.source === 'global')).toBe(true)
   })
 })
 

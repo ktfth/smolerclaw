@@ -8,9 +8,11 @@ import {
 } from 'node:fs'
 import { resolve, relative, join, sep, dirname } from 'node:path'
 import type Anthropic from '@anthropic-ai/sdk'
-import { getShell, hasRipgrep, shouldExclude, SEARCH_EXCLUDES } from './platform'
+import { getShell, hasRipgrep, shouldExclude, SEARCH_EXCLUDES, IS_WINDOWS } from './platform'
 import { UndoStack } from './undo'
 import { type Plugin, executePlugin } from './plugins'
+import { openApp, openFile, openUrl, getRunningApps, getSystemInfo, getOutlookEvents } from './windows'
+import { fetchNews, type NewsCategory } from './news'
 
 // Global undo stack shared across tool calls
 export const undoStack = new UndoStack()
@@ -169,6 +171,104 @@ export const TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+// ─── Windows / Business Tools (added at runtime if on Windows) ──
+
+export const WINDOWS_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'open_application',
+    description:
+      'Open a Windows application by name. Available apps: excel, word, powerpoint, outlook, ' +
+      'onenote, teams, edge, chrome, firefox, calculator, notepad, terminal, explorer, ' +
+      'vscode, cursor, paint, snip, settings, taskmanager.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string', description: 'App name (e.g. "excel", "outlook", "teams")' },
+        argument: { type: 'string', description: 'Optional argument (e.g. file path to open in the app)' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'open_file_default',
+    description:
+      'Open a file with its default Windows application. E.g. .xlsx opens in Excel, .pdf in the PDF reader.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        path: { type: 'string', description: 'File path to open' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'open_url_browser',
+    description: 'Open a URL in the default web browser.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        url: { type: 'string', description: 'URL to open' },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'get_running_apps',
+    description: 'List currently running Windows applications with memory usage. Read-only, non-destructive.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'get_system_info',
+    description: 'Get Windows system resource summary: CPU, RAM, disk, uptime, battery. Read-only.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'get_calendar_events',
+    description: 'Get today\'s Outlook calendar events. Read-only. Returns event times and subjects.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'get_news',
+    description:
+      'Fetch current news headlines. Categories: business, tech, finance, brazil, world. ' +
+      'Returns headlines grouped by category with source attribution.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        category: {
+          type: 'string',
+          description: 'News category to filter. Omit for all categories.',
+          enum: ['business', 'tech', 'finance', 'brazil', 'world'],
+        },
+      },
+      required: [],
+    },
+  },
+]
+
+/** Register Windows tools if on Windows platform */
+export function registerWindowsTools(): void {
+  if (IS_WINDOWS) {
+    TOOLS.push(...WINDOWS_TOOLS)
+  }
+  // Also add get_news on all platforms (it's network-only)
+  if (!IS_WINDOWS && !TOOLS.find((t) => t.name === 'get_news')) {
+    TOOLS.push(WINDOWS_TOOLS[WINDOWS_TOOLS.length - 1]) // get_news
+  }
+}
+
 // ─── Tool Execution ──────────────────────────────────────────
 
 const MAX_OUTPUT = 50_000
@@ -195,6 +295,23 @@ export async function executeTool(
         return await toolRunCommand(input)
       case 'fetch_url':
         return await toolFetchUrl(input)
+      // Windows / business tools
+      case 'open_application':
+        return await openApp(input.name as string, input.argument as string | undefined)
+      case 'open_file_default':
+        return await openFile(input.path as string)
+      case 'open_url_browser':
+        return await openUrl(input.url as string)
+      case 'get_running_apps':
+        return await getRunningApps()
+      case 'get_system_info':
+        return await getSystemInfo()
+      case 'get_calendar_events':
+        return await getOutlookEvents()
+      case 'get_news': {
+        const cat = input.category as NewsCategory | undefined
+        return await fetchNews(cat ? [cat] : undefined)
+      }
       default: {
         // Check plugins
         const plugin = _plugins.find((p) => p.name === name)
