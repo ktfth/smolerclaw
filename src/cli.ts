@@ -124,10 +124,11 @@ Examples:
 Commands (inside TUI):
   /help     Show commands      /clear    Clear conversation
   /new      New session        /load     Load session
-  /sessions List sessions      /delete   Delete session
-  /model    Show/set model     /skills   List skills
-  /export   Export to markdown /cost     Show token usage
-  /retry    Retry last message /exit     Quit`)
+  /model    Show/set model     /persona  Switch mode
+  /briefing Daily briefing     /news     News radar
+  /task     Create task        /tasks    List tasks
+  /open     Open Windows app   /calendar Outlook calendar
+  /export   Export markdown    /exit     Quit`)
 }
 
 function die(msg: string): never {
