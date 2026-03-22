@@ -24,6 +24,7 @@ import { generateBriefing } from './briefing'
 import { initTasks, stopTasks, addTask, completeTask, removeTask, listTasks, formatTaskList, parseTime, type Task } from './tasks'
 import { initPeople, addPerson, findPerson, listPeople, logInteraction, delegateTask, getDelegations, getPendingFollowUps, markFollowUpDone, formatPeopleList, formatPersonDetail, formatDelegationList, formatFollowUps, generatePeopleDashboard, type PersonGroup, type InteractionType } from './people'
 import { initMemos, saveMemo, searchMemos, listMemos, deleteMemo, formatMemoList, formatMemoDetail, formatMemoTags } from './memos'
+import { isFirstRunToday, markMorningDone, generateMorningBriefing } from './morning'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Message, ToolCall } from './types'
@@ -1140,7 +1141,18 @@ async function runInteractive(
   const authInfo = auth.source === 'subscription'
     ? `Authenticated via Claude ${auth.subscriptionType} subscription.`
     : 'Authenticated via API key.'
-  tui.showSystem(`tinyclaw v${getVersion()} — the micro AI assistant.\n${authInfo}\nType /help for commands.`)
+  tui.showSystem(`tinyclaw v${getVersion()} — the micro AI assistant.\n${authInfo}\nType /ajuda for commands.`)
+
+  // Morning briefing — first run of the day
+  if (isFirstRunToday(config.dataDir)) {
+    try {
+      const briefing = await generateMorningBriefing()
+      tui.showSystem(briefing)
+      markMorningDone()
+    } catch {
+      // Don't block startup if briefing fails
+    }
+  }
 
   // Auto-submit initial prompt if provided
   if (initialPrompt) {
