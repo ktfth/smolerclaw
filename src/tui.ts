@@ -35,6 +35,8 @@ export class TUI {
     '/task', '/tasks', '/done', '/rmtask',
     '/people', '/team', '/family', '/person', '/addperson',
     '/delegate', '/delegations', '/followups', '/dashboard', '/contacts',
+    '/monitor', '/vigiar',
+    '/workflow', '/fluxo',
     '/pomodoro', '/foco',
     '/entrada', '/saida', '/income', '/expense', '/finance', '/financas', '/balanco',
     '/decisions', '/decisoes',

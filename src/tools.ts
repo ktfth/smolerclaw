@@ -21,6 +21,7 @@ import { openEmailDraft, formatDraftPreview, type EmailDraft } from './email'
 import { startPomodoro, stopPomodoro, pomodoroStatus } from './pomodoro'
 import { addTransaction, getMonthSummary, getRecentTransactions } from './finance'
 import { logDecision, searchDecisions, listDecisions, formatDecisionList, formatDecisionDetail } from './decisions'
+import { runWorkflow, listWorkflows, formatWorkflowList } from './workflows'
 import {
   addPerson, findPerson, listPeople, updatePerson, removePerson,
   logInteraction, getInteractions, delegateTask, updateDelegation,

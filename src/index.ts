@@ -29,6 +29,8 @@ import { openEmailDraft, formatDraftPreview } from './email'
 import { initPomodoro, startPomodoro, stopPomodoro, pomodoroStatus, stopPomodoroTimer } from './pomodoro'
 import { initFinance, addTransaction, getMonthSummary, getRecentTransactions, removeTransaction } from './finance'
 import { initDecisions, logDecision, searchDecisions, listDecisions, formatDecisionList, formatDecisionDetail } from './decisions'
+import { initWorkflows, runWorkflow, listWorkflows, createWorkflow, deleteWorkflow, formatWorkflowList, type WorkflowStep } from './workflows'
+import { initMonitor, startMonitor, stopMonitor, listMonitors, stopAllMonitors } from './monitor'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Message, ToolCall } from './types'
@@ -178,6 +180,8 @@ async function runInteractive(
   initFinance(config.dataDir)
   initDecisions(config.dataDir)
   initPomodoro((msg) => tui.showSystem(`\n*** ${msg} ***\n`))
+  initWorkflows(config.dataDir)
+  initMonitor((msg) => tui.showSystem(`\n*** ${msg} ***\n`))
   initTasks(config.dataDir, (task: Task) => {
     tui.showSystem(`\n*** LEMBRETE: ${task.title} ***\n`)
   })
@@ -535,6 +539,14 @@ async function runInteractive(
             '  /delegations /delegacoes Listar delegacoes',
             '  /followups              Follow-ups pendentes',
             '  /dashboard /painel      Painel geral',
+            '',
+            'Monitor:',
+            '  /monitor /vigiar     Monitorar processo (ex: /monitor nginx)',
+            '  /monitor stop <nome> Parar monitoramento',
+            '',
+            'Workflows:',
+            '  /workflow /fluxo     Listar workflows',
+            '  /workflow run <nome> Executar (ex: /workflow iniciar-dia)',
             '',
             'Pomodoro:',
             '  /pomodoro /foco      Iniciar (ex: /foco revisar codigo)',
@@ -909,6 +921,68 @@ async function runInteractive(
         break
       }
 
+      // ── Monitor commands ───────────────────────────────────
+
+      case 'monitor':
+      case 'vigiar': {
+        const sub = args[0]?.toLowerCase()
+        if (!sub || sub === 'list' || sub === 'listar') {
+          tui.showSystem(listMonitors())
+        } else if (sub === 'stop' || sub === 'parar') {
+          const name = args[1]
+          if (!name) { tui.showError('Uso: /monitor stop <processo>'); break }
+          tui.showSystem(stopMonitor(name))
+        } else {
+          // Start monitoring
+          const intervalSec = parseInt(args[1]) || 60
+          tui.showSystem(startMonitor(sub, intervalSec))
+        }
+        break
+      }
+
+      // ── Workflow commands ──────────────────────────────────
+
+      case 'workflow':
+      case 'fluxo': {
+        const sub = args[0]?.toLowerCase()
+        if (!sub || sub === 'list' || sub === 'listar') {
+          tui.showSystem(formatWorkflowList())
+        } else if (sub === 'run' || sub === 'rodar') {
+          const name = args[1]
+          if (!name) {
+            tui.showError('Uso: /workflow run <nome>')
+            break
+          }
+          tui.disableInput()
+          try {
+            const result = await runWorkflow(name, (msg) => tui.showSystem(msg))
+            tui.showSystem(result)
+          } catch (err) {
+            tui.showError(`Workflow: ${err instanceof Error ? err.message : String(err)}`)
+          }
+          tui.enableInput()
+        } else if (sub === 'delete' || sub === 'deletar') {
+          const name = args[1]
+          if (!name) { tui.showError('Uso: /workflow delete <nome>'); break }
+          if (deleteWorkflow(name)) {
+            tui.showSystem(`Workflow removido: ${name}`)
+          } else {
+            tui.showError(`Workflow nao encontrado: ${name}`)
+          }
+        } else {
+          // Treat as "run <name>"
+          tui.disableInput()
+          try {
+            const result = await runWorkflow(sub, (msg) => tui.showSystem(msg))
+            tui.showSystem(result)
+          } catch (err) {
+            tui.showError(`Workflow: ${err instanceof Error ? err.message : String(err)}`)
+          }
+          tui.enableInput()
+        }
+        break
+      }
+
       // ── Pomodoro commands ─────────────────────────────────
 
       case 'pomodoro':
@@ -1255,6 +1329,7 @@ async function runInteractive(
   function cleanup(): void {
     stopTasks()
     stopPomodoroTimer()
+    stopAllMonitors()
     tui.stop()
     process.exit(0)
   }
