@@ -31,6 +31,8 @@ export class TUI {
     '/cost', '/retry', '/undo', '/search', '/lang', '/config', '/exit',
     '/briefing', '/news', '/open', '/openfile', '/openurl', '/apps',
     '/sysinfo', '/calendar', '/task', '/tasks', '/done', '/rmtask',
+    '/people', '/equipe', '/familia', '/person', '/addperson',
+    '/delegate', '/delegacoes', '/followups', '/dashboard', '/painel',
   ]
 
   private onSubmit: ((s: string) => void) | null = null

@@ -16,6 +16,14 @@ import { type Plugin, executePlugin } from './plugins'
 import { openApp, openFile, openUrl, getRunningApps, getSystemInfo, getOutlookEvents } from './windows'
 import { fetchNews, type NewsCategory } from './news'
 import { addTask, completeTask, listTasks, formatTaskList, parseTime } from './tasks'
+import {
+  addPerson, findPerson, listPeople, updatePerson, removePerson,
+  logInteraction, getInteractions, delegateTask, updateDelegation,
+  getDelegations, getPendingFollowUps, markFollowUpDone,
+  formatPeopleList, formatPersonDetail, formatDelegationList, formatFollowUps,
+  generatePeopleDashboard,
+  type PersonGroup, type InteractionType,
+} from './people'
 
 // Global undo stack shared across tool calls
 export const undoStack = new UndoStack()
@@ -302,6 +310,105 @@ export const TASK_TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+// ─── People Management Tools (cross-platform) ──────────────
+
+export const PEOPLE_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'add_person',
+    description:
+      'Register a person (team member, family, or contact). ' +
+      'Groups: equipe (work team), familia (family/home), contato (other contacts).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string', description: 'Person name' },
+        group: { type: 'string', enum: ['equipe', 'familia', 'contato'], description: 'Group: equipe, familia, or contato' },
+        role: { type: 'string', description: 'Role or relationship (e.g. "dev frontend", "esposa", "fornecedor"). Optional.' },
+        contact: { type: 'string', description: 'Phone, email, or other contact info. Optional.' },
+      },
+      required: ['name', 'group'],
+    },
+  },
+  {
+    name: 'find_person_info',
+    description:
+      'Look up a person by name or ID. Returns their profile, recent interactions, and pending delegated tasks.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        name_or_id: { type: 'string', description: 'Person name (partial match) or ID' },
+      },
+      required: ['name_or_id'],
+    },
+  },
+  {
+    name: 'list_people',
+    description: 'List all registered people, optionally filtered by group.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        group: { type: 'string', enum: ['equipe', 'familia', 'contato'], description: 'Filter by group. Optional.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'log_interaction',
+    description:
+      'Log an interaction with a person. Types: conversa, email, reuniao, ligacao, mensagem, delegacao, entrega, outro. ' +
+      'Optionally set a follow-up date for a reminder.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        person: { type: 'string', description: 'Person name or ID' },
+        type: { type: 'string', enum: ['conversa', 'email', 'reuniao', 'ligacao', 'mensagem', 'delegacao', 'entrega', 'outro'], description: 'Interaction type' },
+        summary: { type: 'string', description: 'What was discussed or happened' },
+        follow_up: { type: 'string', description: 'When to follow up (e.g. "em 3 dias", "amanha", "25/03"). Optional.' },
+      },
+      required: ['person', 'type', 'summary'],
+    },
+  },
+  {
+    name: 'delegate_to_person',
+    description:
+      'Delegate/assign a task to a person with optional due date. ' +
+      'Use to track what you asked someone to do.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        person: { type: 'string', description: 'Person name or ID' },
+        task: { type: 'string', description: 'What they need to do' },
+        due_date: { type: 'string', description: 'Due date (e.g. "sexta", "em 3 dias", "28/03"). Optional.' },
+      },
+      required: ['person', 'task'],
+    },
+  },
+  {
+    name: 'update_delegation_status',
+    description: 'Update the status of a delegated task. Statuses: pendente, em_andamento, concluido.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        delegation_id: { type: 'string', description: 'Delegation ID' },
+        status: { type: 'string', enum: ['pendente', 'em_andamento', 'concluido'], description: 'New status' },
+        notes: { type: 'string', description: 'Optional notes about the update' },
+      },
+      required: ['delegation_id', 'status'],
+    },
+  },
+  {
+    name: 'get_people_dashboard',
+    description:
+      'Show the people management dashboard: summary of team/family/contacts, ' +
+      'overdue follow-ups, overdue delegations, and recent interactions.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+]
+
 /** get_news tool definition (cross-platform, extracted for reference by name) */
 const NEWS_TOOL = WINDOWS_TOOLS.find((t) => t.name === 'get_news')!
 
@@ -319,8 +426,9 @@ export function registerWindowsTools(): void {
     TOOLS.push(NEWS_TOOL)
   }
 
-  // Task tools are cross-platform
+  // Task and people tools are cross-platform
   TOOLS.push(...TASK_TOOLS)
+  TOOLS.push(...PEOPLE_TOOLS)
 }
 
 // ─── Tool Execution ──────────────────────────────────────────
@@ -389,6 +497,63 @@ export async function executeTool(
         const tasks = listTasks(showDone)
         return formatTaskList(tasks)
       }
+      // People management tools
+      case 'add_person': {
+        const name = input.name as string
+        if (!name?.trim()) return 'Error: name is required.'
+        const group = input.group as PersonGroup
+        const validGroups: PersonGroup[] = ['equipe', 'familia', 'contato']
+        if (!validGroups.includes(group)) return 'Error: group must be equipe, familia, or contato.'
+        const person = addPerson(name, group, input.role as string, input.contact as string)
+        return `Pessoa adicionada: ${person.name} (${group}) [${person.id}]`
+      }
+      case 'find_person_info': {
+        const ref = input.name_or_id as string
+        if (!ref?.trim()) return 'Error: name_or_id is required.'
+        const person = findPerson(ref)
+        if (!person) return `Pessoa nao encontrada: "${ref}"`
+        return formatPersonDetail(person)
+      }
+      case 'list_people': {
+        const group = input.group as PersonGroup | undefined
+        const people = listPeople(group)
+        return formatPeopleList(people)
+      }
+      case 'log_interaction': {
+        const personRef = input.person as string
+        if (!personRef?.trim()) return 'Error: person is required.'
+        const type = input.type as InteractionType
+        const summary = input.summary as string
+        if (!summary?.trim()) return 'Error: summary is required.'
+        const followUpStr = input.follow_up as string | undefined
+        const followUpDate = followUpStr ? parseFuzzyDate(followUpStr) : undefined
+        const interaction = logInteraction(personRef, type, summary, followUpDate || undefined)
+        if (!interaction) return `Pessoa nao encontrada: "${personRef}"`
+        const fuMsg = followUpDate ? ` — follow-up: ${followUpDate.toLocaleDateString('pt-BR')}` : ''
+        return `Interacao registrada: ${type} com ${personRef}${fuMsg}`
+      }
+      case 'delegate_to_person': {
+        const personRef = input.person as string
+        if (!personRef?.trim()) return 'Error: person is required.'
+        const task = input.task as string
+        if (!task?.trim()) return 'Error: task is required.'
+        const dueDateStr = input.due_date as string | undefined
+        const dueDate = dueDateStr ? parseFuzzyDate(dueDateStr) : undefined
+        const delegation = delegateTask(personRef, task, dueDate || undefined)
+        if (!delegation) return `Pessoa nao encontrada: "${personRef}"`
+        const dueMsg = dueDate ? ` — prazo: ${dueDate.toLocaleDateString('pt-BR')}` : ''
+        return `Tarefa delegada para ${personRef}: "${task}"${dueMsg} [${delegation.id}]`
+      }
+      case 'update_delegation_status': {
+        const id = input.delegation_id as string
+        if (!id?.trim()) return 'Error: delegation_id is required.'
+        const status = input.status as 'pendente' | 'em_andamento' | 'concluido'
+        const result = updateDelegation(id, status, input.notes as string)
+        if (!result) return `Delegacao nao encontrada: "${id}"`
+        return `Delegacao atualizada: "${result.task}" -> ${status}`
+      }
+      case 'get_people_dashboard':
+        return generatePeopleDashboard()
       default: {
         // Check plugins
         const plugin = _plugins.find((p) => p.name === name)
@@ -886,4 +1051,65 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}K`
   return `${(bytes / (1024 * 1024)).toFixed(1)}M`
+}
+
+/**
+ * Parse fuzzy date strings: "amanha", "em 3 dias", "sexta", "28/03", etc.
+ */
+function parseFuzzyDate(input: string): Date | null {
+  const text = input.toLowerCase().trim()
+  const now = new Date()
+
+  if (text === 'hoje') return now
+
+  if (text === 'amanha' || text === 'amanhã') {
+    const d = new Date(now)
+    d.setDate(d.getDate() + 1)
+    return d
+  }
+
+  // "em X dias"
+  const daysMatch = text.match(/em\s+(\d+)\s*dias?/)
+  if (daysMatch) {
+    const d = new Date(now)
+    d.setDate(d.getDate() + parseInt(daysMatch[1]))
+    return d
+  }
+
+  // "em X semanas"
+  const weeksMatch = text.match(/em\s+(\d+)\s*semanas?/)
+  if (weeksMatch) {
+    const d = new Date(now)
+    d.setDate(d.getDate() + parseInt(weeksMatch[1]) * 7)
+    return d
+  }
+
+  // Day of week: "segunda", "terca", "quarta", "quinta", "sexta", "sabado", "domingo"
+  const weekdays: Record<string, number> = {
+    domingo: 0, segunda: 1, terca: 2, terça: 2, quarta: 3,
+    quinta: 4, sexta: 5, sabado: 6, sábado: 6,
+  }
+  for (const [name, dayNum] of Object.entries(weekdays)) {
+    if (text.includes(name)) {
+      const d = new Date(now)
+      const diff = (dayNum - d.getDay() + 7) % 7 || 7
+      d.setDate(d.getDate() + diff)
+      return d
+    }
+  }
+
+  // "DD/MM" or "DD/MM/YYYY"
+  const dateMatch = text.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\s*/)
+  if (dateMatch) {
+    const day = parseInt(dateMatch[1])
+    const month = parseInt(dateMatch[2]) - 1
+    const year = dateMatch[3]
+      ? parseInt(dateMatch[3]) + (dateMatch[3].length === 2 ? 2000 : 0)
+      : now.getFullYear()
+    const d = new Date(year, month, day)
+    if (!isNaN(d.getTime())) return d
+  }
+
+  // Try parseTime from tasks (handles "18h", "em 30 min", etc.)
+  return parseTime(text)
 }

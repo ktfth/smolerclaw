@@ -22,6 +22,7 @@ import { openApp, openFile, openUrl, getRunningApps, getSystemInfo, getDateTimeI
 import { fetchNews, getNewsCategories, type NewsCategory } from './news'
 import { generateBriefing } from './briefing'
 import { initTasks, stopTasks, addTask, completeTask, removeTask, listTasks, formatTaskList, parseTime, type Task } from './tasks'
+import { initPeople, addPerson, findPerson, listPeople, logInteraction, delegateTask, getDelegations, getPendingFollowUps, markFollowUpDone, formatPeopleList, formatPersonDetail, formatDelegationList, formatFollowUps, generatePeopleDashboard, type PersonGroup, type InteractionType } from './people'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Message, ToolCall } from './types'
@@ -165,7 +166,8 @@ async function runInteractive(
   let currentPersona = 'default'
   let activeSystemPrompt = systemPrompt
 
-  // Initialize task/reminder system
+  // Initialize people and task systems
+  initPeople(config.dataDir)
   initTasks(config.dataDir, (task: Task) => {
     tui.showSystem(`\n*** LEMBRETE: ${task.title} ***\n`)
   })
@@ -503,6 +505,17 @@ async function runInteractive(
             '  /sysinfo       System resources (CPU, RAM, disk)',
             '  /calendar      Today\'s Outlook calendar',
             '',
+            'Pessoas:',
+            '  /addperson     Cadastrar (ex: /addperson equipe Joao, dev)',
+            '  /people        Listar todas as pessoas',
+            '  /equipe        Listar equipe',
+            '  /familia       Listar familia',
+            '  /person <nome> Detalhes de uma pessoa',
+            '  /delegate      Delegar tarefa (ex: /delegate Joao revisar doc)',
+            '  /delegacoes    Listar delegacoes pendentes',
+            '  /followups     Follow-ups pendentes',
+            '  /dashboard     Painel geral (pessoas + delegacoes + follow-ups)',
+            '',
             'Tarefas:',
             '  /task <texto>  Criar tarefa (ex: /task 18h buscar pao)',
             '  /tasks [all]   Listar tarefas pendentes',
@@ -835,6 +848,92 @@ async function runInteractive(
           tui.showError(`Calendar: ${err instanceof Error ? err.message : String(err)}`)
         }
         tui.enableInput()
+        break
+      }
+
+      // ── People management commands ────────────────────────
+
+      case 'people':
+      case 'equipe':
+      case 'familia': {
+        const groupFilter = cmd === 'equipe' ? 'equipe' as PersonGroup
+          : cmd === 'familia' ? 'familia' as PersonGroup
+          : args[0] as PersonGroup | undefined
+        const people = listPeople(groupFilter)
+        tui.showSystem(formatPeopleList(people))
+        break
+      }
+
+      case 'person': {
+        const ref = args.join(' ')
+        if (!ref) {
+          tui.showError('Uso: /person <nome>')
+          break
+        }
+        const person = findPerson(ref)
+        if (!person) {
+          tui.showError(`Pessoa nao encontrada: "${ref}"`)
+          break
+        }
+        tui.showSystem(formatPersonDetail(person))
+        break
+      }
+
+      case 'addperson': {
+        // /addperson <group> <name> [role]
+        const group = args[0] as PersonGroup
+        const validGroups: PersonGroup[] = ['equipe', 'familia', 'contato']
+        if (!group || !validGroups.includes(group)) {
+          tui.showSystem('Uso: /addperson <equipe|familia|contato> <nome> [papel]\nEx: /addperson equipe Joao dev frontend')
+          break
+        }
+        const nameAndRole = args.slice(1).join(' ')
+        if (!nameAndRole) {
+          tui.showError('Nome obrigatorio. Ex: /addperson equipe Joao dev frontend')
+          break
+        }
+        // Split name from role at first comma if present
+        const [pName, ...roleParts] = nameAndRole.split(',')
+        const pRole = roleParts.join(',').trim() || undefined
+        const newPerson = addPerson(pName.trim(), group, pRole)
+        tui.showSystem(`Adicionado: ${newPerson.name} (${group}) [${newPerson.id}]`)
+        break
+      }
+
+      case 'delegate': {
+        // /delegate <person> <task>
+        const personName = args[0]
+        if (!personName || args.length < 2) {
+          tui.showSystem('Uso: /delegate <pessoa> <tarefa>\nEx: /delegate Joao revisar relatorio')
+          break
+        }
+        const taskText = args.slice(1).join(' ')
+        const delegation = delegateTask(personName, taskText)
+        if (!delegation) {
+          tui.showError(`Pessoa nao encontrada: "${personName}"`)
+          break
+        }
+        tui.showSystem(`Delegado para ${personName}: "${taskText}" [${delegation.id}]`)
+        break
+      }
+
+      case 'delegations':
+      case 'delegacoes': {
+        const personRef = args[0]
+        const delegations = getDelegations(personRef)
+        tui.showSystem(formatDelegationList(delegations))
+        break
+      }
+
+      case 'followups': {
+        const followUps = getPendingFollowUps()
+        tui.showSystem(formatFollowUps(followUps))
+        break
+      }
+
+      case 'dashboard':
+      case 'painel': {
+        tui.showSystem(generatePeopleDashboard())
         break
       }
 
