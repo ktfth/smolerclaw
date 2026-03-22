@@ -17,6 +17,7 @@ import { openApp, openFile, openUrl, getRunningApps, getSystemInfo, getOutlookEv
 import { fetchNews, type NewsCategory } from './news'
 import { addTask, completeTask, listTasks, formatTaskList, parseTime } from './tasks'
 import { saveMemo, searchMemos, listMemos, deleteMemo, formatMemoList, formatMemoDetail } from './memos'
+import { openEmailDraft, formatDraftPreview, type EmailDraft } from './email'
 import {
   addPerson, findPerson, listPeople, updatePerson, removePerson,
   logInteraction, getInteractions, delegateTask, updateDelegation,
@@ -448,6 +449,26 @@ export const MEMO_TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+// ─── Email Tool (cross-platform) ────────────────────────────
+
+export const EMAIL_TOOL: Anthropic.Tool = {
+  name: 'draft_email',
+  description:
+    'Create an email draft and open it in Outlook (Windows) or the default mail client. ' +
+    'The user can review and send manually. ' +
+    'Use when the user says "escreve um email", "manda um email", "rascunho de email", etc.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      to: { type: 'string', description: 'Recipient email address' },
+      subject: { type: 'string', description: 'Email subject line' },
+      body: { type: 'string', description: 'Email body text' },
+      cc: { type: 'string', description: 'CC recipients (optional)' },
+    },
+    required: ['to', 'subject', 'body'],
+  },
+}
+
 /** get_news tool definition (cross-platform, extracted for reference by name) */
 const NEWS_TOOL = WINDOWS_TOOLS.find((t) => t.name === 'get_news')!
 
@@ -465,10 +486,11 @@ export function registerWindowsTools(): void {
     TOOLS.push(NEWS_TOOL)
   }
 
-  // Task, people, and memo tools are cross-platform
+  // Task, people, memo, and email tools are cross-platform
   TOOLS.push(...TASK_TOOLS)
   TOOLS.push(...PEOPLE_TOOLS)
   TOOLS.push(...MEMO_TOOLS)
+  TOOLS.push(EMAIL_TOOL)
 }
 
 // ─── Tool Execution ──────────────────────────────────────────
@@ -608,6 +630,19 @@ export async function executeTool(
         if (!query?.trim()) return formatMemoList(listMemos())
         const results = searchMemos(query)
         return formatMemoList(results)
+      }
+      // Email tool
+      case 'draft_email': {
+        const to = input.to as string
+        const subject = input.subject as string
+        const body = input.body as string
+        if (!to?.trim() || !subject?.trim() || !body?.trim()) {
+          return 'Error: to, subject, and body are required.'
+        }
+        const draft: EmailDraft = { to, subject, body, cc: input.cc as string }
+        const preview = formatDraftPreview(draft)
+        const result = await openEmailDraft(draft)
+        return `${preview}\n\n${result}`
       }
       default: {
         // Check plugins

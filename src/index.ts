@@ -25,6 +25,7 @@ import { initTasks, stopTasks, addTask, completeTask, removeTask, listTasks, for
 import { initPeople, addPerson, findPerson, listPeople, logInteraction, delegateTask, getDelegations, getPendingFollowUps, markFollowUpDone, formatPeopleList, formatPersonDetail, formatDelegationList, formatFollowUps, generatePeopleDashboard, type PersonGroup, type InteractionType } from './people'
 import { initMemos, saveMemo, searchMemos, listMemos, deleteMemo, formatMemoList, formatMemoDetail, formatMemoTags } from './memos'
 import { isFirstRunToday, markMorningDone, generateMorningBriefing } from './morning'
+import { openEmailDraft, formatDraftPreview } from './email'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Message, ToolCall } from './types'
@@ -529,6 +530,9 @@ async function runInteractive(
             '  /followups              Follow-ups pendentes',
             '  /dashboard /painel      Painel geral',
             '',
+            'Email:',
+            '  /email /rascunho     Rascunho (ex: /email joao@x.com oi | texto)',
+            '',
             'Memos / Notes:',
             '  /memo /anotar        Salvar memo (ex: /memo senha wifi #casa)',
             '  /memos /notas        Buscar memos (ex: /memos docker)',
@@ -881,6 +885,43 @@ async function runInteractive(
           tui.showSystem(`${dateInfo}\n\n--- Agenda ---\n${events}`)
         } catch (err) {
           tui.showError(`Calendar: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        tui.enableInput()
+        break
+      }
+
+      // ── Email command ──────────────────────────────────────
+
+      case 'email':
+      case 'rascunho': {
+        // Quick email: /email to@addr.com assunto | corpo
+        const text = args.join(' ')
+        if (!text) {
+          tui.showSystem('Uso: /email <destinatario> <assunto> | <corpo>\nOu peca a IA: "escreve um email para joao@email.com cobrando o relatorio"')
+          break
+        }
+        // Parse: first word is email, rest before | is subject, after | is body
+        const emailAddr = args[0]
+        const restText = args.slice(1).join(' ')
+        const pipeIdx = restText.indexOf('|')
+        if (pipeIdx === -1) {
+          tui.showSystem('Formato: /email <destinatario> <assunto> | <corpo>\nUse | para separar assunto do corpo.')
+          break
+        }
+        const subject = restText.slice(0, pipeIdx).trim()
+        const body = restText.slice(pipeIdx + 1).trim()
+        if (!subject || !body) {
+          tui.showError('Assunto e corpo sao obrigatorios.')
+          break
+        }
+        const draft = { to: emailAddr, subject, body }
+        tui.showSystem(formatDraftPreview(draft))
+        tui.disableInput()
+        try {
+          const result = await openEmailDraft(draft)
+          tui.showSystem(result)
+        } catch (err) {
+          tui.showError(`Email: ${err instanceof Error ? err.message : String(err)}`)
         }
         tui.enableInput()
         break

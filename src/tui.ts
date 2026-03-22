@@ -35,6 +35,7 @@ export class TUI {
     '/task', '/tasks', '/done', '/rmtask',
     '/people', '/team', '/family', '/person', '/addperson',
     '/delegate', '/delegations', '/followups', '/dashboard', '/contacts',
+    '/email', '/rascunho',
     '/memo', '/memos', '/note', '/notas', '/tags', '/memotags', '/rmmemo', '/rmnota',
     // Portugues
     '/anotar', '/ajuda', '/limpar', '/commitar', '/modo', '/copiar',
