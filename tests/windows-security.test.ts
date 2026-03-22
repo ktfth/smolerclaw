@@ -52,10 +52,8 @@ describe('windows security', () => {
     expect(result).toContain('Unknown app')
   })
 
-  test('openApp rejects empty argument gracefully', async () => {
-    const result = await openApp('notepad', '')
-    // Empty string should not cause injection — just open notepad normally
-    // On non-Windows this returns "only available on Windows"
-    expect(result).toBeTruthy()
+  test('openApp rejects newline in argument', async () => {
+    const result = await openApp('notepad', 'file\nname')
+    expect(result).toContain('invalid characters')
   })
 })
