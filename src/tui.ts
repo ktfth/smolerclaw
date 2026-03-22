@@ -26,13 +26,24 @@ export class TUI {
   private streamStartTime = 0
   private sessionCost = ''
   private commands = [
+    // English
     '/help', '/clear', '/commit', '/persona', '/copy', '/fork',
     '/new', '/load', '/sessions', '/delete', '/model', '/export',
     '/cost', '/retry', '/undo', '/search', '/lang', '/config', '/exit',
     '/briefing', '/news', '/open', '/openfile', '/openurl', '/apps',
-    '/sysinfo', '/calendar', '/task', '/tasks', '/done', '/rmtask',
-    '/people', '/equipe', '/familia', '/person', '/addperson',
-    '/delegate', '/delegacoes', '/followups', '/dashboard', '/painel',
+    '/sysinfo', '/calendar', '/ask', '/budget', '/plugins',
+    '/task', '/tasks', '/done', '/rmtask',
+    '/people', '/team', '/family', '/person', '/addperson',
+    '/delegate', '/delegations', '/followups', '/dashboard', '/contacts',
+    // Portugues
+    '/ajuda', '/limpar', '/commitar', '/modo', '/copiar',
+    '/novo', '/carregar', '/sessoes', '/deletar', '/modelo', '/exportar',
+    '/custo', '/repetir', '/desfazer', '/buscar', '/idioma', '/sair',
+    '/resumo', '/noticias', '/abrir', '/programas', '/sistema',
+    '/agenda', '/calendario', '/perguntar', '/orcamento',
+    '/tarefa', '/tarefas', '/feito', '/concluido', '/rmtarefa',
+    '/pessoas', '/equipe', '/familia', '/pessoa', '/novapessoa', '/addpessoa',
+    '/delegar', '/delegacoes', '/delegados', '/painel', '/contatos',
   ]
 
   private onSubmit: ((s: string) => void) | null = null

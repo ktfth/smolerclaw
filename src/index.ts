@@ -321,17 +321,21 @@ async function runInteractive(
     switch (cmd) {
       case 'exit':
       case 'quit':
+      case 'sair':
       case 'q':
         cleanup()
         break
 
       case 'clear':
+      case 'limpar':
         sessions.clear()
         tui.clearMessages()
         tui.showSystem('Conversation cleared.')
         break
 
-      case 'new': {
+      case 'new':
+      case 'novo':
+      case 'nova': {
         const name = args[0] || `s-${Date.now()}`
         sessions.switchTo(name)
         tui.clearMessages()
@@ -340,7 +344,8 @@ async function runInteractive(
         break
       }
 
-      case 'load': {
+      case 'load':
+      case 'carregar': {
         const name = args[0]
         if (!name) {
           tui.showError('Usage: /load <name>')
@@ -358,6 +363,7 @@ async function runInteractive(
       }
 
       case 'sessions':
+      case 'sessoes':
       case 'ls': {
         const list = sessions.list()
         if (list.length === 0) {
@@ -376,6 +382,7 @@ async function runInteractive(
       }
 
       case 'delete':
+      case 'deletar':
       case 'rm': {
         const name = args[0]
         if (!name) {
@@ -390,7 +397,8 @@ async function runInteractive(
         break
       }
 
-      case 'model': {
+      case 'model':
+      case 'modelo': {
         const m = args[0]
         if (!m) {
           tui.showSystem(formatModelList(config.model) + '\n\n' + formatProviderList())
@@ -413,7 +421,8 @@ async function runInteractive(
         break
       }
 
-      case 'skills': {
+      case 'skills':
+      case 'habilidades': {
         tui.showSystem(formatSkillList(skills))
         break
       }
@@ -432,7 +441,8 @@ async function runInteractive(
         tui.showSystem(`Config: ${getConfigPath()}`)
         break
 
-      case 'export': {
+      case 'export':
+      case 'exportar': {
         const datePart = new Date().toISOString().split('T')[0]
         const exportPath = args[0] || `tinyclaw-${sessions.session.name}-${datePart}.md`
         try {
@@ -446,10 +456,12 @@ async function runInteractive(
       }
 
       case 'cost':
+      case 'custo':
         tui.showSystem(`Session: ${tracker.formatSession()}`)
         break
 
-      case 'retry': {
+      case 'retry':
+      case 'repetir': {
         const lastUserMsg = [...sessions.messages].reverse().find((m) => m.role === 'user')
         if (!lastUserMsg) {
           tui.showError('No previous message to retry.')
@@ -472,55 +484,53 @@ async function runInteractive(
       }
 
       case 'help':
+      case 'ajuda':
       case '?':
         tui.showSystem(
           [
-            'Commands:',
-            '  /help          Show this help',
-            '  /clear         Clear conversation',
-            '  /commit        AI-generated git commit',
-            '  /persona [name] Switch assistant mode',
-            '  /copy          Copy last response to clipboard',
-            '  /fork [name]   Fork current session',
-            '  /new [name]    Start new session',
-            '  /load <name>   Load session',
-            '  /sessions      List sessions',
-            '  /delete <name> Delete session',
-            '  /model [name]  Show/set model',
-            '  /export [path] Export to markdown',
-            '  /cost          Show token usage',
-            '  /retry         Retry last message',
-            '  /undo          Undo last file change',
-            '  /search <text> Search conversation',
-            '  /lang [code]   Set language (auto, pt, en...)',
-            '  /config        Show config path',
-            '  /exit          Quit',
+            'Comandos / Commands (en | pt):',
+            '  /help /ajuda           Mostrar ajuda',
+            '  /clear /limpar         Limpar conversa',
+            '  /new /novo             Nova sessao',
+            '  /load /carregar        Carregar sessao',
+            '  /sessions /sessoes     Listar sessoes',
+            '  /delete /deletar       Deletar sessao',
+            '  /model /modelo         Ver/trocar modelo',
+            '  /persona /modo         Trocar modo (business, coder...)',
+            '  /export /exportar      Exportar para markdown',
+            '  /copy /copiar          Copiar ultima resposta',
+            '  /cost /custo           Ver uso de tokens',
+            '  /retry /repetir        Repetir ultima msg',
+            '  /undo /desfazer        Desfazer alteracao',
+            '  /search /buscar        Buscar na conversa',
+            '  /lang /idioma          Definir idioma',
+            '  /commit /commitar      Git commit com IA',
+            '  /exit /sair            Sair',
             '',
-            'Business:',
-            '  /briefing      Daily briefing (agenda + news + system)',
-            '  /news [cat]    News radar (business/tech/finance/brazil/world)',
-            '  /open <app>    Open Windows app (excel, word, outlook...)',
-            '  /openfile <p>  Open file with default app',
-            '  /apps          Show running applications',
-            '  /sysinfo       System resources (CPU, RAM, disk)',
-            '  /calendar      Today\'s Outlook calendar',
+            'Negocios / Business:',
+            '  /briefing /resumo      Briefing diario',
+            '  /news /noticias        Radar de noticias',
+            '  /open /abrir           Abrir app Windows',
+            '  /apps /programas       Apps em execucao',
+            '  /sysinfo /sistema      Recursos do sistema',
+            '  /calendar /agenda      Calendario Outlook',
             '',
-            'Pessoas:',
-            '  /addperson     Cadastrar (ex: /addperson equipe Joao, dev)',
-            '  /people        Listar todas as pessoas',
-            '  /equipe        Listar equipe',
-            '  /familia       Listar familia',
-            '  /person <nome> Detalhes de uma pessoa',
-            '  /delegate      Delegar tarefa (ex: /delegate Joao revisar doc)',
-            '  /delegacoes    Listar delegacoes pendentes',
-            '  /followups     Follow-ups pendentes',
-            '  /dashboard     Painel geral (pessoas + delegacoes + follow-ups)',
+            'Pessoas / People:',
+            '  /addperson /novapessoa  Cadastrar pessoa',
+            '  /people /pessoas        Listar todas',
+            '  /team /equipe           Listar equipe',
+            '  /family /familia        Listar familia',
+            '  /person /pessoa         Detalhes de alguem',
+            '  /delegate /delegar      Delegar tarefa',
+            '  /delegations /delegacoes Listar delegacoes',
+            '  /followups              Follow-ups pendentes',
+            '  /dashboard /painel      Painel geral',
             '',
-            'Tarefas:',
-            '  /task <texto>  Criar tarefa (ex: /task 18h buscar pao)',
-            '  /tasks [all]   Listar tarefas pendentes',
-            '  /done <ref>    Marcar tarefa como concluida',
-            '  /rmtask <ref>  Remover tarefa',
+            'Tarefas / Tasks:',
+            '  /task /tarefa           Criar tarefa (ex: /tarefa 18h buscar pao)',
+            '  /tasks /tarefas         Listar pendentes',
+            '  /done /feito            Marcar como concluida',
+            '  /rmtask /rmtarefa       Remover tarefa',
             '',
             'Tab completes commands. Use \\ at end of line for multi-line.',
             '',
@@ -534,7 +544,8 @@ async function runInteractive(
         )
         break
 
-      case 'commit': {
+      case 'commit':
+      case 'commitar': {
         if (!await isGitRepo()) {
           tui.showError('Not a git repository.')
           break
@@ -591,7 +602,8 @@ async function runInteractive(
         break
       }
 
-      case 'persona': {
+      case 'persona':
+      case 'modo': {
         const name = args[0]
         if (!name) {
           tui.showSystem(formatPersonaList(currentPersona))
@@ -612,7 +624,8 @@ async function runInteractive(
         break
       }
 
-      case 'copy': {
+      case 'copy':
+      case 'copiar': {
         // Copy last assistant message to clipboard
         const lastAssistant = [...sessions.messages].reverse().find((m) => m.role === 'assistant')
         if (!lastAssistant) {
@@ -628,7 +641,8 @@ async function runInteractive(
         break
       }
 
-      case 'ask': {
+      case 'ask':
+      case 'perguntar': {
         const question = args.join(' ')
         if (!question) {
           tui.showError('Usage: /ask <question>')
@@ -672,7 +686,8 @@ async function runInteractive(
         break
       }
 
-      case 'budget': {
+      case 'budget':
+      case 'orcamento': {
         const val = args[0]
         if (!val) {
           const max = config.maxSessionCost
@@ -696,7 +711,8 @@ async function runInteractive(
         break
       }
 
-      case 'undo': {
+      case 'undo':
+      case 'desfazer': {
         const peek = undoStack.peek()
         if (!peek) {
           tui.showError('Nothing to undo.')
@@ -709,7 +725,8 @@ async function runInteractive(
         break
       }
 
-      case 'search': {
+      case 'search':
+      case 'buscar': {
         const query = args.join(' ').toLowerCase()
         if (!query) {
           tui.showError('Usage: /search <text>')
@@ -732,7 +749,8 @@ async function runInteractive(
       }
 
       case 'lang':
-      case 'language': {
+      case 'language':
+      case 'idioma': {
         const lang = args[0]
         if (!lang) {
           tui.showSystem(`Language: ${config.language} (auto = match user's language)`)
@@ -746,7 +764,8 @@ async function runInteractive(
 
       // ── Business assistant commands ──────────────────────
 
-      case 'briefing': {
+      case 'briefing':
+      case 'resumo': {
         tui.showSystem('Carregando briefing...')
         tui.disableInput()
         try {
@@ -759,7 +778,8 @@ async function runInteractive(
         break
       }
 
-      case 'news': {
+      case 'news':
+      case 'noticias': {
         const category = args[0] as NewsCategory | undefined
         const validCats: NewsCategory[] = ['business', 'tech', 'finance', 'brazil', 'world']
         if (category && !validCats.includes(category)) {
@@ -778,7 +798,8 @@ async function runInteractive(
         break
       }
 
-      case 'open': {
+      case 'open':
+      case 'abrir': {
         const appName = args.join(' ')
         if (!appName) {
           tui.showSystem(`Apps disponiveis: ${getKnownApps().join(', ')}\nUso: /open <app> ou /open <app> <arquivo>`)
@@ -791,7 +812,8 @@ async function runInteractive(
         break
       }
 
-      case 'openfile': {
+      case 'openfile':
+      case 'abrirarquivo': {
         const filePath = args.join(' ')
         if (!filePath) {
           tui.showError('Uso: /openfile <caminho>')
@@ -813,7 +835,8 @@ async function runInteractive(
         break
       }
 
-      case 'apps': {
+      case 'apps':
+      case 'programas': {
         tui.disableInput()
         try {
           const result = await getRunningApps()
@@ -825,7 +848,8 @@ async function runInteractive(
         break
       }
 
-      case 'sysinfo': {
+      case 'sysinfo':
+      case 'sistema': {
         tui.disableInput()
         try {
           const result = await getSystemInfo()
@@ -838,6 +862,8 @@ async function runInteractive(
       }
 
       case 'calendar':
+      case 'calendario':
+      case 'agenda':
       case 'cal': {
         tui.disableInput()
         try {
@@ -854,17 +880,27 @@ async function runInteractive(
       // ── People management commands ────────────────────────
 
       case 'people':
+      case 'pessoas':
       case 'equipe':
-      case 'familia': {
-        const groupFilter = cmd === 'equipe' ? 'equipe' as PersonGroup
-          : cmd === 'familia' ? 'familia' as PersonGroup
-          : args[0] as PersonGroup | undefined
+      case 'team':
+      case 'familia':
+      case 'family':
+      case 'contato':
+      case 'contatos':
+      case 'contacts': {
+        const groupMap: Record<string, PersonGroup> = {
+          equipe: 'equipe', team: 'equipe',
+          familia: 'familia', family: 'familia',
+          contato: 'contato', contatos: 'contato', contacts: 'contato',
+        }
+        const groupFilter = groupMap[cmd] || args[0] as PersonGroup | undefined
         const people = listPeople(groupFilter)
         tui.showSystem(formatPeopleList(people))
         break
       }
 
-      case 'person': {
+      case 'person':
+      case 'pessoa': {
         const ref = args.join(' ')
         if (!ref) {
           tui.showError('Uso: /person <nome>')
@@ -879,7 +915,9 @@ async function runInteractive(
         break
       }
 
-      case 'addperson': {
+      case 'addperson':
+      case 'addpessoa':
+      case 'novapessoa': {
         // /addperson <group> <name> [role]
         const group = args[0] as PersonGroup
         const validGroups: PersonGroup[] = ['equipe', 'familia', 'contato']
@@ -900,7 +938,8 @@ async function runInteractive(
         break
       }
 
-      case 'delegate': {
+      case 'delegate':
+      case 'delegar': {
         // /delegate <person> <task>
         const personName = args[0]
         if (!personName || args.length < 2) {
@@ -918,7 +957,8 @@ async function runInteractive(
       }
 
       case 'delegations':
-      case 'delegacoes': {
+      case 'delegacoes':
+      case 'delegados': {
         const personRef = args[0]
         const delegations = getDelegations(personRef)
         tui.showSystem(formatDelegationList(delegations))
@@ -939,7 +979,8 @@ async function runInteractive(
 
       // ── Task/reminder commands ────────────────────────────
 
-      case 'task': {
+      case 'task':
+      case 'tarefa': {
         const text = args.join(' ')
         if (!text) {
           // Show pending tasks
@@ -970,14 +1011,17 @@ async function runInteractive(
         break
       }
 
-      case 'tasks': {
+      case 'tasks':
+      case 'tarefas': {
         const showAll = args[0] === 'all' || args[0] === 'todas'
         const tasks = listTasks(showAll)
         tui.showSystem(formatTaskList(tasks))
         break
       }
 
-      case 'done': {
+      case 'done':
+      case 'feito':
+      case 'concluido': {
         const ref = args.join(' ')
         if (!ref) {
           tui.showError('Uso: /done <id ou parte do titulo>')
@@ -992,7 +1036,8 @@ async function runInteractive(
         break
       }
 
-      case 'rmtask': {
+      case 'rmtask':
+      case 'rmtarefa': {
         const ref = args.join(' ')
         if (!ref) {
           tui.showError('Uso: /rmtask <id ou parte do titulo>')
