@@ -14,14 +14,14 @@ import { OpenAICompatProvider } from './openai-provider'
 import { gitDiff, gitStatus, gitStageAll, gitCommit, isGitRepo } from './git'
 import { getPersona, formatPersonaList, type Persona } from './personas'
 import { copyToClipboard } from './clipboard'
-import { undoStack, registerPlugins, registerWindowsTools } from './tools'
+import { undoStack, registerPlugins, registerWindowsTools, TOOLS } from './tools'
 import { loadPlugins, pluginsToTools, formatPluginList, getPluginDir } from './plugins'
 import { formatApprovalPrompt, formatEditDiff } from './approval'
 import { extractImages } from './images'
 import { openApp, openFile, openUrl, getRunningApps, getSystemInfo, getDateTimeInfo, getOutlookEvents, getKnownApps } from './windows'
 import { fetchNews, getNewsCategories, type NewsCategory } from './news'
 import { generateBriefing } from './briefing'
-import { writeFileSync, statSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Message, ToolCall } from './types'
 
@@ -75,8 +75,6 @@ async function main(): Promise<void> {
   const plugins = loadPlugins(pluginDir)
   if (plugins.length > 0) {
     registerPlugins(plugins)
-    // Add plugin tools to the TOOLS array
-    const { TOOLS } = await import('./tools')
     TOOLS.push(...pluginsToTools(plugins))
   }
 
@@ -457,7 +455,11 @@ async function runInteractive(
         if (toPop > 0) sessions.popMessages(toPop)
 
         tui.showSystem('Retrying...')
-        await handleSubmit(lastUserMsg.content)
+        // Reconstruct input with image references if present
+        const retryInput = lastUserMsg.images?.length
+          ? lastUserMsg.content  // images are stored in session, will be picked up again
+          : lastUserMsg.content
+        await handleSubmit(retryInput)
         break
       }
 
@@ -520,33 +522,45 @@ async function runInteractive(
         tui.showSystem('Changes:\n' + status)
         tui.disableInput()
 
-        // Get diff and generate commit message via AI
-        const diff = await gitDiff()
-        const commitPrompt = `Generate a concise git commit message for these changes. Use conventional commits format (feat:, fix:, refactor:, docs:, chore:, etc.). One line, max 72 chars. No quotes. Just the message.\n\nDiff:\n${diff.slice(0, 8000)}`
+        try {
+          // Get diff and generate commit message via AI
+          const diff = await gitDiff()
+          const commitPrompt = `Generate a concise git commit message for these changes. Use conventional commits format (feat:, fix:, refactor:, docs:, chore:, etc.). One line, max 72 chars. No quotes. Just the message.\n\nDiff:\n${diff.slice(0, 8000)}`
 
-        tui.startStream()
-        let commitMsg = ''
-        for await (const event of claude.chat(
-          [{ role: 'user', content: commitPrompt, timestamp: Date.now() }],
-          'You generate git commit messages. Output ONLY the commit message, nothing else.',
-          false,
-        )) {
-          if (event.type === 'text') {
-            commitMsg += event.text
-            tui.appendStream(event.text)
+          tui.startStream()
+          let commitMsg = ''
+          for await (const event of claude.chat(
+            [{ role: 'user', content: commitPrompt, timestamp: Date.now() }],
+            'You generate git commit messages. Output ONLY the commit message, nothing else.',
+            false,
+          )) {
+            if (event.type === 'text') {
+              commitMsg += event.text
+              tui.appendStream(event.text)
+            } else if (event.type === 'error') {
+              tui.showError(event.error)
+            }
           }
-        }
-        tui.endStream()
+          tui.endStream()
 
-        commitMsg = commitMsg.trim().replace(/^["']|["']$/g, '')
+          commitMsg = commitMsg.trim().replace(/^["']|["']$/g, '')
 
-        // Stage and commit
-        await gitStageAll()
-        const result = await gitCommit(commitMsg)
-        if (result.ok) {
-          tui.showSystem(`Committed: ${commitMsg}`)
-        } else {
-          tui.showError(`Commit failed: ${result.output}`)
+          // Guard: don't stage/commit with empty message
+          if (!commitMsg) {
+            tui.showError('Failed to generate commit message. Aborting.')
+            break
+          }
+
+          // Stage and commit
+          await gitStageAll()
+          const result = await gitCommit(commitMsg)
+          if (result.ok) {
+            tui.showSystem(`Committed: ${commitMsg}`)
+          } else {
+            tui.showError(`Commit failed: ${result.output}`)
+          }
+        } catch (err) {
+          tui.showError(`Commit error: ${err instanceof Error ? err.message : String(err)}`)
         }
         tui.enableInput()
         break
@@ -608,6 +622,8 @@ async function runInteractive(
           if (event.type === 'text') {
             askText += event.text
             tui.appendStream(event.text)
+          } else if (event.type === 'error') {
+            tui.showError(event.error)
           } else if (event.type === 'usage') {
             // Show usage inline but don't track in session
             tui.showUsage(`${event.inputTokens} in / ${event.outputTokens} out (ephemeral)`)
@@ -774,16 +790,24 @@ async function runInteractive(
 
       case 'apps': {
         tui.disableInput()
-        const result = await getRunningApps()
-        tui.showSystem(result)
+        try {
+          const result = await getRunningApps()
+          tui.showSystem(result)
+        } catch (err) {
+          tui.showError(`Apps: ${err instanceof Error ? err.message : String(err)}`)
+        }
         tui.enableInput()
         break
       }
 
       case 'sysinfo': {
         tui.disableInput()
-        const result = await getSystemInfo()
-        tui.showSystem(result)
+        try {
+          const result = await getSystemInfo()
+          tui.showSystem(result)
+        } catch (err) {
+          tui.showError(`Sysinfo: ${err instanceof Error ? err.message : String(err)}`)
+        }
         tui.enableInput()
         break
       }
@@ -791,9 +815,13 @@ async function runInteractive(
       case 'calendar':
       case 'cal': {
         tui.disableInput()
-        const dateInfo = await getDateTimeInfo()
-        const events = await getOutlookEvents()
-        tui.showSystem(`${dateInfo}\n\n--- Agenda ---\n${events}`)
+        try {
+          const dateInfo = await getDateTimeInfo()
+          const events = await getOutlookEvents()
+          tui.showSystem(`${dateInfo}\n\n--- Agenda ---\n${events}`)
+        } catch (err) {
+          tui.showError(`Calendar: ${err instanceof Error ? err.message : String(err)}`)
+        }
         tui.enableInput()
         break
       }
@@ -829,18 +857,21 @@ async function runInteractive(
 
   // Auto-submit initial prompt if provided
   if (initialPrompt) {
-    handleSubmit(initialPrompt)
+    await handleSubmit(initialPrompt)
   }
 }
 
 function formatAge(timestamp: number): string {
+  if (!timestamp || timestamp <= 0) return ''
   const diff = Date.now() - timestamp
+  if (diff < 0) return ''
   const mins = Math.floor(diff / 60_000)
   if (mins < 1) return 'just now'
   if (mins < 60) return `${mins}m ago`
   const hours = Math.floor(mins / 60)
   if (hours < 24) return `${hours}h ago`
   const days = Math.floor(hours / 24)
+  if (days > 365) return `${Math.floor(days / 365)}y ago`
   return `${days}d ago`
 }
 

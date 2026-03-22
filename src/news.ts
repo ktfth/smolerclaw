@@ -13,7 +13,7 @@ interface NewsSource {
 
 export type NewsCategory = 'business' | 'tech' | 'finance' | 'brazil' | 'world'
 
-const FEEDS: NewsSource[] = [
+const FEEDS: readonly NewsSource[] = [
   // Business & Economy
   { name: 'InfoMoney', url: 'https://www.infomoney.com.br/feed/', category: 'finance' },
   { name: 'Valor Economico', url: 'https://pox.globo.com/rss/valor/', category: 'business' },
@@ -32,6 +32,12 @@ const FEEDS: NewsSource[] = [
   { name: 'BBC World', url: 'https://feeds.bbci.co.uk/news/world/rss.xml', category: 'world' },
   { name: 'Reuters', url: 'https://www.reutersagency.com/feed/', category: 'world' },
 ]
+
+// ─── Constants ──────────────────────────────────────────────
+
+const MAX_BODY_BYTES = 2 * 1024 * 1024  // 2 MB max per feed
+const MAX_ITEMS_PER_FEED = 10
+const FETCH_TIMEOUT_MS = 10_000
 
 // ─── RSS Parser (minimal, no dependencies) ──────────────────
 
@@ -56,21 +62,9 @@ function parseRss(xml: string, source: string, category: NewsCategory): NewsItem
 
   while ((match = itemRegex.exec(xml)) !== null) {
     const block = match[1]
-    const title = extractTag(block, 'title')
-    const link = extractTag(block, 'link') || extractAtomLink(block)
-    const pubDateStr = extractTag(block, 'pubDate') || extractTag(block, 'published') || extractTag(block, 'updated')
-
-    if (title) {
-      items.push({
-        title: cleanHtml(title),
-        link: link || '',
-        source,
-        category,
-        pubDate: pubDateStr ? new Date(pubDateStr) : undefined,
-      })
-    }
-
-    if (items.length >= 10) break
+    const item = parseBlock(block, source, category)
+    if (item) items.push(item)
+    if (items.length >= MAX_ITEMS_PER_FEED) break
   }
 
   // If no <item>, try Atom <entry>
@@ -78,35 +72,68 @@ function parseRss(xml: string, source: string, category: NewsCategory): NewsItem
     const entryRegex = /<entry[\s>]([\s\S]*?)<\/entry>/gi
     while ((match = entryRegex.exec(xml)) !== null) {
       const block = match[1]
-      const title = extractTag(block, 'title')
-      const link = extractAtomLink(block) || extractTag(block, 'link')
-      const pubDateStr = extractTag(block, 'published') || extractTag(block, 'updated')
-
-      if (title) {
-        items.push({
-          title: cleanHtml(title),
-          link: link || '',
-          source,
-          category,
-          pubDate: pubDateStr ? new Date(pubDateStr) : undefined,
-        })
-      }
-
-      if (items.length >= 10) break
+      const item = parseBlock(block, source, category)
+      if (item) items.push(item)
+      if (items.length >= MAX_ITEMS_PER_FEED) break
     }
   }
 
   return items
 }
 
+function parseBlock(block: string, source: string, category: NewsCategory): NewsItem | null {
+  const title = extractTag(block, 'title')
+  if (!title) return null
+
+  const rawLink = extractTag(block, 'link') || extractAtomLink(block)
+  const link = sanitizeLink(rawLink)
+  const pubDateStr = extractTag(block, 'pubDate') || extractTag(block, 'published') || extractTag(block, 'updated')
+
+  let pubDate: Date | undefined
+  if (pubDateStr) {
+    const d = new Date(pubDateStr)
+    pubDate = isNaN(d.getTime()) ? undefined : d
+  }
+
+  return {
+    title: cleanHtml(title),
+    link,
+    source,
+    category,
+    pubDate,
+  }
+}
+
+/**
+ * Validate a link is a safe HTTP(S) URL.
+ * Rejects javascript:, data:, and other schemes.
+ */
+function sanitizeLink(link: string | null): string {
+  if (!link) return ''
+  const trimmed = link.trim()
+  if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
+    return trimmed
+  }
+  return '' // reject non-HTTP links
+}
+
+/**
+ * Escape regex special characters in a string.
+ */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 function extractTag(xml: string, tag: string): string | null {
+  const escaped = escapeRegex(tag)
+
   // Handle CDATA
-  const cdataRegex = new RegExp(`<${tag}[^>]*>\\s*<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>\\s*</${tag}>`, 'i')
+  const cdataRegex = new RegExp(`<${escaped}[^>]*>\\s*<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>\\s*</${escaped}>`, 'i')
   const cdataMatch = cdataRegex.exec(xml)
   if (cdataMatch) return cdataMatch[1].trim()
 
   // Plain text
-  const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i')
+  const regex = new RegExp(`<${escaped}[^>]*>([\\s\\S]*?)</${escaped}>`, 'i')
   const match = regex.exec(xml)
   return match ? match[1].trim() : null
 }
@@ -126,6 +153,8 @@ function cleanHtml(text: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
     .trim()
 }
 
@@ -139,12 +168,20 @@ export async function fetchNews(
   categories?: NewsCategory[],
   maxPerSource = 5,
 ): Promise<string> {
+  // Validate maxPerSource
+  const cappedMax = Math.max(1, Math.min(maxPerSource, MAX_ITEMS_PER_FEED))
+
+  // Guard against empty categories array
+  if (categories && categories.length === 0) {
+    return getNewsCategories()
+  }
+
   const feeds = categories
     ? FEEDS.filter((f) => categories.includes(f.category))
     : FEEDS
 
   const results = await Promise.allSettled(
-    feeds.map((feed) => fetchFeed(feed, maxPerSource)),
+    feeds.map((feed) => fetchFeed(feed, cappedMax)),
   )
 
   const allItems: NewsItem[] = []
@@ -155,7 +192,7 @@ export async function fetchNews(
     if (result.status === 'fulfilled') {
       allItems.push(...result.value)
     } else {
-      errors.push(`${feeds[i].name}: timeout/unreachable`)
+      errors.push(`${feeds[i].name}: ${summarizeError(result.reason)}`)
     }
   }
 
@@ -165,7 +202,7 @@ export async function fetchNews(
       : 'Nenhuma noticia encontrada.'
   }
 
-  // Sort by date (newest first), group by category
+  // Sort by date (newest first)
   allItems.sort((a, b) => {
     const da = a.pubDate?.getTime() || 0
     const db = b.pubDate?.getTime() || 0
@@ -175,9 +212,17 @@ export async function fetchNews(
   return formatNews(allItems, errors)
 }
 
+function summarizeError(err: unknown): string {
+  if (err instanceof Error) {
+    if (err.name === 'AbortError') return 'timeout'
+    return err.message.slice(0, 80)
+  }
+  return 'unreachable'
+}
+
 async function fetchFeed(source: NewsSource, maxItems: number): Promise<NewsItem[]> {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 10_000)
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
 
   try {
     const resp = await fetch(source.url, {
@@ -191,11 +236,39 @@ async function fetchFeed(source: NewsSource, maxItems: number): Promise<NewsItem
 
     if (!resp.ok) return []
 
-    const xml = await resp.text()
+    // Check content-length before reading body
+    const contentLength = resp.headers.get('content-length')
+    if (contentLength && Number(contentLength) > MAX_BODY_BYTES) {
+      return [] // skip oversized feeds
+    }
+
+    // Read body with size cap
+    const reader = resp.body?.getReader()
+    if (!reader) return []
+
+    const chunks: Uint8Array[] = []
+    let totalBytes = 0
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      totalBytes += value.byteLength
+      if (totalBytes > MAX_BODY_BYTES) {
+        reader.cancel()
+        return [] // body too large
+      }
+      chunks.push(value)
+    }
+
+    const xml = new TextDecoder().decode(Buffer.concat(chunks))
     const items = parseRss(xml, source.name, source.category)
     return items.slice(0, maxItems)
-  } catch {
+  } catch (err) {
     clearTimeout(timeout)
+    // Log errors for debugging but don't crash
+    if (process.env.DEBUG) {
+      console.error(`[news] ${source.name}: ${err instanceof Error ? err.message : err}`)
+    }
     return []
   }
 }
@@ -209,12 +282,11 @@ function formatNews(items: NewsItem[], errors: string[]): string {
     world: 'Mundo',
   }
 
-  // Group by category
+  // Group by category (immutable approach)
   const grouped = new Map<NewsCategory, NewsItem[]>()
   for (const item of items) {
-    const list = grouped.get(item.category) || []
-    list.push(item)
-    grouped.set(item.category, list)
+    const existing = grouped.get(item.category) || []
+    grouped.set(item.category, [...existing, item])
   }
 
   const sections: string[] = []
@@ -227,7 +299,11 @@ function formatNews(items: NewsItem[], errors: string[]): string {
     const label = categoryLabels[cat]
     const lines = catItems.slice(0, 8).map((item) => {
       const time = item.pubDate
-        ? item.pubDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+        ? item.pubDate.toLocaleTimeString('pt-BR', {
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZone: 'America/Sao_Paulo',
+          })
         : ''
       const timeStr = time ? `[${time}]` : ''
       return `  ${timeStr} ${item.title} (${item.source})`

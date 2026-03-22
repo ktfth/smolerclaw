@@ -1,9 +1,61 @@
 /**
  * Windows-specific utilities for the business assistant.
  * All operations are non-destructive (read-only or open-only).
+ *
+ * getDateTimeInfo() is cross-platform (pure JS, no Windows APIs).
  */
 
 import { IS_WINDOWS } from './platform'
+
+// ─── Security: PowerShell input sanitization ────────────────
+
+/** Characters that can break out of a PowerShell double-quoted string or inject commands */
+const PS_DANGEROUS = /[";`$\n\r|&<>{}()]/
+
+/**
+ * Validate a string is safe for embedding in a PowerShell command.
+ * Rejects any string containing shell metacharacters rather than
+ * trying to escape them (defense-in-depth).
+ */
+function validatePsInput(value: string, label: string): string | null {
+  if (!value || typeof value !== 'string') {
+    return `Error: ${label} is required.`
+  }
+  if (value.length > 500) {
+    return `Error: ${label} too long (max 500 chars).`
+  }
+  if (PS_DANGEROUS.test(value)) {
+    return `Error: ${label} contains invalid characters. Avoid: " ; \` $ | & < > { } ( ) and newlines.`
+  }
+  return null
+}
+
+// ─── Process helpers with timeout and deadlock prevention ───
+
+const SPAWN_TIMEOUT_MS = 15_000
+
+/**
+ * Spawn a PowerShell command with timeout and concurrent pipe drainage.
+ * Returns { stdout, stderr, exitCode }.
+ */
+async function runPowerShell(cmd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const proc = Bun.spawn(
+    ['powershell', '-NoProfile', '-NonInteractive', '-Command', cmd],
+    { stdout: 'pipe', stderr: 'pipe' },
+  )
+
+  const timer = setTimeout(() => proc.kill(), SPAWN_TIMEOUT_MS)
+
+  // Drain both pipes concurrently to prevent deadlock
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  const exitCode = await proc.exited
+  clearTimeout(timer)
+
+  return { stdout, stderr, exitCode }
+}
 
 // ─── App Launcher ───────────────────────────────────────────
 
@@ -51,14 +103,21 @@ export async function openApp(name: string, args?: string): Promise<string> {
     return `Unknown app: "${name}". Available: ${available}`
   }
 
-  const cmd = args ? `Start-Process "${exe}" -ArgumentList "${args}"` : `Start-Process "${exe}"`
+  // Validate optional argument (file path to open in the app)
+  if (args) {
+    const err = validatePsInput(args, 'argument')
+    if (err) return err
+  }
+
+  const cmd = args
+    ? `Start-Process '${exe}' -ArgumentList '${args}'`
+    : `Start-Process '${exe}'`
 
   try {
-    const proc = Bun.spawn(
-      ['powershell', '-NoProfile', '-NonInteractive', '-Command', cmd],
-      { stdout: 'pipe', stderr: 'pipe' },
-    )
-    await proc.exited
+    const { exitCode, stderr } = await runPowerShell(cmd)
+    if (exitCode !== 0 && stderr.trim()) {
+      return `Error opening ${name}: ${stderr.trim()}`
+    }
     return `Opened: ${name}`
   } catch (err) {
     return `Error opening ${name}: ${err instanceof Error ? err.message : String(err)}`
@@ -71,12 +130,19 @@ export async function openApp(name: string, args?: string): Promise<string> {
 export async function openUrl(url: string): Promise<string> {
   if (!IS_WINDOWS) return 'Error: this command is only available on Windows.'
 
+  // Validate URL scheme
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    return 'Error: URL must start with http:// or https://'
+  }
+
+  const err = validatePsInput(url, 'URL')
+  if (err) return err
+
   try {
-    const proc = Bun.spawn(
-      ['powershell', '-NoProfile', '-NonInteractive', '-Command', `Start-Process "${url}"`],
-      { stdout: 'pipe', stderr: 'pipe' },
-    )
-    await proc.exited
+    const { exitCode, stderr } = await runPowerShell(`Start-Process '${url}'`)
+    if (exitCode !== 0 && stderr.trim()) {
+      return `Error: ${stderr.trim()}`
+    }
     return `Opened in browser: ${url}`
   } catch (err) {
     return `Error: ${err instanceof Error ? err.message : String(err)}`
@@ -89,12 +155,14 @@ export async function openUrl(url: string): Promise<string> {
 export async function openFile(filePath: string): Promise<string> {
   if (!IS_WINDOWS) return 'Error: this command is only available on Windows.'
 
+  const err = validatePsInput(filePath, 'file path')
+  if (err) return err
+
   try {
-    const proc = Bun.spawn(
-      ['powershell', '-NoProfile', '-NonInteractive', '-Command', `Invoke-Item "${filePath}"`],
-      { stdout: 'pipe', stderr: 'pipe' },
-    )
-    await proc.exited
+    const { exitCode, stderr } = await runPowerShell(`Invoke-Item '${filePath}'`)
+    if (exitCode !== 0 && stderr.trim()) {
+      return `Error: ${stderr.trim()}`
+    }
     return `Opened: ${filePath}`
   } catch (err) {
     return `Error: ${err instanceof Error ? err.message : String(err)}`
@@ -112,12 +180,10 @@ export async function getRunningApps(): Promise<string> {
 
   try {
     const cmd = `Get-Process | Where-Object {$_.MainWindowTitle -ne ''} | Sort-Object -Property WorkingSet64 -Descending | Select-Object -First 15 Name, @{N='Memory(MB)';E={[math]::Round($_.WorkingSet64/1MB,1)}}, MainWindowTitle | Format-Table -AutoSize | Out-String -Width 200`
-    const proc = Bun.spawn(
-      ['powershell', '-NoProfile', '-NonInteractive', '-Command', cmd],
-      { stdout: 'pipe', stderr: 'pipe' },
-    )
-    const stdout = await new Response(proc.stdout).text()
-    await proc.exited
+    const { stdout, stderr } = await runPowerShell(cmd)
+    if (stderr.trim()) {
+      return `Error: ${stderr.trim()}`
+    }
     return stdout.trim() || 'No windowed applications running.'
   } catch (err) {
     return `Error: ${err instanceof Error ? err.message : String(err)}`
@@ -131,36 +197,26 @@ export async function getSystemInfo(): Promise<string> {
   if (!IS_WINDOWS) return 'Error: this command is only available on Windows.'
 
   const commands = [
-    // CPU usage
     `$cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average; "CPU: $cpu%"`,
-    // RAM
     `$os = Get-CimInstance Win32_OperatingSystem; $total = [math]::Round($os.TotalVisibleMemorySize/1MB,1); $free = [math]::Round($os.FreePhysicalMemory/1MB,1); $used = $total - $free; "RAM: $used GB / $total GB (Free: $free GB)"`,
-    // Disk
     `Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object { $free = [math]::Round($_.FreeSpace/1GB,1); $total = [math]::Round($_.Size/1GB,1); "$($_.DeviceID) $free GB free / $total GB" }`,
-    // Uptime
     `$uptime = (Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime; "Uptime: $($uptime.Days)d $($uptime.Hours)h $($uptime.Minutes)m"`,
-    // Battery (if laptop)
     `$b = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue; if ($b) { "Battery: $($b.EstimatedChargeRemaining)%" } else { "Battery: N/A (desktop)" }`,
   ]
 
-  const fullCmd = commands.join('; ')
-
   try {
-    const proc = Bun.spawn(
-      ['powershell', '-NoProfile', '-NonInteractive', '-Command', fullCmd],
-      { stdout: 'pipe', stderr: 'pipe' },
-    )
-    const stdout = await new Response(proc.stdout).text()
-    await proc.exited
-    return stdout.trim()
+    const { stdout, stderr } = await runPowerShell(commands.join('; '))
+    if (!stdout.trim() && stderr.trim()) {
+      return `Error: ${stderr.trim()}`
+    }
+    return stdout.trim() || 'System info unavailable.'
   } catch (err) {
     return `Error: ${err instanceof Error ? err.message : String(err)}`
   }
 }
 
 /**
- * Get today's date/time info including upcoming calendar events
- * from Outlook (if available).
+ * Get today's date/time info. Cross-platform (pure JS).
  */
 export async function getDateTimeInfo(): Promise<string> {
   const now = new Date()
@@ -172,11 +228,11 @@ export async function getDateTimeInfo(): Promise<string> {
 
   lines.push(`${weekday}, ${date} — ${time}`)
 
-  // Week number
-  const start = new Date(now.getFullYear(), 0, 1)
-  const diff = now.getTime() - start.getTime()
-  const oneWeek = 7 * 24 * 60 * 60 * 1000
-  const weekNum = Math.ceil(((diff / oneWeek) + start.getDay() + 1) / 1)
+  // ISO 8601 week number calculation
+  const target = new Date(now.valueOf())
+  target.setDate(target.getDate() + 3 - ((target.getDay() + 6) % 7))
+  const jan4 = new Date(target.getFullYear(), 0, 4)
+  const weekNum = 1 + Math.round(((target.getTime() - jan4.getTime()) / 86_400_000 - 3 + ((jan4.getDay() + 6) % 7)) / 7)
   lines.push(`Semana ${weekNum} do ano`)
 
   // Business hours check
@@ -197,6 +253,7 @@ export async function getDateTimeInfo(): Promise<string> {
 /**
  * Get today's Outlook calendar events (read-only).
  * Falls back gracefully if Outlook is not installed.
+ * Uses olFolderCalendar = 9 from the Outlook COM object model.
  */
 export async function getOutlookEvents(): Promise<string> {
   if (!IS_WINDOWS) return 'Outlook integration only available on Windows.'
@@ -205,7 +262,7 @@ export async function getOutlookEvents(): Promise<string> {
     'try {',
     '  $outlook = New-Object -ComObject Outlook.Application -ErrorAction Stop',
     '  $ns = $outlook.GetNamespace("MAPI")',
-    '  $cal = $ns.GetDefaultFolder(9)',
+    '  $cal = $ns.GetDefaultFolder(9)',  // olFolderCalendar
     '  $today = (Get-Date).Date',
     '  $tomorrow = $today.AddDays(1)',
     '  $items = $cal.Items',
@@ -227,20 +284,15 @@ export async function getOutlookEvents(): Promise<string> {
   ].join('\n')
 
   try {
-    const proc = Bun.spawn(
-      ['powershell', '-NoProfile', '-NonInteractive', '-Command', cmd],
-      { stdout: 'pipe', stderr: 'pipe' },
-    )
-    const stdout = await new Response(proc.stdout).text()
-    await proc.exited
-    return stdout.trim()
+    const { stdout } = await runPowerShell(cmd)
+    return stdout.trim() || 'Outlook nao disponivel.'
   } catch {
     return 'Outlook nao disponivel.'
   }
 }
 
-// ─── Quick Notes (non-destructive — appends only) ───────────
+// ─── Exports ────────────────────────────────────────────────
 
-export function getKnownApps(): string[] {
+export function getKnownApps(): readonly string[] {
   return Object.keys(KNOWN_APPS)
 }

@@ -5,8 +5,10 @@ import {
   writeFileSync,
   renameSync,
   statSync,
+  realpathSync,
 } from 'node:fs'
 import { resolve, relative, join, sep, dirname } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import type Anthropic from '@anthropic-ai/sdk'
 import { getShell, hasRipgrep, shouldExclude, SEARCH_EXCLUDES, IS_WINDOWS } from './platform'
 import { UndoStack } from './undo'
@@ -258,14 +260,21 @@ export const WINDOWS_TOOLS: Anthropic.Tool[] = [
   },
 ]
 
-/** Register Windows tools if on Windows platform */
+/** get_news tool definition (cross-platform, extracted for reference by name) */
+const NEWS_TOOL = WINDOWS_TOOLS.find((t) => t.name === 'get_news')!
+
+let _windowsToolsRegistered = false
+
+/** Register Windows tools if on Windows platform. Idempotent. */
 export function registerWindowsTools(): void {
+  if (_windowsToolsRegistered) return
+  _windowsToolsRegistered = true
+
   if (IS_WINDOWS) {
     TOOLS.push(...WINDOWS_TOOLS)
-  }
-  // Also add get_news on all platforms (it's network-only)
-  if (!IS_WINDOWS && !TOOLS.find((t) => t.name === 'get_news')) {
-    TOOLS.push(WINDOWS_TOOLS[WINDOWS_TOOLS.length - 1]) // get_news
+  } else {
+    // Add get_news on all platforms (it's network-only)
+    TOOLS.push(NEWS_TOOL)
   }
 }
 
@@ -333,7 +342,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
  * Prevents corruption from crash/power loss mid-write.
  */
 function atomicWrite(filePath: string, content: string): void {
-  const tmp = join(dirname(filePath), `.${Date.now()}.tmp`)
+  const tmp = join(dirname(filePath), `.tinyclaw-${randomUUID().slice(0, 8)}.tmp`)
   writeFileSync(tmp, content)
   renameSync(tmp, filePath)
 }
@@ -344,12 +353,34 @@ function guardPath(filePath: string): string | null {
   if (resolved !== cwd && !resolved.startsWith(cwd + sep)) {
     return `Error: path outside working directory is not permitted: ${resolved}`
   }
+  // Follow symlinks and re-check containment
+  try {
+    if (existsSync(resolved)) {
+      const real = realpathSync(resolved)
+      if (real !== cwd && !real.startsWith(cwd + sep)) {
+        return `Error: symlink target is outside working directory: ${real}`
+      }
+    }
+  } catch {
+    // File doesn't exist yet (write_file creating new file) — that's OK
+  }
+  return null
+}
+
+/** Validate that a required string input is present and non-empty */
+function requireString(input: Record<string, unknown>, key: string): string | null {
+  const val = input[key]
+  if (typeof val !== 'string' || val.trim().length === 0) {
+    return `Error: '${key}' is required and must be a non-empty string.`
+  }
   return null
 }
 
 // ─── Implementations ─────────────────────────────────────────
 
 function toolReadFile(input: Record<string, unknown>): string {
+  const pathValErr = requireString(input, 'path')
+  if (pathValErr) return pathValErr
   const path = resolve(input.path as string)
   const pathErr = guardPath(path)
   if (pathErr) return pathErr
@@ -378,6 +409,8 @@ function toolReadFile(input: Record<string, unknown>): string {
 }
 
 function toolWriteFile(input: Record<string, unknown>): string {
+  const pathValErr = requireString(input, 'path')
+  if (pathValErr) return pathValErr
   const path = resolve(input.path as string)
   const pathErr = guardPath(path)
   if (pathErr) return pathErr
@@ -390,6 +423,8 @@ function toolWriteFile(input: Record<string, unknown>): string {
 }
 
 function toolEditFile(input: Record<string, unknown>): string {
+  const pathValErr = requireString(input, 'path')
+  if (pathValErr) return pathValErr
   const path = resolve(input.path as string)
   const pathErr = guardPath(path)
   if (pathErr) return pathErr
@@ -408,7 +443,8 @@ function toolEditFile(input: Record<string, unknown>): string {
   }
 
   undoStack.saveState(path)
-  const updated = content.replace(oldText, newText)
+  // Use split/join instead of String.replace to avoid $& back-reference issues
+  const updated = content.split(oldText).join(newText)
   atomicWrite(path, updated)
 
   const oldLines = oldText.split('\n').length
@@ -419,8 +455,12 @@ function toolEditFile(input: Record<string, unknown>): string {
 // ─── search_files: ripgrep → pure-Bun fallback ─────────────
 
 async function toolSearchFiles(input: Record<string, unknown>): Promise<string> {
+  const patternErr = requireString(input, 'pattern')
+  if (patternErr) return patternErr
   const pattern = input.pattern as string
   const dir = resolve((input.path as string) || '.')
+  const pathErr = guardPath(dir)
+  if (pathErr) return pathErr
   const include = input.include as string | undefined
 
   if (await hasRipgrep()) {
@@ -504,8 +544,12 @@ async function searchWithBun(
 // ─── find_files: Bun.Glob (cross-platform) ─────────────────
 
 async function toolFindFiles(input: Record<string, unknown>): Promise<string> {
+  const patternErr = requireString(input, 'pattern')
+  if (patternErr) return patternErr
   const pattern = input.pattern as string
   const dir = resolve((input.path as string) || '.')
+  const pathErr = guardPath(dir)
+  if (pathErr) return pathErr
 
   const glob = new Bun.Glob(pattern)
   const matches: string[] = []
@@ -529,6 +573,8 @@ async function toolFindFiles(input: Record<string, unknown>): Promise<string> {
 
 function toolListDirectory(input: Record<string, unknown>): string {
   const dir = resolve((input.path as string) || '.')
+  const pathErr = guardPath(dir)
+  if (pathErr) return pathErr
   if (!existsSync(dir)) return `Error: not found: ${dir}`
 
   const entries = readdirSync(dir, { withFileTypes: true })
@@ -554,6 +600,8 @@ function toolListDirectory(input: Record<string, unknown>): string {
 // ─── run_command: cross-platform shell ──────────────────────
 
 async function toolRunCommand(input: Record<string, unknown>): Promise<string> {
+  const cmdErr = requireString(input, 'command')
+  if (cmdErr) return cmdErr
   const cmd = input.command as string
   const timeoutSec = Math.min(120, Math.max(5, (input.timeout as number) || 30))
 
@@ -638,6 +686,12 @@ async function toolFetchUrl(input: Record<string, unknown>): Promise<string> {
       return `Status: ${status}\n${headerLines}`
     }
 
+    // Check content-length before reading body
+    const contentLength = resp.headers.get('content-length')
+    if (contentLength && Number(contentLength) > MAX_OUTPUT * 2) {
+      return `Status: ${status}\n\nError: response body too large (${contentLength} bytes). Max is ${MAX_OUTPUT * 2} bytes.`
+    }
+
     const text = await resp.text()
 
     // For HTML, extract readable text (strip tags)
@@ -663,27 +717,40 @@ function checkSsrf(urlStr: string): string | null {
     const parsed = new URL(urlStr)
     const host = parsed.hostname.toLowerCase()
 
-    // Block private hostnames
-    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+    // Block non-HTTP schemes
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return `Error: protocol ${parsed.protocol} is not allowed.`
+    }
+
+    // Block private/reserved hostnames
+    const blockedHostnames = [
+      'localhost', '127.0.0.1', '::1', '0.0.0.0',
+      '::ffff:127.0.0.1', '::ffff:0.0.0.0',
+    ]
+    if (blockedHostnames.includes(host)) {
       return 'Error: requests to localhost are blocked for security.'
     }
     if (host.endsWith('.local') || host.endsWith('.internal')) {
       return 'Error: requests to internal hostnames are blocked.'
     }
+    // Block cloud metadata endpoints
+    if (host === 'metadata.google.internal' || host === 'metadata.gcp.internal') {
+      return 'Error: requests to cloud metadata endpoints are blocked.'
+    }
 
-    // Block private IP ranges
+    // Block private IP ranges (decimal notation)
     const parts = host.split('.').map(Number)
-    if (parts.length === 4 && parts.every((n) => !isNaN(n))) {
+    if (parts.length === 4 && parts.every((n) => !isNaN(n) && n >= 0 && n <= 255)) {
       if (parts[0] === 10) return 'Error: requests to private IPs (10.x) are blocked.'
       if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return 'Error: requests to private IPs (172.16-31.x) are blocked.'
       if (parts[0] === 192 && parts[1] === 168) return 'Error: requests to private IPs (192.168.x) are blocked.'
-      if (parts[0] === 169 && parts[1] === 254) return 'Error: requests to link-local IPs are blocked.'
+      if (parts[0] === 169 && parts[1] === 254) return 'Error: requests to link-local/metadata IPs are blocked.'
       if (parts[0] === 0) return 'Error: requests to 0.x IPs are blocked.'
     }
 
-    // Block file:// and other schemes that might slip through
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return `Error: protocol ${parsed.protocol} is not allowed.`
+    // Block IPv6-mapped IPv4 (::ffff:x.x.x.x)
+    if (host.startsWith('::ffff:') || host.startsWith('[::ffff:')) {
+      return 'Error: requests to IPv6-mapped IPv4 addresses are blocked.'
     }
   } catch {
     return 'Error: invalid URL.'
@@ -727,10 +794,12 @@ function stripHtml(html: string): string {
 
 function formatSearchResults(stdout: string, baseDir: string): string {
   const cwd = process.cwd()
+  const cwdPrefix = cwd + sep
+  const baseDirPrefix = baseDir + sep
   const lines = stdout.trim().split('\n')
   const relativized = lines.map((line) => {
-    if (line.startsWith(cwd)) return '.' + line.slice(cwd.length).replace(/\\/g, '/')
-    if (line.startsWith(baseDir)) return '.' + line.slice(baseDir.length).replace(/\\/g, '/')
+    if (line.startsWith(cwdPrefix)) return '.' + line.slice(cwd.length).replace(/\\/g, '/')
+    if (line.startsWith(baseDirPrefix)) return '.' + line.slice(baseDir.length).replace(/\\/g, '/')
     return line
   })
 
