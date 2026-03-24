@@ -228,7 +228,7 @@ async function fetchFeed(source: NewsSource, maxItems: number): Promise<NewsItem
     const resp = await fetch(source.url, {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'tinyclaw/1.0 (news-radar)',
+        'User-Agent': 'smolerclaw/1.0 (news-radar)',
         'Accept': 'application/rss+xml, application/atom+xml, application/xml, text/xml',
       },
     })

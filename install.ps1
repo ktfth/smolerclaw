@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────
-# tinyclaw installer for Windows
+# smolerclaw installer for Windows
 # Compiles the binary and installs to user PATH
 # Usage: powershell -ExecutionPolicy Bypass -File install.ps1
 # ─────────────────────────────────────────────────────────────
@@ -7,12 +7,12 @@
 $ErrorActionPreference = "Stop"
 
 $ProjectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$BinName = "tinyclaw.exe"
-$InstallDir = Join-Path $env:LOCALAPPDATA "tinyclaw\bin"
+$BinName = "smolerclaw.exe"
+$InstallDir = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"
 $InstallPath = Join-Path $InstallDir $BinName
 
 Write-Host ""
-Write-Host "  tinyclaw installer" -ForegroundColor Cyan
+Write-Host "  smolerclaw installer" -ForegroundColor Cyan
 Write-Host "  ==================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -106,14 +106,14 @@ if ($userPath -notlike "*$InstallDir*") {
 
 Write-Host ""
 Write-Host "  Installation complete!" -ForegroundColor Cyan
-Write-Host "  tinyclaw v$version" -ForegroundColor Cyan
+Write-Host "  smolerclaw v$version" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Usage:" -ForegroundColor White
-Write-Host "    tinyclaw                    # interactive mode"
-Write-Host "    tinyclaw 'explain this'     # with prompt"
-Write-Host "    tinyclaw -p '2+2'           # print mode"
+Write-Host "    smolerclaw                    # interactive mode"
+Write-Host "    smolerclaw 'explain this'     # with prompt"
+Write-Host "    smolerclaw -p '2+2'           # print mode"
 Write-Host ""
 Write-Host "  First run:" -ForegroundColor White
 Write-Host "    set ANTHROPIC_API_KEY=sk-ant-..."
-Write-Host "    tinyclaw"
+Write-Host "    smolerclaw"
 Write-Host ""

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 
 describe('memos', () => {
   beforeEach(() => {
-    const tmpDir = mkdtempSync(join(tmpdir(), 'tinyclaw-memo-'))
+    const tmpDir = mkdtempSync(join(tmpdir(), 'smolerclaw-memo-'))
     initMemos(tmpDir)
   })
 

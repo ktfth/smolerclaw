@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { parseArgs, printHelp, getVersion } from './cli'
 import { loadConfig, saveConfig, getConfigPath } from './config'
-import { resolveAuth, authLabel, type AuthResult } from './auth'
+import { resolveAuth, refreshAuth, authLabel, type AuthResult } from './auth'
 import { ClaudeProvider } from './claude'
 import { SessionManager } from './session'
 import { loadSkills, buildSystemPrompt, formatSkillList } from './skills'
@@ -31,6 +31,7 @@ import { initFinance, addTransaction, getMonthSummary, getRecentTransactions, re
 import { initDecisions, logDecision, searchDecisions, listDecisions, formatDecisionList, formatDecisionDetail } from './decisions'
 import { initWorkflows, runWorkflow, listWorkflows, createWorkflow, deleteWorkflow, formatWorkflowList, type WorkflowStep } from './workflows'
 import { initMonitor, startMonitor, stopMonitor, listMonitors, stopAllMonitors } from './monitor'
+import { initInvestigations } from './investigate'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Message, ToolCall } from './types'
@@ -44,7 +45,7 @@ async function main(): Promise<void> {
     process.exit(0)
   }
   if (cliArgs.version) {
-    console.log(`tinyclaw v${getVersion()}`)
+    console.log(`smolerclaw v${getVersion()}`)
     process.exit(0)
   }
 
@@ -57,7 +58,7 @@ async function main(): Promise<void> {
   try {
     auth = resolveAuth(config.apiKey, config.authMode)
   } catch (err) {
-    console.error('tinyclaw:', err instanceof Error ? err.message : err)
+    console.error('smolerclaw:', err instanceof Error ? err.message : err)
     process.exit(1)
   }
 
@@ -68,7 +69,20 @@ async function main(): Promise<void> {
   if (providerType === 'openai' || providerType === 'ollama') {
     claude = new OpenAICompatProvider(providerType, providerModel, config.maxTokens)
   } else {
-    claude = new ClaudeProvider(auth.apiKey, config.model, config.maxTokens, config.toolApproval)
+    const claudeProvider = new ClaudeProvider(auth.apiKey, config.model, config.maxTokens, config.toolApproval)
+
+    // Auto-refresh credentials on 401 so the session survives token expiration
+    claudeProvider.setAuthRefresh(() => {
+      const freshAuth = refreshAuth(config.apiKey, config.authMode)
+      if (freshAuth && freshAuth.apiKey !== auth.apiKey) {
+        auth = freshAuth
+        claudeProvider.updateApiKey(freshAuth.apiKey)
+        return true
+      }
+      return false
+    })
+
+    claude = claudeProvider
   }
   const sessionName = cliArgs.session || 'default'
   const sessions = new SessionManager(config.dataDir)
@@ -122,7 +136,7 @@ async function runPrintMode(
   }
 
   if (!input.trim()) {
-    console.error('tinyclaw: no input provided')
+    console.error('smolerclaw: no input provided')
     process.exit(1)
   }
 
@@ -135,7 +149,7 @@ async function runPrintMode(
       process.stdout.write(event.text)
       fullText += event.text
     } else if (event.type === 'error') {
-      console.error(`\ntinyclaw error: ${event.error}`)
+      console.error(`\nsmolerclaw error: ${event.error}`)
     }
   }
 
@@ -181,6 +195,7 @@ async function runInteractive(
   initDecisions(config.dataDir)
   initPomodoro((msg) => tui.showSystem(`\n*** ${msg} ***\n`))
   initWorkflows(config.dataDir)
+  initInvestigations(config.dataDir)
   initMonitor((msg) => tui.showSystem(`\n*** ${msg} ***\n`))
   initTasks(config.dataDir, (task: Task) => {
     tui.showSystem(`\n*** LEMBRETE: ${task.title} ***\n`)
@@ -427,7 +442,7 @@ async function runInteractive(
         } else {
           // For non-anthropic providers, show info but keep using claude for now
           // Full provider switch requires restarting the provider instance
-          tui.showSystem(`Note: ${provider} provider selected. Restart tinyclaw for full provider switch.`)
+          tui.showSystem(`Note: ${provider} provider selected. Restart smolerclaw for full provider switch.`)
         }
         tracker.setModel(resolved)
         tui.updateModel(config.model)
@@ -458,7 +473,7 @@ async function runInteractive(
       case 'export':
       case 'exportar': {
         const datePart = new Date().toISOString().split('T')[0]
-        const exportPath = args[0] || `tinyclaw-${sessions.session.name}-${datePart}.md`
+        const exportPath = args[0] || `smolerclaw-${sessions.session.name}-${datePart}.md`
         try {
           const md = exportToMarkdown(sessions.session)
           writeFileSync(exportPath, md)
@@ -569,6 +584,10 @@ async function runInteractive(
             '  /memos /notas        Buscar memos (ex: /memos docker)',
             '  /tags /memotags      Listar tags',
             '  /rmmemo /rmnota      Remover memo',
+            '',
+            'Investigacao / Investigation:',
+            '  /investigar /investigate  Listar investigacoes',
+            '  /investigar <busca>       Buscar por palavra-chave',
             '',
             'Tarefas / Tasks:',
             '  /task /tarefa           Criar tarefa (ex: /tarefa 18h buscar pao)',
@@ -1057,6 +1076,22 @@ async function runInteractive(
         break
       }
 
+      // ── Investigation commands ─────────────────────────────
+
+      case 'investigar':
+      case 'investigate':
+      case 'investigacoes': {
+        const query = args.join(' ')
+        if (query) {
+          const { searchInvestigations, formatInvestigationList } = await import('./investigate')
+          tui.showSystem(formatInvestigationList(searchInvestigations(query)))
+        } else {
+          const { listInvestigations, formatInvestigationList } = await import('./investigate')
+          tui.showSystem(formatInvestigationList(listInvestigations()))
+        }
+        break
+      }
+
       // ── Email command ──────────────────────────────────────
 
       case 'email':
@@ -1351,7 +1386,7 @@ async function runInteractive(
   const authInfo = auth.source === 'subscription'
     ? `Authenticated via Claude ${auth.subscriptionType} subscription.`
     : 'Authenticated via API key.'
-  tui.showSystem(`tinyclaw v${getVersion()} — the micro AI assistant.\n${authInfo}\nType /ajuda for commands.`)
+  tui.showSystem(`smolerclaw v${getVersion()} — the micro AI assistant.\n${authInfo}\nType /ajuda for commands.`)
 
   // Morning briefing — first run of the day
   if (isFirstRunToday(config.dataDir)) {

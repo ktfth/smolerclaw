@@ -8,12 +8,12 @@ const HOME = homedir()
 
 // Platform-aware directories
 const CONFIG_DIR = IS_WINDOWS
-  ? join(process.env.APPDATA || join(HOME, 'AppData', 'Roaming'), 'tinyclaw')
-  : join(HOME, '.config', 'tinyclaw')
+  ? join(process.env.APPDATA || join(HOME, 'AppData', 'Roaming'), 'smolerclaw')
+  : join(HOME, '.config', 'smolerclaw')
 
 const DATA_DIR = IS_WINDOWS
-  ? join(process.env.LOCALAPPDATA || join(HOME, 'AppData', 'Local'), 'tinyclaw')
-  : join(HOME, '.local', 'share', 'tinyclaw')
+  ? join(process.env.LOCALAPPDATA || join(HOME, 'AppData', 'Local'), 'smolerclaw')
+  : join(HOME, '.local', 'share', 'smolerclaw')
 
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json')
 
@@ -74,9 +74,9 @@ export function getDataDir(): string {
   return DATA_DIR
 }
 
-/** One-time migration from old ~/.config/tinyclaw paths on Windows */
+/** One-time migration from old ~/.config/smolerclaw paths on Windows */
 function migrateOldPaths(): void {
-  const oldConfig = join(HOME, '.config', 'tinyclaw', 'config.json')
+  const oldConfig = join(HOME, '.config', 'smolerclaw', 'config.json')
   if (existsSync(oldConfig) && !existsSync(CONFIG_FILE)) {
     try {
       const data = readFileSync(oldConfig, 'utf-8')

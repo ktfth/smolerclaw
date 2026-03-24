@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 
 describe('people', () => {
   beforeEach(() => {
-    const tmpDir = mkdtempSync(join(tmpdir(), 'tinyclaw-people-'))
+    const tmpDir = mkdtempSync(join(tmpdir(), 'smolerclaw-people-'))
     initPeople(tmpDir)
   })
 

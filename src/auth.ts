@@ -27,7 +27,7 @@ export interface AuthResult {
  * Resolve authentication in priority order:
  *   1. ANTHROPIC_API_KEY env var
  *   2. Claude Code subscription (OAuth token from ~/.claude/.credentials.json)
- *   3. apiKey from tinyclaw config file
+ *   3. apiKey from smolerclaw config file
  *
  * authMode overrides: "api-key" skips subscription, "subscription" skips api-key.
  */
@@ -40,7 +40,7 @@ export function resolveAuth(
     if (sub) return sub
     throw new Error(
       'Claude Code credentials not found or expired.\n' +
-      'Run `claude` to refresh, then restart tinyclaw.',
+      'Run `claude` to refresh, then restart smolerclaw.',
     )
   }
 
@@ -74,7 +74,7 @@ export function resolveAuth(
     'Options:\n' +
     '  1. Install Claude Code with a Pro/Max subscription (auto-detected)\n' +
     '  2. Set ANTHROPIC_API_KEY env var\n' +
-    '  3. Add apiKey to ~/.config/tinyclaw/config.json',
+    '  3. Add apiKey to ~/.config/smolerclaw/config.json',
   )
 }
 
@@ -95,6 +95,22 @@ function trySubscription(): AuthResult | null {
       subscriptionType: oauth.subscriptionType,
       expiresAt: oauth.expiresAt,
     }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Re-read credentials from disk. Useful when the OAuth token expires
+ * mid-session — Claude Code auto-refreshes it, so a re-read often works.
+ * Returns null if no valid credentials are found.
+ */
+export function refreshAuth(
+  configApiKey: string,
+  authMode: 'auto' | 'api-key' | 'subscription' = 'auto',
+): AuthResult | null {
+  try {
+    return resolveAuth(configApiKey, authMode)
   } catch {
     return null
   }

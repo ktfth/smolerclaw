@@ -8,6 +8,8 @@ interface RetryOptions {
   baseDelayMs?: number
   signal?: AbortSignal
   onRetry?: (attempt: number, waitMs: number, reason: string) => void
+  /** Called on 401 to attempt credential refresh. Return true if refresh succeeded. */
+  onAuthExpired?: () => boolean
 }
 
 /**
@@ -31,6 +33,17 @@ export async function withRetry<T>(
 
       if (opts.signal?.aborted) throw err
       if (attempt >= maxRetries) throw err
+
+      // Handle auth expiration: try to refresh credentials once
+      if (isAuthError(err) && opts.onAuthExpired) {
+        const refreshed = opts.onAuthExpired()
+        if (refreshed) {
+          opts.onRetry?.(attempt + 1, 500, 'Auth refreshed, retrying...')
+          await sleep(500, opts.signal)
+          continue
+        }
+      }
+
       if (!isRetryable(err)) throw err
 
       const retryAfter = extractRetryAfter(err)
@@ -44,6 +57,12 @@ export async function withRetry<T>(
   }
 
   throw lastError
+}
+
+function isAuthError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const status = (err as { status?: number }).status
+  return status === 401
 }
 
 function isRetryable(err: unknown): boolean {

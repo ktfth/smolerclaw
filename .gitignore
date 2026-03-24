@@ -5,5 +5,5 @@ dist/
 .env.*
 *.log
 *.tmp
-.tinyclaw/
+.smolerclaw/
 .claude/*.local.md

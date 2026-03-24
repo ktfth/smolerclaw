@@ -12,7 +12,7 @@ export function exportToMarkdown(session: Session, opts: ExportOptions = {}): st
   const { includeToolCalls = true, includeTimestamps = true } = opts
   const lines: string[] = []
 
-  lines.push(`# tinyclaw session: ${session.name}`)
+  lines.push(`# smolerclaw session: ${session.name}`)
   lines.push(`Created: ${new Date(session.created).toLocaleString()}`)
   lines.push('')
   lines.push('---')

@@ -4,7 +4,7 @@ import { loadSkills, formatSkillList } from '../src/skills'
 describe('loadSkills', () => {
   test('returns empty array for non-existent dir', () => {
     const skills = loadSkills('/nonexistent/dir')
-    // May return local skills from CWD if .tinyclaw/skills exists
+    // May return local skills from CWD if .smolerclaw/skills exists
     // But won't crash
     expect(Array.isArray(skills)).toBe(true)
   })

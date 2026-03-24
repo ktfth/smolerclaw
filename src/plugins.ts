@@ -111,7 +111,7 @@ export async function executePlugin(
  * Format plugin list for display.
  */
 export function formatPluginList(plugins: Plugin[]): string {
-  if (plugins.length === 0) return 'No plugins loaded. Add .json files to ~/.config/tinyclaw/plugins/'
+  if (plugins.length === 0) return 'No plugins loaded. Add .json files to ~/.config/smolerclaw/plugins/'
   return 'Plugins:\n' + plugins.map((p) => `  ${p.name} — ${p.description}`).join('\n')
 }
 

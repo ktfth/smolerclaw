@@ -59,9 +59,13 @@ export function initTasks(dataDir: string, onNotify: (task: Task) => void): void
   if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true })
   load()
 
-  // Start background checker (every 30 seconds)
+  // Start background checker (every 30 seconds) for in-process notifications
   if (_checkTimer) clearInterval(_checkTimer)
   _checkTimer = setInterval(checkDueTasks, 30_000)
+
+  // Sync pending reminders with Windows Task Scheduler so they fire
+  // even if smolerclaw is not running
+  syncScheduledTasks().catch(() => {})
 }
 
 /**
@@ -88,6 +92,13 @@ export function addTask(title: string, dueAt?: Date): Task {
   }
   _tasks = [..._tasks, task]
   save()
+
+  // Schedule a Windows Task Scheduler job so the reminder fires
+  // even if smolerclaw is not running
+  if (dueAt && IS_WINDOWS) {
+    scheduleWindowsTask(task).catch(() => {})
+  }
+
   return task
 }
 
@@ -105,6 +116,12 @@ export function completeTask(idOrTitle: string): Task | null {
     t.id === task.id ? { ...t, done: true } : t,
   )
   save()
+
+  // Remove the scheduled Windows task
+  if (task.dueAt && IS_WINDOWS) {
+    removeWindowsTask(task.id).catch(() => {})
+  }
+
   return _tasks.find((t) => t.id === task.id) || null
 }
 
@@ -118,8 +135,15 @@ export function removeTask(idOrTitle: string): boolean {
   )
   if (idx === -1) return false
 
+  const task = _tasks[idx]
   _tasks = [..._tasks.slice(0, idx), ..._tasks.slice(idx + 1)]
   save()
+
+  // Remove the scheduled Windows task
+  if (task.dueAt && IS_WINDOWS) {
+    removeWindowsTask(task.id).catch(() => {})
+  }
+
   return true
 }
 
@@ -237,11 +261,11 @@ async function fireNotification(task: Task): Promise<void> {
   const cmd = [
     '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null',
     '[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null',
-    `$template = '<toast><visual><binding template="ToastText02"><text id="1">tinyclaw - Lembrete</text><text id="2">${title}</text></binding></visual><audio src="ms-winsoundevent:Notification.Default"/></toast>'`,
+    `$template = '<toast><visual><binding template="ToastText02"><text id="1">smolerclaw - Lembrete</text><text id="2">${title}</text></binding></visual><audio src="ms-winsoundevent:Notification.Default"/></toast>'`,
     '$xml = New-Object Windows.Data.Xml.Dom.XmlDocument',
     '$xml.LoadXml($template)',
     `$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)`,
-    `[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('tinyclaw').Show($toast)`,
+    `[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('smolerclaw').Show($toast)`,
   ].join('; ')
 
   try {
@@ -258,6 +282,103 @@ async function fireNotification(task: Task): Promise<void> {
     clearTimeout(timer)
   } catch {
     // Best effort — notification failure should not crash
+  }
+}
+
+// ─── Windows Task Scheduler Integration ─────────────────────
+
+const TASK_PREFIX = 'smolerclaw-reminder-'
+
+/**
+ * Create a Windows Scheduled Task that fires a toast notification at the due time.
+ * Uses schtasks.exe — works without admin rights for the current user.
+ */
+async function scheduleWindowsTask(task: Task): Promise<void> {
+  if (!task.dueAt) return
+
+  const due = new Date(task.dueAt)
+  if (isNaN(due.getTime()) || due.getTime() <= Date.now()) return
+
+  const taskName = `${TASK_PREFIX}${task.id}`
+
+  // Format date/time for schtasks: MM/DD/YYYY and HH:MM
+  const startDate = [
+    String(due.getMonth() + 1).padStart(2, '0'),
+    String(due.getDate()).padStart(2, '0'),
+    String(due.getFullYear()),
+  ].join('/')
+  const startTime = [
+    String(due.getHours()).padStart(2, '0'),
+    String(due.getMinutes()).padStart(2, '0'),
+  ].join(':')
+
+  // PowerShell command that shows a toast notification
+  const title = task.title.replace(/'/g, "''").replace(/"/g, '\\"')
+  const toastPs = [
+    '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null;',
+    '[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null;',
+    `$x = New-Object Windows.Data.Xml.Dom.XmlDocument;`,
+    `$x.LoadXml('<toast><visual><binding template=""ToastText02""><text id=""1"">smolerclaw</text><text id=""2"">${title}</text></binding></visual><audio src=""ms-winsoundevent:Notification.Reminder""/></toast>');`,
+    `[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('smolerclaw').Show([Windows.UI.Notifications.ToastNotification]::new($x))`,
+  ].join(' ')
+
+  try {
+    const proc = Bun.spawn([
+      'schtasks', '/Create',
+      '/TN', taskName,
+      '/SC', 'ONCE',
+      '/SD', startDate,
+      '/ST', startTime,
+      '/TR', `powershell -NoProfile -WindowStyle Hidden -Command "${toastPs}"`,
+      '/F',  // force overwrite if exists
+    ], { stdout: 'pipe', stderr: 'pipe' })
+    await proc.exited
+  } catch {
+    // Best effort — scheduler failure should not block task creation
+  }
+}
+
+/**
+ * Remove a scheduled Windows task by task ID.
+ */
+async function removeWindowsTask(taskId: string): Promise<void> {
+  const taskName = `${TASK_PREFIX}${taskId}`
+  try {
+    const proc = Bun.spawn([
+      'schtasks', '/Delete', '/TN', taskName, '/F',
+    ], { stdout: 'pipe', stderr: 'pipe' })
+    await proc.exited
+  } catch {
+    // Ignore — task may not exist
+  }
+}
+
+/**
+ * Sync existing tasks with Task Scheduler on startup.
+ * Ensures pending reminders are scheduled even after a restart.
+ */
+async function syncScheduledTasks(): Promise<void> {
+  if (!IS_WINDOWS) return
+
+  const now = Date.now()
+  for (const task of _tasks) {
+    if (task.done || task.notified || !task.dueAt) continue
+    const due = new Date(task.dueAt)
+    if (isNaN(due.getTime()) || due.getTime() <= now) continue
+
+    // Check if the scheduled task exists
+    try {
+      const proc = Bun.spawn([
+        'schtasks', '/Query', '/TN', `${TASK_PREFIX}${task.id}`,
+      ], { stdout: 'pipe', stderr: 'pipe' })
+      const code = await proc.exited
+      if (code !== 0) {
+        // Task doesn't exist in scheduler — recreate it
+        await scheduleWindowsTask(task)
+      }
+    } catch {
+      await scheduleWindowsTask(task)
+    }
   }
 }
 

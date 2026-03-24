@@ -145,7 +145,7 @@ async function fireToast(title: string, body: string): Promise<void> {
     '$xml = New-Object Windows.Data.Xml.Dom.XmlDocument',
     '$xml.LoadXml($template)',
     '$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)',
-    '[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("tinyclaw").Show($toast)',
+    '[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("smolerclaw").Show($toast)',
   ].join('; ')
 
   try {

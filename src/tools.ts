@@ -23,6 +23,12 @@ import { addTransaction, getMonthSummary, getRecentTransactions } from './financ
 import { logDecision, searchDecisions, listDecisions, formatDecisionList, formatDecisionDetail } from './decisions'
 import { runWorkflow, listWorkflows, formatWorkflowList } from './workflows'
 import {
+  openInvestigation, collectEvidence, addFinding, closeInvestigation,
+  getInvestigation, listInvestigations, searchInvestigations, generateReport,
+  formatInvestigationList, formatInvestigationDetail, formatEvidenceDetail,
+  type InvestigationType, type InvestigationStatus, type EvidenceSource,
+} from './investigate'
+import {
   addPerson, findPerson, listPeople, updatePerson, removePerson,
   logInteraction, getInteractions, delegateTask, updateDelegation,
   getDelegations, getPendingFollowUps, markFollowUpDone,
@@ -531,6 +537,119 @@ export const TIER2_TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+// ─── Investigation Tools ─────────────────────────────────────
+
+export const INVESTIGATE_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'open_investigation',
+    description:
+      'Start a new investigation to systematically collect evidence. ' +
+      'Types: bug (malfunction), feature (material for building), test (test scenarios), audit (code review), incident (runtime issue). ' +
+      'Use when the user says "investiga", "analisa", "diagnostica", "verifica", or needs structured evidence collection.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        title: { type: 'string', description: 'Investigation title (short, descriptive)' },
+        type: { type: 'string', enum: ['bug', 'feature', 'test', 'audit', 'incident'], description: 'Investigation type' },
+        hypothesis: { type: 'string', description: 'Initial theory or goal to investigate. Optional.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization. Optional.' },
+      },
+      required: ['title', 'type'],
+    },
+  },
+  {
+    name: 'collect_evidence',
+    description:
+      'Add a piece of evidence to an active investigation. ' +
+      'Sources: file (file content), command (command output), log (log entries), diff (code changes), url (web content), observation (manual note). ' +
+      'Use after reading files, running commands, or observing behavior to build the investigation record.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        investigation: { type: 'string', description: 'Investigation ID or title (partial match)' },
+        source: { type: 'string', enum: ['file', 'command', 'log', 'diff', 'url', 'observation'], description: 'Evidence source type' },
+        label: { type: 'string', description: 'Short description of this evidence' },
+        content: { type: 'string', description: 'The evidence data (file content, command output, observation text, etc.)' },
+        path: { type: 'string', description: 'File path or URL associated with this evidence. Optional.' },
+      },
+      required: ['investigation', 'source', 'label', 'content'],
+    },
+  },
+  {
+    name: 'add_finding',
+    description:
+      'Record a conclusion or insight derived from collected evidence. ' +
+      'Severity: critical, high, medium, low, info. ' +
+      'Link to evidence IDs that support this finding.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        investigation: { type: 'string', description: 'Investigation ID or title' },
+        severity: { type: 'string', enum: ['critical', 'high', 'medium', 'low', 'info'], description: 'Finding severity' },
+        title: { type: 'string', description: 'Finding title (short)' },
+        description: { type: 'string', description: 'Detailed description of the finding' },
+        evidence_ids: { type: 'array', items: { type: 'string' }, description: 'IDs of evidence supporting this finding. Optional.' },
+      },
+      required: ['investigation', 'severity', 'title', 'description'],
+    },
+  },
+  {
+    name: 'close_investigation',
+    description:
+      'Close an investigation with a summary and recommendations. ' +
+      'Use after all evidence is collected and findings are recorded.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        investigation: { type: 'string', description: 'Investigation ID or title' },
+        summary: { type: 'string', description: 'Final summary of the investigation' },
+        recommendations: { type: 'string', description: 'Action items and next steps. Optional.' },
+      },
+      required: ['investigation', 'summary'],
+    },
+  },
+  {
+    name: 'investigation_status',
+    description:
+      'View the current state of an investigation: evidence collected, findings, and progress. ' +
+      'Use to check progress or review before closing.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        investigation: { type: 'string', description: 'Investigation ID or title' },
+      },
+      required: ['investigation'],
+    },
+  },
+  {
+    name: 'investigation_report',
+    description:
+      'Generate a full structured report (markdown) for an investigation. ' +
+      'Includes all evidence, findings, summary, and recommendations.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        investigation: { type: 'string', description: 'Investigation ID or title' },
+      },
+      required: ['investigation'],
+    },
+  },
+  {
+    name: 'list_investigations',
+    description:
+      'List all investigations, optionally filtered by status or type.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        status: { type: 'string', enum: ['aberta', 'em_andamento', 'concluida', 'arquivada'], description: 'Filter by status. Optional.' },
+        type: { type: 'string', enum: ['bug', 'feature', 'test', 'audit', 'incident'], description: 'Filter by type. Optional.' },
+        query: { type: 'string', description: 'Search by keyword. Optional.' },
+      },
+      required: [],
+    },
+  },
+]
+
 /** get_news tool definition (cross-platform, extracted for reference by name) */
 const NEWS_TOOL = WINDOWS_TOOLS.find((t) => t.name === 'get_news')!
 
@@ -554,6 +673,7 @@ export function registerWindowsTools(): void {
   TOOLS.push(...MEMO_TOOLS)
   TOOLS.push(EMAIL_TOOL)
   TOOLS.push(...TIER2_TOOLS)
+  TOOLS.push(...INVESTIGATE_TOOLS)
 }
 
 // ─── Tool Execution ──────────────────────────────────────────
@@ -722,6 +842,69 @@ export async function executeTool(
         if (!query?.trim()) return formatDecisionList(listDecisions())
         return formatDecisionList(searchDecisions(query))
       }
+      // Investigation tools
+      case 'open_investigation': {
+        const title = input.title as string
+        if (!title?.trim()) return 'Error: title is required.'
+        const type = input.type as InvestigationType
+        const validTypes: InvestigationType[] = ['bug', 'feature', 'test', 'audit', 'incident']
+        if (!validTypes.includes(type)) return 'Error: type must be bug, feature, test, audit, or incident.'
+        const inv = openInvestigation(title, type, input.hypothesis as string, (input.tags as string[]) || [])
+        return `Investigacao aberta: "${inv.title}" (${inv.type}) {${inv.id}}`
+      }
+      case 'collect_evidence': {
+        const ref = input.investigation as string
+        if (!ref?.trim()) return 'Error: investigation is required.'
+        const source = input.source as EvidenceSource
+        const label = input.label as string
+        const content = input.content as string
+        if (!label?.trim() || !content?.trim()) return 'Error: label and content are required.'
+        const ev = collectEvidence(ref, source, label, content, input.path as string)
+        if (!ev) return `Investigacao nao encontrada: "${ref}"`
+        return `Evidencia coletada: [${ev.id}] ${ev.source}: ${ev.label}`
+      }
+      case 'add_finding': {
+        const ref = input.investigation as string
+        if (!ref?.trim()) return 'Error: investigation is required.'
+        const severity = input.severity as 'critical' | 'high' | 'medium' | 'low' | 'info'
+        const title = input.title as string
+        const description = input.description as string
+        if (!title?.trim() || !description?.trim()) return 'Error: title and description are required.'
+        const evidenceIds = (input.evidence_ids as string[]) || []
+        const finding = addFinding(ref, severity, title, description, evidenceIds)
+        if (!finding) return `Investigacao nao encontrada: "${ref}"`
+        return `Conclusao registrada: [${finding.severity.toUpperCase()}] ${finding.title} {${finding.id}}`
+      }
+      case 'close_investigation': {
+        const ref = input.investigation as string
+        if (!ref?.trim()) return 'Error: investigation is required.'
+        const summary = input.summary as string
+        if (!summary?.trim()) return 'Error: summary is required.'
+        const inv = closeInvestigation(ref, summary, input.recommendations as string)
+        if (!inv) return `Investigacao nao encontrada: "${ref}"`
+        return `Investigacao concluida: "${inv.title}" — ${inv.evidence.length} evidencias, ${inv.findings.length} conclusoes`
+      }
+      case 'investigation_status': {
+        const ref = input.investigation as string
+        if (!ref?.trim()) return 'Error: investigation is required.'
+        const inv = getInvestigation(ref)
+        if (!inv) return `Investigacao nao encontrada: "${ref}"`
+        return formatInvestigationDetail(inv)
+      }
+      case 'investigation_report': {
+        const ref = input.investigation as string
+        if (!ref?.trim()) return 'Error: investigation is required.'
+        const report = generateReport(ref)
+        if (!report) return `Investigacao nao encontrada: "${ref}"`
+        return report
+      }
+      case 'list_investigations': {
+        const query = input.query as string | undefined
+        if (query?.trim()) return formatInvestigationList(searchInvestigations(query))
+        const status = input.status as InvestigationStatus | undefined
+        const type = input.type as InvestigationType | undefined
+        return formatInvestigationList(listInvestigations(status, type))
+      }
       // Email tool
       case 'draft_email': {
         const to = input.to as string
@@ -756,7 +939,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
  * Prevents corruption from crash/power loss mid-write.
  */
 function atomicWrite(filePath: string, content: string): void {
-  const tmp = join(dirname(filePath), `.tinyclaw-${randomUUID().slice(0, 8)}.tmp`)
+  const tmp = join(dirname(filePath), `.smolerclaw-${randomUUID().slice(0, 8)}.tmp`)
   writeFileSync(tmp, content)
   renameSync(tmp, filePath)
 }
@@ -1072,7 +1255,7 @@ async function toolFetchUrl(input: Record<string, unknown>): Promise<string> {
       method,
       redirect: 'manual', // prevent redirect-based SSRF
       headers: {
-        'User-Agent': 'tinyclaw/1.0',
+        'User-Agent': 'smolerclaw/1.0',
         'Accept': 'text/html, application/json, text/plain, */*',
         ...headers,
       },

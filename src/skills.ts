@@ -34,12 +34,12 @@ function loadFromDir(dir: string, source: 'global' | 'local'): Skill[] {
 }
 
 /**
- * Load skills from global dir + project-local .tinyclaw/skills/.
+ * Load skills from global dir + project-local .smolerclaw/skills/.
  * Local skills override global skills with the same name.
  */
 export function loadSkills(globalDir: string): Skill[] {
   const globalSkills = loadFromDir(globalDir, 'global')
-  const localDir = join(process.cwd(), '.tinyclaw', 'skills')
+  const localDir = join(process.cwd(), '.smolerclaw', 'skills')
   const localSkills = loadFromDir(localDir, 'local')
 
   // Merge: local overrides global by name

@@ -35,6 +35,7 @@ export class TUI {
     '/task', '/tasks', '/done', '/rmtask',
     '/people', '/team', '/family', '/person', '/addperson',
     '/delegate', '/delegations', '/followups', '/dashboard', '/contacts',
+    '/investigar', '/investigate', '/investigacoes',
     '/monitor', '/vigiar',
     '/workflow', '/fluxo',
     '/pomodoro', '/foco',
@@ -341,7 +342,7 @@ export class TUI {
   private renderHeader(): void {
     w(A.to(1, 1))
     w(A.inv)
-    const left = ' tinyclaw'
+    const left = ' smolerclaw'
     const parts = [this.model, this.sessionName]
     if (this.sessionCost) parts.push(this.sessionCost)
     if (this.authInfo) parts.push(this.authInfo)
@@ -398,12 +399,13 @@ export class TUI {
       w(`  ${C.ai}${this.getSpinnerChar()}${A.reset} ${A.dim}streaming... ${elapsed}s${A.reset}`)
       w(A.hide)
     } else {
-      const display = this.inputBuf.length > this.width - 3
+      const display = visibleLength(this.inputBuf) > this.width - 3
         ? this.inputBuf.slice(this.inputBuf.length - this.width + 3)
         : this.inputBuf
       w(`${C.prompt}❯${A.reset} ${display}`)
       // Unicode-aware cursor: compute display width of chars before cursor
-      const cursorCol = displayWidth(this.inputBuf, this.inputPos) + 3
+      const beforeCursor = this.inputBuf.slice(0, this.inputPos)
+      const cursorCol = visibleLength(beforeCursor) + 3
       w(A.to(inputRow, Math.min(cursorCol, this.width)))
       w(A.show)
     }
@@ -412,7 +414,7 @@ export class TUI {
   // ── Input Handling ──────────────────────────────────────
 
   private onKey(data: Buffer): void {
-    const key = data.toString()
+    const key = data.toString('utf-8')
 
     // Ctrl+C
     if (key === '\x03') {
@@ -463,15 +465,18 @@ export class TUI {
       return
     }
 
-    // Paste detection: multi-char input with newlines → insert as single line
-    if (key.length > 1 && !key.startsWith('\x1b') && key.includes('\n')) {
+    // Paste detection: multi-char input that isn't an escape sequence
+    // Covers both newline-containing pastes and plain text pastes
+    if (key.length > 1 && !key.startsWith('\x1b') && !isSingleUnicodeChar(key)) {
       const cleaned = key.replace(/\r?\n/g, ' ').trim()
-      this.inputBuf =
-        this.inputBuf.slice(0, this.inputPos) +
-        cleaned +
-        this.inputBuf.slice(this.inputPos)
-      this.inputPos += cleaned.length
-      this.renderInput()
+      if (cleaned.length > 0) {
+        this.inputBuf =
+          this.inputBuf.slice(0, this.inputPos) +
+          cleaned +
+          this.inputBuf.slice(this.inputPos)
+        this.inputPos += cleaned.length
+        this.renderInput()
+      }
       return
     }
 
@@ -499,10 +504,11 @@ export class TUI {
     // Backspace
     if (key === '\x7f' || key === '\b') {
       if (this.inputPos > 0) {
+        const charLen = prevCharLength(this.inputBuf, this.inputPos)
         this.inputBuf =
-          this.inputBuf.slice(0, this.inputPos - 1) +
+          this.inputBuf.slice(0, this.inputPos - charLen) +
           this.inputBuf.slice(this.inputPos)
-        this.inputPos--
+        this.inputPos -= charLen
         this.renderInput()
       }
       return
@@ -514,13 +520,13 @@ export class TUI {
       switch (code) {
         case 'D': // Left
           if (this.inputPos > 0) {
-            this.inputPos--
+            this.inputPos -= prevCharLength(this.inputBuf, this.inputPos)
             this.renderInput()
           }
           break
         case 'C': // Right
           if (this.inputPos < this.inputBuf.length) {
-            this.inputPos++
+            this.inputPos += nextCharLength(this.inputBuf, this.inputPos)
             this.renderInput()
           }
           break
@@ -562,25 +568,27 @@ export class TUI {
           this.inputPos = this.inputBuf.length
           this.renderInput()
           break
-        case '3~': // Delete
+        case '3~': { // Delete
           if (this.inputPos < this.inputBuf.length) {
+            const charLen = nextCharLength(this.inputBuf, this.inputPos)
             this.inputBuf =
               this.inputBuf.slice(0, this.inputPos) +
-              this.inputBuf.slice(this.inputPos + 1)
+              this.inputBuf.slice(this.inputPos + charLen)
             this.renderInput()
           }
           break
+        }
       }
       return
     }
 
-    // Regular printable characters
-    if (key.length === 1 && key >= ' ') {
+    // Regular printable characters (including multi-byte Unicode like ç, ã, é)
+    if (isPrintable(key)) {
       this.inputBuf =
         this.inputBuf.slice(0, this.inputPos) +
         key +
         this.inputBuf.slice(this.inputPos)
-      this.inputPos++
+      this.inputPos += key.length
       this.renderInput()
     }
   }
@@ -643,4 +651,43 @@ export class TUI {
       this.lines.push({ text: line })
     }
   }
+}
+
+// ─── Unicode helpers for input handling ───────────────────
+
+/** Check if a string is a single Unicode codepoint (may be 1 or 2 JS chars for surrogates) */
+function isSingleUnicodeChar(s: string): boolean {
+  const chars = [...s]
+  return chars.length === 1
+}
+
+/** Check if a key input is a printable character (single codepoint, not control) */
+function isPrintable(key: string): boolean {
+  if (!isSingleUnicodeChar(key)) return false
+  const code = key.codePointAt(0) || 0
+  return code >= 0x20 && code !== 0x7f
+}
+
+/** Get the JS string length of the previous codepoint before position */
+function prevCharLength(s: string, pos: number): number {
+  if (pos <= 0) return 0
+  // Check for surrogate pair (emoji, etc): low surrogate at pos-1 + high surrogate at pos-2
+  if (pos >= 2) {
+    const low = s.charCodeAt(pos - 1)
+    const high = s.charCodeAt(pos - 2)
+    if (low >= 0xdc00 && low <= 0xdfff && high >= 0xd800 && high <= 0xdbff) {
+      return 2
+    }
+  }
+  return 1
+}
+
+/** Get the JS string length of the codepoint at position */
+function nextCharLength(s: string, pos: number): number {
+  if (pos >= s.length) return 0
+  const high = s.charCodeAt(pos)
+  if (high >= 0xd800 && high <= 0xdbff && pos + 1 < s.length) {
+    return 2
+  }
+  return 1
 }

@@ -49,13 +49,11 @@ function load(): void {
 const DEFAULT_WORKFLOWS: Workflow[] = [
   {
     name: 'iniciar-dia',
-    description: 'Abrir apps do dia-a-dia: Outlook, Teams, e navegador',
+    description: 'Abrir terminal e Postman',
     steps: [
-      { action: 'open_app', target: 'outlook' },
+      { action: 'open_app', target: 'terminal' },
       { action: 'wait', target: '2' },
-      { action: 'open_app', target: 'teams' },
-      { action: 'wait', target: '2' },
-      { action: 'open_app', target: 'edge' },
+      { action: 'open_app', target: 'postman' },
     ],
   },
   {

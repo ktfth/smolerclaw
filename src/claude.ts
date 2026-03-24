@@ -12,6 +12,7 @@ export class ClaudeProvider {
   private approvalMode: ToolApprovalMode
   private approvalCallback: ApprovalCallback | null = null
   private autoApproveAll = false
+  private onAuthExpired: (() => boolean) | null = null
 
   constructor(
     apiKey: string,
@@ -21,6 +22,16 @@ export class ClaudeProvider {
   ) {
     this.client = new Anthropic({ apiKey })
     this.approvalMode = approvalMode
+  }
+
+  /** Replace the API key and recreate the client (used after auth refresh) */
+  updateApiKey(newKey: string): void {
+    this.client = new Anthropic({ apiKey: newKey })
+  }
+
+  /** Register a callback that fires on 401 to attempt credential refresh */
+  setAuthRefresh(cb: () => boolean): void {
+    this.onAuthExpired = cb
   }
 
   setModel(model: string): void {
@@ -114,6 +125,9 @@ export class ClaudeProvider {
               ...(tools?.length ? { tools } : {}),
             })
           },
+          {
+            onAuthExpired: this.onAuthExpired ?? undefined,
+          },
         )
       } catch (err) {
         yield { type: 'error', error: humanizeError(err) }
@@ -145,7 +159,7 @@ export class ClaudeProvider {
       }
 
       const toolBlocks = final.content.filter(
-        (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
+        (b: Anthropic.ContentBlock): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
       )
 
       convo.push({ role: 'assistant', content: final.content })

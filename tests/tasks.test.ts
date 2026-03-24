@@ -8,7 +8,7 @@ describe('tasks', () => {
   let tmpDir: string
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'tinyclaw-test-'))
+    tmpDir = mkdtempSync(join(tmpdir(), 'smolerclaw-test-'))
     initTasks(tmpDir, () => {}) // no-op notification
   })
 

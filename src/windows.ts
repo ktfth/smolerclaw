@@ -61,13 +61,13 @@ async function runPowerShell(cmd: string): Promise<{ stdout: string; stderr: str
 
 /** Known Windows applications with their executable paths/commands */
 const KNOWN_APPS: Record<string, string> = {
-  // Microsoft Office
+  // Microsoft Office (protocol URIs for MSIX/Store apps)
   excel: 'excel',
   word: 'winword',
   powerpoint: 'powerpnt',
-  outlook: 'outlook',
+  outlook: 'ms-outlook:',
   onenote: 'onenote',
-  teams: 'msteams',
+  teams: 'msteams:',
 
   // Browsers
   edge: 'msedge',
@@ -87,6 +87,7 @@ const KNOWN_APPS: Record<string, string> = {
   // Dev tools
   vscode: 'code',
   cursor: 'cursor',
+  postman: 'Postman',
 }
 
 /**

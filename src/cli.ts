@@ -100,10 +100,10 @@ export function getVersion(): string {
 
 export function printHelp(): void {
   const version = getVersion()
-  console.log(`tinyclaw v${version} — the micro AI assistant
+  console.log(`smolerclaw v${version} — the micro AI assistant
 
 Usage:
-  tinyclaw [options] [prompt]
+  smolerclaw [options] [prompt]
 
 Options:
   -h, --help           Show this help
@@ -115,11 +115,11 @@ Options:
   -p, --print          Print response and exit (no TUI)
 
 Examples:
-  tinyclaw                        Interactive TUI mode
-  tinyclaw "explain this error"   Launch TUI with initial prompt
-  tinyclaw -p "what is 2+2"      Print answer and exit
-  echo "review" | tinyclaw -p     Pipe input, print response
-  tinyclaw -m claude-sonnet-4-20250514 -s work
+  smolerclaw                        Interactive TUI mode
+  smolerclaw "explain this error"   Launch TUI with initial prompt
+  smolerclaw -p "what is 2+2"      Print answer and exit
+  echo "review" | smolerclaw -p     Pipe input, print response
+  smolerclaw -m claude-sonnet-4-20250514 -s work
 
 Commands (inside TUI):
   /help     Show commands      /clear    Clear conversation
@@ -132,6 +132,6 @@ Commands (inside TUI):
 }
 
 function die(msg: string): never {
-  console.error(`tinyclaw: ${msg}`)
+  console.error(`smolerclaw: ${msg}`)
   process.exit(2)
 }
