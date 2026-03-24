@@ -170,8 +170,9 @@ export function getInteractions(personIdOrName: string, limit = 10): Interaction
   const person = findPerson(personIdOrName)
   if (!person) return []
 
-  return _data.interactions
+  return [..._data.interactions]
     .filter((i) => i.personId === person.id)
+    .reverse() // newest insertion last → first after reverse
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, limit)
 }

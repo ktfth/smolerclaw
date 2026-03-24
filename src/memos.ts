@@ -125,6 +125,7 @@ export function searchMemos(query: string): Memo[] {
  */
 export function listMemos(limit = 20): Memo[] {
   return [..._memos]
+    .reverse() // newest insertion last → first after reverse
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .slice(0, limit)
 }

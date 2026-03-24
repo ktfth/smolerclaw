@@ -94,8 +94,7 @@ const KNOWN_APPS: Record<string, string> = {
  * Open a Windows application by name. Non-destructive.
  */
 export async function openApp(name: string, args?: string): Promise<string> {
-  if (!IS_WINDOWS) return 'Error: this command is only available on Windows.'
-
+  // Validate inputs first (platform-independent, so security tests work on CI)
   const key = name.toLowerCase().replace(/\s+/g, '')
   const exe = KNOWN_APPS[key]
 
@@ -104,11 +103,12 @@ export async function openApp(name: string, args?: string): Promise<string> {
     return `Unknown app: "${name}". Available: ${available}`
   }
 
-  // Validate optional argument (file path to open in the app)
   if (args) {
     const err = validatePsInput(args, 'argument')
     if (err) return err
   }
+
+  if (!IS_WINDOWS) return 'Error: this command is only available on Windows.'
 
   const cmd = args
     ? `Start-Process '${exe}' -ArgumentList '${args}'`
@@ -129,15 +129,15 @@ export async function openApp(name: string, args?: string): Promise<string> {
  * Open a URL in the default browser.
  */
 export async function openUrl(url: string): Promise<string> {
-  if (!IS_WINDOWS) return 'Error: this command is only available on Windows.'
-
-  // Validate URL scheme
+  // Validate inputs first (platform-independent)
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     return 'Error: URL must start with http:// or https://'
   }
 
   const err = validatePsInput(url, 'URL')
   if (err) return err
+
+  if (!IS_WINDOWS) return 'Error: this command is only available on Windows.'
 
   try {
     const { exitCode, stderr } = await runPowerShell(`Start-Process '${url}'`)
@@ -154,10 +154,11 @@ export async function openUrl(url: string): Promise<string> {
  * Open a file with its default application.
  */
 export async function openFile(filePath: string): Promise<string> {
-  if (!IS_WINDOWS) return 'Error: this command is only available on Windows.'
-
+  // Validate inputs first (platform-independent)
   const err = validatePsInput(filePath, 'file path')
   if (err) return err
+
+  if (!IS_WINDOWS) return 'Error: this command is only available on Windows.'
 
   try {
     const { exitCode, stderr } = await runPowerShell(`Invoke-Item '${filePath}'`)
