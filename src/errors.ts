@@ -17,11 +17,11 @@ export function humanizeError(err: unknown): string {
         return `Bad request: ${extractDetail(msg)}`
 
       case 401:
-        return 'Authentication failed. Your API key or subscription token may be expired.\n' +
-          'Try: Set ANTHROPIC_API_KEY env var, or run `claude` to refresh subscription credentials.'
+        return 'Authentication failed. Your subscription token may be expired.\n' +
+          'Try: Run `claude` to refresh subscription credentials.'
 
       case 403:
-        return 'Access denied. Your API key may not have permission for this model.\n' +
+        return 'Access denied. Your subscription may not have permission for this model.\n' +
           'Try: /model haiku (uses a more accessible model).'
 
       case 404:
@@ -56,7 +56,7 @@ export function humanizeError(err: unknown): string {
 
   // Subscription-specific
   if (lower.includes('expired') || lower.includes('invalid_api_key')) {
-    return 'Your authentication has expired. Run `claude` to refresh, or set a new ANTHROPIC_API_KEY.'
+    return 'Your subscription token has expired. Run `claude` to refresh.'
   }
 
   // Default: return original with prefix

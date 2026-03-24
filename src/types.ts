@@ -28,8 +28,6 @@ export interface Session {
 }
 
 export interface TinyClawConfig {
-  apiKey: string
-  authMode: 'auto' | 'api-key' | 'subscription'
   model: string
   maxTokens: number
   maxHistory: number

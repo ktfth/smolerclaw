@@ -43,8 +43,8 @@ export function parseModelString(input: string): { provider: string; model: stri
 export const PROVIDER_INFO: Record<string, { name: string; envKey: string; description: string }> = {
   anthropic: {
     name: 'Anthropic',
-    envKey: 'ANTHROPIC_API_KEY',
-    description: 'Claude models (default)',
+    envKey: '',
+    description: 'Claude models (default, via subscription)',
   },
   openai: {
     name: 'OpenAI',

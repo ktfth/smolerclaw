@@ -56,7 +56,7 @@ async function main(): Promise<void> {
 
   let auth: AuthResult
   try {
-    auth = resolveAuth(config.apiKey, config.authMode)
+    auth = resolveAuth()
   } catch (err) {
     console.error('smolerclaw:', err instanceof Error ? err.message : err)
     process.exit(1)
@@ -69,14 +69,14 @@ async function main(): Promise<void> {
   if (providerType === 'openai' || providerType === 'ollama') {
     claude = new OpenAICompatProvider(providerType, providerModel, config.maxTokens)
   } else {
-    const claudeProvider = new ClaudeProvider(auth.apiKey, config.model, config.maxTokens, config.toolApproval)
+    const claudeProvider = new ClaudeProvider(auth.token, config.model, config.maxTokens, config.toolApproval)
 
     // Auto-refresh credentials on 401 so the session survives token expiration
     claudeProvider.setAuthRefresh(() => {
-      const freshAuth = refreshAuth(config.apiKey, config.authMode)
-      if (freshAuth && freshAuth.apiKey !== auth.apiKey) {
+      const freshAuth = refreshAuth()
+      if (freshAuth && freshAuth.token !== auth.token) {
         auth = freshAuth
-        claudeProvider.updateApiKey(freshAuth.apiKey)
+        claudeProvider.updateApiKey(freshAuth.token)
         return true
       }
       return false
@@ -458,11 +458,8 @@ async function runInteractive(
 
       case 'auth':
         tui.showSystem(
-          `Auth: ${auth.source}` +
-          (auth.subscriptionType ? ` (${auth.subscriptionType})` : '') +
-          (auth.expiresAt
-            ? `\nExpires: ${new Date(auth.expiresAt).toLocaleString()}`
-            : ''),
+          `Auth: subscription (${auth.subscriptionType})` +
+          `\nExpires: ${new Date(auth.expiresAt).toLocaleString()}`,
         )
         break
 
@@ -1383,9 +1380,7 @@ async function runInteractive(
     onExit: cleanup,
   })
 
-  const authInfo = auth.source === 'subscription'
-    ? `Authenticated via Claude ${auth.subscriptionType} subscription.`
-    : 'Authenticated via API key.'
+  const authInfo = `Authenticated via Claude ${auth.subscriptionType} subscription.`
   tui.showSystem(`smolerclaw v${getVersion()} — the micro AI assistant.\n${authInfo}\nType /ajuda for commands.`)
 
   // Morning briefing — first run of the day

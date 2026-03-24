@@ -17,68 +17,26 @@ interface ClaudeCredentials {
 }
 
 export interface AuthResult {
-  apiKey: string
-  source: 'api-key' | 'subscription'
-  subscriptionType?: string
-  expiresAt?: number
+  token: string
+  subscriptionType: string
+  expiresAt: number
 }
 
 /**
- * Resolve authentication in priority order:
- *   1. ANTHROPIC_API_KEY env var
- *   2. Claude Code subscription (OAuth token from ~/.claude/.credentials.json)
- *   3. apiKey from smolerclaw config file
- *
- * authMode overrides: "api-key" skips subscription, "subscription" skips api-key.
+ * Resolve authentication from Claude Code subscription.
+ * Reads the OAuth token from ~/.claude/.credentials.json.
  */
-export function resolveAuth(
-  configApiKey: string,
-  authMode: 'auto' | 'api-key' | 'subscription' = 'auto',
-): AuthResult {
-  if (authMode === 'subscription') {
-    const sub = trySubscription()
-    if (sub) return sub
-    throw new Error(
-      'Claude Code credentials not found or expired.\n' +
-      'Run `claude` to refresh, then restart smolerclaw.',
-    )
-  }
-
-  if (authMode === 'api-key') {
-    const key = process.env.ANTHROPIC_API_KEY || configApiKey
-    if (key) return { apiKey: key, source: 'api-key' }
-    throw new Error(
-      'No API key found.\n' +
-      'Set ANTHROPIC_API_KEY env var or add apiKey to config.',
-    )
-  }
-
-  // auto mode: try all sources in order
-
-  // 1. Explicit env var always wins
-  if (process.env.ANTHROPIC_API_KEY) {
-    return { apiKey: process.env.ANTHROPIC_API_KEY, source: 'api-key' }
-  }
-
-  // 2. Claude Code subscription
-  const sub = trySubscription()
-  if (sub) return sub
-
-  // 3. Config file API key
-  if (configApiKey) {
-    return { apiKey: configApiKey, source: 'api-key' }
-  }
+export function resolveAuth(): AuthResult {
+  const result = readSubscription()
+  if (result) return result
 
   throw new Error(
-    'No authentication found.\n' +
-    'Options:\n' +
-    '  1. Install Claude Code with a Pro/Max subscription (auto-detected)\n' +
-    '  2. Set ANTHROPIC_API_KEY env var\n' +
-    '  3. Add apiKey to ~/.config/smolerclaw/config.json',
+    'Claude Code subscription not found or expired.\n' +
+    'Install Claude Code with a Pro/Max subscription and run `claude` to authenticate.',
   )
 }
 
-function trySubscription(): AuthResult | null {
+function readSubscription(): AuthResult | null {
   if (!existsSync(CRED_PATH)) return null
 
   try {
@@ -90,8 +48,7 @@ function trySubscription(): AuthResult | null {
     if (Date.now() > oauth.expiresAt - 60_000) return null
 
     return {
-      apiKey: oauth.accessToken,
-      source: 'subscription',
+      token: oauth.accessToken,
       subscriptionType: oauth.subscriptionType,
       expiresAt: oauth.expiresAt,
     }
@@ -105,12 +62,9 @@ function trySubscription(): AuthResult | null {
  * mid-session — Claude Code auto-refreshes it, so a re-read often works.
  * Returns null if no valid credentials are found.
  */
-export function refreshAuth(
-  configApiKey: string,
-  authMode: 'auto' | 'api-key' | 'subscription' = 'auto',
-): AuthResult | null {
+export function refreshAuth(): AuthResult | null {
   try {
-    return resolveAuth(configApiKey, authMode)
+    return resolveAuth()
   } catch {
     return null
   }
@@ -118,8 +72,5 @@ export function refreshAuth(
 
 /** Human-readable label for the TUI header */
 export function authLabel(auth: AuthResult): string {
-  if (auth.source === 'subscription') {
-    return `sub:${auth.subscriptionType || 'pro'}`
-  }
-  return 'api-key'
+  return `sub:${auth.subscriptionType || 'pro'}`
 }

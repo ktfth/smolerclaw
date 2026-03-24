@@ -18,8 +18,6 @@ const DATA_DIR = IS_WINDOWS
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json')
 
 const DEFAULTS: TinyClawConfig = {
-  apiKey: '',
-  authMode: 'auto',
   model: 'claude-haiku-4-5-20251001',
   maxTokens: 4096,
   maxHistory: 50,
