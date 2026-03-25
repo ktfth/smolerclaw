@@ -1,6 +1,6 @@
 /**
  * News radar — fetches headlines from RSS feeds and web sources.
- * Categories: business, tech, finance, brazil, world.
+ * Categories: business, tech, finance, brazil, world, security.
  */
 
 // ─── RSS Feed Sources ───────────────────────────────────────
@@ -11,7 +11,7 @@ interface NewsSource {
   category: NewsCategory
 }
 
-export type NewsCategory = 'business' | 'tech' | 'finance' | 'brazil' | 'world'
+export type NewsCategory = 'business' | 'tech' | 'finance' | 'brazil' | 'world' | 'security'
 
 const FEEDS: readonly NewsSource[] = [
   // Business & Economy
@@ -31,6 +31,11 @@ const FEEDS: readonly NewsSource[] = [
   // World
   { name: 'BBC World', url: 'https://feeds.bbci.co.uk/news/world/rss.xml', category: 'world' },
   { name: 'Reuters', url: 'https://www.reutersagency.com/feed/', category: 'world' },
+
+  // Cybersecurity
+  { name: 'The Hacker News', url: 'https://feeds.feedburner.com/TheHackersNews', category: 'security' },
+  { name: 'BleepingComputer', url: 'https://www.bleepingcomputer.com/feed/', category: 'security' },
+  { name: 'Krebs on Security', url: 'https://krebsonsecurity.com/feed/', category: 'security' },
 ]
 
 // ─── Constants ──────────────────────────────────────────────
@@ -280,6 +285,7 @@ function formatNews(items: NewsItem[], errors: string[]): string {
     finance: 'Financas',
     brazil: 'Brasil',
     world: 'Mundo',
+    security: 'Ciberseguranca',
   }
 
   // Group by category (immutable approach)
@@ -290,7 +296,7 @@ function formatNews(items: NewsItem[], errors: string[]): string {
   }
 
   const sections: string[] = []
-  const categoryOrder: NewsCategory[] = ['finance', 'business', 'tech', 'brazil', 'world']
+  const categoryOrder: NewsCategory[] = ['finance', 'business', 'tech', 'security', 'brazil', 'world']
 
   for (const cat of categoryOrder) {
     const catItems = grouped.get(cat)
@@ -325,5 +331,5 @@ function formatNews(items: NewsItem[], errors: string[]): string {
  * Get list of available categories.
  */
 export function getNewsCategories(): string {
-  return 'Categorias: business, tech, finance, brazil, world\nUso: /news [categoria]'
+  return 'Categorias: business, tech, finance, brazil, world, security\nUso: /news [categoria]'
 }

@@ -265,7 +265,7 @@ export const WINDOWS_TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_news',
     description:
-      'Fetch current news headlines. Categories: business, tech, finance, brazil, world. ' +
+      'Fetch current news headlines. Categories: business, tech, finance, brazil, world, security. ' +
       'Returns headlines grouped by category with source attribution.',
     input_schema: {
       type: 'object' as const,
@@ -273,7 +273,7 @@ export const WINDOWS_TOOLS: Anthropic.Tool[] = [
         category: {
           type: 'string',
           description: 'News category to filter. Omit for all categories.',
-          enum: ['business', 'tech', 'finance', 'brazil', 'world'],
+          enum: ['business', 'tech', 'finance', 'brazil', 'world', 'security'],
         },
       },
       required: [],

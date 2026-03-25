@@ -841,7 +841,7 @@ async function runInteractive(
       case 'news':
       case 'noticias': {
         const category = args[0] as NewsCategory | undefined
-        const validCats: NewsCategory[] = ['business', 'tech', 'finance', 'brazil', 'world']
+        const validCats: NewsCategory[] = ['business', 'tech', 'finance', 'brazil', 'world', 'security']
         if (category && !validCats.includes(category)) {
           tui.showSystem(getNewsCategories())
           break
