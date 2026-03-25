@@ -1,15 +1,20 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Session, Message } from './types'
 
 export class SessionManager {
   private sessionsDir: string
+  private archiveDir: string
   private current: Session
 
   constructor(dataDir: string) {
     this.sessionsDir = join(dataDir, 'sessions')
+    this.archiveDir = join(dataDir, 'sessions', 'archive')
     if (!existsSync(this.sessionsDir)) {
       mkdirSync(this.sessionsDir, { recursive: true })
+    }
+    if (!existsSync(this.archiveDir)) {
+      mkdirSync(this.archiveDir, { recursive: true })
     }
     this.current = this.loadOrCreate('default')
   }
@@ -99,6 +104,83 @@ export class SessionManager {
     writeFileSync(path, JSON.stringify(forked, null, 2))
     this.current = forked
     return forked
+  }
+
+  // ─── Archive ──────────────────────────────────────────────
+
+  /**
+   * Archive a session — moves it from sessions/ to sessions/archive/.
+   * Cannot archive the currently active session.
+   */
+  archive(name: string): boolean {
+    if (name === this.current.name) return false
+    const src = join(this.sessionsDir, `${name}.json`)
+    if (!existsSync(src)) return false
+    const dest = join(this.archiveDir, `${name}.json`)
+    renameSync(src, dest)
+    return true
+  }
+
+  /**
+   * Archive ALL sessions except the current one.
+   * Returns the list of archived session names.
+   */
+  archiveAll(): string[] {
+    const archived: string[] = []
+    const sessions = this.list().filter((n) => n !== this.current.name)
+    for (const name of sessions) {
+      if (this.archive(name)) {
+        archived.push(name)
+      }
+    }
+    return archived
+  }
+
+  /**
+   * Restore an archived session back to the active sessions directory.
+   */
+  unarchive(name: string): boolean {
+    const src = join(this.archiveDir, `${name}.json`)
+    if (!existsSync(src)) return false
+    const dest = join(this.sessionsDir, `${name}.json`)
+    renameSync(src, dest)
+    return true
+  }
+
+  /**
+   * List all archived sessions.
+   */
+  listArchived(): string[] {
+    if (!existsSync(this.archiveDir)) return []
+    return readdirSync(this.archiveDir)
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => f.replace('.json', ''))
+  }
+
+  /**
+   * Get info about an archived session.
+   */
+  getArchivedInfo(name: string): { messageCount: number; updated: number } | null {
+    const path = join(this.archiveDir, `${name}.json`)
+    if (!existsSync(path)) return null
+    try {
+      const data: Session = JSON.parse(readFileSync(path, 'utf-8'))
+      return { messageCount: data.messages.length, updated: data.updated }
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Permanently delete an archived session.
+   */
+  deleteArchived(name: string): boolean {
+    const path = join(this.archiveDir, `${name}.json`)
+    if (existsSync(path)) {
+      unlinkSync(path)
+      return true
+    }
+    return false
   }
 
   private loadOrCreate(name: string): Session {

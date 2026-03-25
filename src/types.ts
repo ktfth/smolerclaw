@@ -27,6 +27,16 @@ export interface Session {
   updated: number
 }
 
+export interface Material {
+  id: string
+  title: string
+  content: string
+  category: string
+  tags: string[]
+  createdAt: string
+  updatedAt: string
+}
+
 export interface TinyClawConfig {
   model: string
   maxTokens: number

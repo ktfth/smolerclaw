@@ -36,6 +36,10 @@ import {
   generatePeopleDashboard,
   type PersonGroup, type InteractionType,
 } from './people'
+import {
+  saveMaterial, searchMaterials, listMaterials, deleteMaterial, updateMaterial,
+  getMaterial, formatMaterialList, formatMaterialDetail, formatMaterialCategories,
+} from './materials'
 
 // Global undo stack shared across tool calls
 export const undoStack = new UndoStack()
@@ -650,10 +654,136 @@ export const INVESTIGATE_TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+// ─── Material Tools (cross-platform) ──────────────────────
+
+export const MATERIAL_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'save_material',
+    description:
+      'Save reference material to the assistant\'s persistent knowledge base. ' +
+      'Materials are categorized documents, guides, procedures, or reference info that persists across sessions. ' +
+      'Use when the user says "salva esse material", "guarda essa referencia", "adiciona ao conhecimento", etc. ' +
+      'Categories: procedimento, referencia, guia, template, contato, projeto, tecnico, geral.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        title: { type: 'string', description: 'Title of the material' },
+        content: { type: 'string', description: 'Full content. Use #tags for categorization.' },
+        category: {
+          type: 'string',
+          description: 'Category (e.g. procedimento, referencia, guia, template, contato, projeto, tecnico, geral). Default: geral.',
+        },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional additional tags (without #).',
+        },
+      },
+      required: ['title', 'content'],
+    },
+  },
+  {
+    name: 'search_materials',
+    description:
+      'Search the assistant\'s material knowledge base by keyword, tag (#tag), or category (@category). ' +
+      'Use when answering questions that may be covered by saved materials, or when user asks about reference docs.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string', description: 'Search query. Use #tag for tag search, @category for category search, or plain text.' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'list_materials',
+    description: 'List all saved materials, optionally filtered by category.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        category: { type: 'string', description: 'Filter by category. Optional.' },
+        limit: { type: 'number', description: 'Max results. Default 30.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'update_material',
+    description: 'Update an existing material by ID. Can change title, content, category, or tags.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Material ID' },
+        title: { type: 'string', description: 'New title. Optional.' },
+        content: { type: 'string', description: 'New content. Optional.' },
+        category: { type: 'string', description: 'New category. Optional.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'New tags. Optional.' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'delete_material',
+    description: 'Delete a material by ID.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Material ID' },
+      },
+      required: ['id'],
+    },
+  },
+]
+
+// ─── Archive Tools (cross-platform) ───────────────────────
+
+export const ARCHIVE_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'archive_session',
+    description:
+      'Archive a conversation session. Archived sessions are preserved but removed from the active list. ' +
+      'Use "all" as name to archive all sessions except the current one.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string', description: 'Session name to archive, or "all" to archive all except current.' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'unarchive_session',
+    description: 'Restore an archived session back to the active sessions list.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string', description: 'Archived session name to restore.' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'list_archived_sessions',
+    description: 'List all archived conversation sessions with message count and last update.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+]
+
 /** get_news tool definition (cross-platform, extracted for reference by name) */
 const NEWS_TOOL = WINDOWS_TOOLS.find((t) => t.name === 'get_news')!
 
 let _windowsToolsRegistered = false
+
+// SessionManager reference for archive tools
+let _sessionManager: { archive: (n: string) => boolean; archiveAll: () => string[]; unarchive: (n: string) => boolean; listArchived: () => string[]; getArchivedInfo: (n: string) => { messageCount: number; updated: number } | null } | null = null
+
+export function registerSessionManager(sm: typeof _sessionManager): void {
+  _sessionManager = sm
+}
 
 /** Register Windows tools and task tools. Idempotent. */
 export function registerWindowsTools(): void {
@@ -674,6 +804,8 @@ export function registerWindowsTools(): void {
   TOOLS.push(EMAIL_TOOL)
   TOOLS.push(...TIER2_TOOLS)
   TOOLS.push(...INVESTIGATE_TOOLS)
+  TOOLS.push(...MATERIAL_TOOLS)
+  TOOLS.push(...ARCHIVE_TOOLS)
 }
 
 // ─── Tool Execution ──────────────────────────────────────────
@@ -917,6 +1049,82 @@ export async function executeTool(
         const preview = formatDraftPreview(draft)
         const result = await openEmailDraft(draft)
         return `${preview}\n\n${result}`
+      }
+      // Material tools
+      case 'save_material': {
+        const title = input.title as string
+        if (!title?.trim()) return 'Error: title is required.'
+        const content = input.content as string
+        if (!content?.trim()) return 'Error: content is required.'
+        const category = (input.category as string) || 'geral'
+        const tags = (input.tags as string[]) || []
+        const mat = saveMaterial(title, content, category, tags)
+        const tagStr = mat.tags.length > 0 ? ` [${mat.tags.map((t) => '#' + t).join(' ')}]` : ''
+        return `Material salvo: "${mat.title}" (${mat.category})${tagStr}  {${mat.id}}`
+      }
+      case 'search_materials': {
+        const query = input.query as string
+        if (!query?.trim()) return formatMaterialList(listMaterials())
+        const results = searchMaterials(query)
+        return formatMaterialList(results)
+      }
+      case 'list_materials': {
+        const category = input.category as string | undefined
+        const limit = (input.limit as number) || 30
+        const mats = listMaterials(limit, category)
+        return formatMaterialList(mats)
+      }
+      case 'update_material': {
+        const id = input.id as string
+        if (!id?.trim()) return 'Error: id is required.'
+        const updates: { title?: string; content?: string; category?: string; tags?: string[] } = {}
+        if (input.title) updates.title = input.title as string
+        if (input.content) updates.content = input.content as string
+        if (input.category) updates.category = input.category as string
+        if (input.tags) updates.tags = input.tags as string[]
+        const mat = updateMaterial(id, updates)
+        if (!mat) return `Material nao encontrado: "${id}"`
+        return `Material atualizado: "${mat.title}" (${mat.category}) {${mat.id}}`
+      }
+      case 'delete_material': {
+        const id = input.id as string
+        if (!id?.trim()) return 'Error: id is required.'
+        return deleteMaterial(id) ? 'Material removido.' : `Material nao encontrado: "${id}"`
+      }
+      // Archive tools
+      case 'archive_session': {
+        if (!_sessionManager) return 'Error: session manager not initialized.'
+        const name = input.name as string
+        if (!name?.trim()) return 'Error: name is required.'
+        if (name === 'all') {
+          const archived = _sessionManager.archiveAll()
+          return archived.length > 0
+            ? `Arquivadas ${archived.length} sessoes: ${archived.join(', ')}`
+            : 'Nenhuma sessao para arquivar (apenas a sessao atual esta ativa).'
+        }
+        return _sessionManager.archive(name)
+          ? `Sessao arquivada: "${name}"`
+          : `Falha ao arquivar "${name}" (nao encontrada ou e a sessao atual).`
+      }
+      case 'unarchive_session': {
+        if (!_sessionManager) return 'Error: session manager not initialized.'
+        const name = input.name as string
+        if (!name?.trim()) return 'Error: name is required.'
+        return _sessionManager.unarchive(name)
+          ? `Sessao restaurada: "${name}"`
+          : `Sessao arquivada nao encontrada: "${name}"`
+      }
+      case 'list_archived_sessions': {
+        if (!_sessionManager) return 'Error: session manager not initialized.'
+        const list = _sessionManager.listArchived()
+        if (list.length === 0) return 'Nenhuma sessao arquivada.'
+        const details = list.map((name) => {
+          const info = _sessionManager!.getArchivedInfo(name)
+          const age = info ? new Date(info.updated).toLocaleDateString('pt-BR') : ''
+          const msgs = info ? `${info.messageCount} msgs` : ''
+          return `  ${name.padEnd(20)} ${msgs.padEnd(10)} ${age}`
+        })
+        return `Sessoes arquivadas (${list.length}):\n${details.join('\n')}`
       }
       default: {
         // Check plugins

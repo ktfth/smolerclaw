@@ -14,7 +14,7 @@ import { OpenAICompatProvider } from './openai-provider'
 import { gitDiff, gitStatus, gitStageAll, gitCommit, isGitRepo } from './git'
 import { getPersona, formatPersonaList, type Persona } from './personas'
 import { copyToClipboard } from './clipboard'
-import { undoStack, registerPlugins, registerWindowsTools, TOOLS } from './tools'
+import { undoStack, registerPlugins, registerWindowsTools, registerSessionManager, TOOLS } from './tools'
 import { loadPlugins, pluginsToTools, formatPluginList, getPluginDir } from './plugins'
 import { formatApprovalPrompt, formatEditDiff } from './approval'
 import { extractImages } from './images'
@@ -24,6 +24,7 @@ import { generateBriefing } from './briefing'
 import { initTasks, stopTasks, addTask, completeTask, removeTask, listTasks, formatTaskList, parseTime, type Task } from './tasks'
 import { initPeople, addPerson, findPerson, listPeople, logInteraction, delegateTask, getDelegations, getPendingFollowUps, markFollowUpDone, formatPeopleList, formatPersonDetail, formatDelegationList, formatFollowUps, generatePeopleDashboard, type PersonGroup, type InteractionType } from './people'
 import { initMemos, saveMemo, searchMemos, listMemos, deleteMemo, formatMemoList, formatMemoDetail, formatMemoTags } from './memos'
+import { initMaterials, saveMaterial, searchMaterials, listMaterials, deleteMaterial, updateMaterial, getMaterial, formatMaterialList, formatMaterialDetail, formatMaterialCategories, buildMaterialsContext } from './materials'
 import { isFirstRunToday, markMorningDone, generateMorningBriefing } from './morning'
 import { openEmailDraft, formatDraftPreview } from './email'
 import { initPomodoro, startPomodoro, stopPomodoro, pomodoroStatus, stopPomodoroTimer } from './pomodoro'
@@ -186,11 +187,15 @@ async function runInteractive(
   const tracker = new TokenTracker(config.model)
   const tui = new TUI(config.model, sessions.session.name, authLabel(auth), config.dataDir)
   let currentPersona = 'default'
-  let activeSystemPrompt = systemPrompt
+  // Append materials context to system prompt so the AI knows about saved reference materials
+  const materialsCtx = buildMaterialsContext()
+  let activeSystemPrompt = materialsCtx ? `${systemPrompt}\n\n${materialsCtx}` : systemPrompt
 
-  // Initialize people, task, and memo systems
+  // Initialize people, task, memo, and material systems
   initPeople(config.dataDir)
   initMemos(config.dataDir)
+  initMaterials(config.dataDir)
+  registerSessionManager(sessions)
   initFinance(config.dataDir)
   initDecisions(config.dataDir)
   initPomodoro((msg) => tui.showSystem(`\n*** ${msg} ***\n`))
@@ -426,6 +431,64 @@ async function runInteractive(
         break
       }
 
+      case 'archive':
+      case 'arquivar': {
+        const name = args[0]
+        if (!name) {
+          tui.showError('Uso: /archive <nome> ou /archive all')
+          break
+        }
+        if (name === 'all' || name === 'todas') {
+          const archived = sessions.archiveAll()
+          if (archived.length > 0) {
+            tui.showSystem(`Arquivadas ${archived.length} sessoes: ${archived.join(', ')}`)
+          } else {
+            tui.showSystem('Nenhuma sessao para arquivar (apenas a sessao atual esta ativa).')
+          }
+        } else {
+          if (sessions.archive(name)) {
+            tui.showSystem(`Sessao arquivada: "${name}"`)
+          } else {
+            tui.showError(`Falha ao arquivar "${name}" (nao encontrada ou e a sessao atual).`)
+          }
+        }
+        break
+      }
+
+      case 'unarchive':
+      case 'desarquivar':
+      case 'restore':
+      case 'restaurar': {
+        const name = args[0]
+        if (!name) {
+          tui.showError('Uso: /unarchive <nome>')
+          break
+        }
+        if (sessions.unarchive(name)) {
+          tui.showSystem(`Sessao restaurada: "${name}"`)
+        } else {
+          tui.showError(`Sessao arquivada nao encontrada: "${name}"`)
+        }
+        break
+      }
+
+      case 'archived':
+      case 'arquivadas': {
+        const list = sessions.listArchived()
+        if (list.length === 0) {
+          tui.showSystem('Nenhuma sessao arquivada.')
+          break
+        }
+        const details = list.map((name) => {
+          const info = sessions.getArchivedInfo(name)
+          const age = info ? formatAge(info.updated) : ''
+          const msgs = info ? `${info.messageCount} msgs` : ''
+          return `  ${name.padEnd(20)} ${msgs.padEnd(10)} ${age}`
+        })
+        tui.showSystem(`Sessoes arquivadas (${list.length}):\n${details.join('\n')}`)
+        break
+      }
+
       case 'model':
       case 'modelo': {
         const m = args[0]
@@ -581,6 +644,18 @@ async function runInteractive(
             '  /memos /notas        Buscar memos (ex: /memos docker)',
             '  /tags /memotags      Listar tags',
             '  /rmmemo /rmnota      Remover memo',
+            '',
+            'Materiais / Materials:',
+            '  /material /mat       Salvar material (ex: /mat titulo | conteudo)',
+            '  /materials /materiais Listar/buscar materiais',
+            '  /matcats /categorias Listar categorias',
+            '  /rmmat /rmmaterial   Remover material',
+            '',
+            'Arquivo / Archive:',
+            '  /archive /arquivar   Arquivar sessao (ex: /archive minha-sessao)',
+            '  /archive all         Arquivar todas exceto a atual',
+            '  /archived /arquivadas Listar sessoes arquivadas',
+            '  /unarchive /restaurar Restaurar sessao arquivada',
             '',
             'Investigacao / Investigation:',
             '  /investigar /investigate  Listar investigacoes',
@@ -1174,6 +1249,78 @@ async function runInteractive(
           tui.showSystem('Memo removido.')
         } else {
           tui.showError(`Memo nao encontrado: ${id}`)
+        }
+        break
+      }
+
+      // ── Material commands ───────────────────────────────────
+
+      case 'material':
+      case 'mat': {
+        const text = args.join(' ')
+        if (!text) {
+          const mats = listMaterials(10)
+          tui.showSystem(formatMaterialList(mats))
+          break
+        }
+        // Check if it's a detail view (ID-like: 6 alphanumeric chars)
+        if (/^[a-z0-9]{6}$/.test(text)) {
+          const mat = getMaterial(text)
+          if (mat) {
+            tui.showSystem(formatMaterialDetail(mat))
+          } else {
+            tui.showError(`Material nao encontrado: ${text}`)
+          }
+          break
+        }
+        // Otherwise treat as a quick save: /material title | content
+        const pipeIdx = text.indexOf('|')
+        if (pipeIdx === -1) {
+          tui.showSystem('Uso: /material <titulo> | <conteudo>\nOu peca a IA: "salva esse material sobre..."')
+          break
+        }
+        const title = text.slice(0, pipeIdx).trim()
+        const content = text.slice(pipeIdx + 1).trim()
+        if (!title || !content) {
+          tui.showError('Titulo e conteudo sao obrigatorios.')
+          break
+        }
+        const mat = saveMaterial(title, content)
+        const tagStr = mat.tags.length > 0 ? ` [${mat.tags.map((t: string) => '#' + t).join(' ')}]` : ''
+        tui.showSystem(`Material salvo: "${mat.title}" (${mat.category})${tagStr}  {${mat.id}}`)
+        break
+      }
+
+      case 'materials':
+      case 'materiais': {
+        const query = args.join(' ')
+        if (query) {
+          const results = searchMaterials(query)
+          tui.showSystem(formatMaterialList(results))
+        } else {
+          const mats = listMaterials()
+          tui.showSystem(formatMaterialList(mats))
+        }
+        break
+      }
+
+      case 'matcats':
+      case 'categorias': {
+        tui.showSystem(formatMaterialCategories())
+        break
+      }
+
+      case 'rmmat':
+      case 'rmmaterial': {
+        const id = args[0]
+        if (!id) {
+          tui.showError('Uso: /rmmat <id>')
+          break
+        }
+        if (deleteMaterial(id)) {
+          tui.showSystem('Material removido.')
+        } else {
+          tui.showError(`Material nao encontrado: ${id}`)
         }
         break
       }
