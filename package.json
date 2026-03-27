@@ -9,8 +9,8 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun --watch src/index.ts",
-    "build": "bun build src/index.ts --outdir dist --target bun --minify --define BUILD_VERSION='\"1.0.0\"'",
-    "compile": "bun build src/index.ts --compile --outfile dist/smolerclaw --define BUILD_VERSION='\"0.1.0\"'",
+    "build": "node scripts/build.mjs",
+    "compile": "node scripts/compile.mjs",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },
