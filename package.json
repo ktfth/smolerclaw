@@ -1,6 +1,6 @@
 {
   "name": "smolerclaw",
-  "version": "1.0.5",
+  "version": "1.1.0",
   "description": "Micro AI assistant for tiny machines. Inspired by OpenClaw.",
   "type": "module",
   "bin": {
