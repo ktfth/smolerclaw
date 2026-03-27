@@ -12,7 +12,8 @@
     "build": "node scripts/build.mjs",
     "compile": "node scripts/compile.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "prepublishOnly": "node scripts/build.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0"
