@@ -19,7 +19,7 @@ import { loadPlugins, pluginsToTools, formatPluginList, getPluginDir } from './p
 import { formatApprovalPrompt, formatEditDiff } from './approval'
 import { extractImages } from './images'
 import { openApp, openFile, openUrl, getRunningApps, getSystemInfo, getDateTimeInfo, getOutlookEvents, getKnownApps } from './windows'
-import { fetchNews, getNewsCategories, type NewsCategory } from './news'
+import { fetchNews, getNewsCategories, initNews, addNewsFeed, removeNewsFeed, disableNewsFeed, enableNewsFeed, listNewsFeeds, type NewsCategory } from './news'
 import { generateBriefing } from './briefing'
 import { initTasks, stopTasks, addTask, completeTask, removeTask, listTasks, formatTaskList, parseTime, type Task } from './tasks'
 import { initPeople, addPerson, findPerson, listPeople, logInteraction, delegateTask, getDelegations, getPendingFollowUps, markFollowUpDone, formatPeopleList, formatPersonDetail, formatDelegationList, formatFollowUps, generatePeopleDashboard, type PersonGroup, type InteractionType } from './people'
@@ -30,9 +30,18 @@ import { openEmailDraft, formatDraftPreview } from './email'
 import { initPomodoro, startPomodoro, stopPomodoro, pomodoroStatus, stopPomodoroTimer } from './pomodoro'
 import { initFinance, addTransaction, getMonthSummary, getRecentTransactions, removeTransaction } from './finance'
 import { initDecisions, logDecision, searchDecisions, listDecisions, formatDecisionList, formatDecisionDetail } from './decisions'
-import { initWorkflows, runWorkflow, listWorkflows, createWorkflow, deleteWorkflow, formatWorkflowList, type WorkflowStep } from './workflows'
+import { initWorkflows, runWorkflow, listWorkflows, getWorkflow, createWorkflow, deleteWorkflow, updateWorkflow, formatWorkflowList, formatWorkflowDetail, type WorkflowStep } from './workflows'
 import { initMonitor, startMonitor, stopMonitor, listMonitors, stopAllMonitors } from './monitor'
 import { initInvestigations } from './investigate'
+import { initMemory, buildIndex, queryMemory, getIndexStats, formatQueryResults } from './memory'
+import { initVault, getVaultStatus, formatVaultStatus, initShadowBackup, performBackup, syncBackupToRemote, startAutoBackup, stopAutoBackup } from './vault'
+import { executePowerShellScript, analyzeScreenContext, readClipboardContent } from './windows-agent'
+import {
+  initProjects, setActiveProject, getActiveProject, autoDetectProject,
+  listProjects, getProject, startSession, endSession, getOpenSession,
+  listOpportunities, generateWorkReport, getProjectBriefingSummary,
+  formatProjectList, formatProjectDetail, formatOpportunityList,
+} from './projects'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Message, ToolCall } from './types'
@@ -192,15 +201,20 @@ async function runInteractive(
   let activeSystemPrompt = materialsCtx ? `${systemPrompt}\n\n${materialsCtx}` : systemPrompt
 
   // Initialize people, task, memo, and material systems
+  // Vault must init first — other modules use atomicWriteFile
+  initVault(config.dataDir, getConfigPath().replace(/[/\\]config\.json$/, ''))
   initPeople(config.dataDir)
   initMemos(config.dataDir)
   initMaterials(config.dataDir)
+  initNews(config.dataDir)
   registerSessionManager(sessions)
   initFinance(config.dataDir)
   initDecisions(config.dataDir)
   initPomodoro((msg) => tui.showSystem(`\n*** ${msg} ***\n`))
   initWorkflows(config.dataDir)
   initInvestigations(config.dataDir)
+  initMemory(config.dataDir)
+  initProjects(config.dataDir)
   initMonitor((msg) => tui.showSystem(`\n*** ${msg} ***\n`))
   initTasks(config.dataDir, (task: Task) => {
     tui.showSystem(`\n*** LEMBRETE: ${task.title} ***\n`)
@@ -525,6 +539,31 @@ async function runInteractive(
           `\nExpires: ${new Date(auth.expiresAt).toLocaleString()}`,
         )
         break
+
+      case 'refresh':
+      case 'renovar': {
+        tui.showSystem('Renovando sessao Claude...')
+        try {
+          const proc = Bun.spawn(['claude', '-p', 'Fresh!'], { stdout: 'pipe', stderr: 'pipe' })
+          const timer = setTimeout(() => proc.kill(), 15_000)
+          await proc.exited
+          clearTimeout(timer)
+          // Re-read credentials
+          const freshAuth = refreshAuth()
+          if (freshAuth) {
+            auth = freshAuth
+            if ('updateApiKey' in claude) {
+              (claude as any).updateApiKey(freshAuth.token)
+            }
+            tui.showSystem(`Sessao renovada. Expira: ${new Date(freshAuth.expiresAt).toLocaleString()}`)
+          } else {
+            tui.showSystem('claude executado, mas credenciais nao atualizaram. Tente novamente.')
+          }
+        } catch (err) {
+          tui.showError(`Falha ao renovar: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        break
+      }
 
       case 'config':
         tui.showSystem(`Config: ${getConfigPath()}`)
@@ -916,12 +955,11 @@ async function runInteractive(
       case 'news':
       case 'noticias': {
         const category = args[0] as NewsCategory | undefined
-        const validCats: NewsCategory[] = ['business', 'tech', 'finance', 'brazil', 'world', 'security']
-        if (category && !validCats.includes(category)) {
-          tui.showSystem(getNewsCategories())
-          break
+        if (category) {
+          tui.showSystem(`Buscando noticias (${category})...`)
+        } else {
+          tui.showSystem('Buscando noticias...')
         }
-        tui.showSystem('Buscando noticias...')
         tui.disableInput()
         try {
           const news = await fetchNews(category ? [category] : undefined)
@@ -930,6 +968,76 @@ async function runInteractive(
           tui.showError(`Falha ao buscar noticias: ${err instanceof Error ? err.message : String(err)}`)
         }
         tui.enableInput()
+        break
+      }
+
+      case 'feeds':
+      case 'fontes': {
+        tui.showSystem(listNewsFeeds())
+        break
+      }
+
+      case 'addfeed':
+      case 'novafonte': {
+        // Usage: /addfeed <name> <url> <category>
+        if (args.length < 3) {
+          tui.showError('Uso: /addfeed <nome> <url> <categoria>\nEx: /addfeed "Ars Technica" https://feeds.arstechnica.com/arstechnica/index tech')
+          break
+        }
+        const feedName = args[0]
+        const feedUrl = args[1]
+        const feedCat = args[2]
+        const result = addNewsFeed(feedName, feedUrl, feedCat)
+        if (typeof result === 'string') {
+          tui.showError(result)
+        } else {
+          tui.showSystem(`Fonte adicionada: ${result.name} (${result.category}) — ${result.url}`)
+        }
+        break
+      }
+
+      case 'rmfeed':
+      case 'rmfonte': {
+        const ref = args.join(' ')
+        if (!ref) {
+          tui.showError('Uso: /rmfeed <nome ou url>')
+          break
+        }
+        if (removeNewsFeed(ref)) {
+          tui.showSystem(`Fonte removida: ${ref}`)
+        } else {
+          tui.showError(`Fonte custom nao encontrada: "${ref}". Para desativar uma built-in, use /disablefeed.`)
+        }
+        break
+      }
+
+      case 'disablefeed':
+      case 'desativarfonte': {
+        const ref = args.join(' ')
+        if (!ref) {
+          tui.showError('Uso: /disablefeed <nome ou url>')
+          break
+        }
+        if (disableNewsFeed(ref)) {
+          tui.showSystem(`Fonte desativada: ${ref}`)
+        } else {
+          tui.showError(`Fonte built-in nao encontrada ou ja desativada: "${ref}"`)
+        }
+        break
+      }
+
+      case 'enablefeed':
+      case 'ativarfonte': {
+        const ref = args.join(' ')
+        if (!ref) {
+          tui.showError('Uso: /enablefeed <nome ou url>')
+          break
+        }
+        if (enableNewsFeed(ref)) {
+          tui.showSystem(`Fonte reativada: ${ref}`)
+        } else {
+          tui.showError(`Fonte built-in nao encontrada ou nao esta desativada: "${ref}"`)
+        }
         break
       }
 
@@ -1037,13 +1145,11 @@ async function runInteractive(
       case 'fluxo': {
         const sub = args[0]?.toLowerCase()
         if (!sub || sub === 'list' || sub === 'listar') {
-          tui.showSystem(formatWorkflowList())
+          const tag = args[1]
+          tui.showSystem(formatWorkflowList(listWorkflows(tag)))
         } else if (sub === 'run' || sub === 'rodar') {
           const name = args[1]
-          if (!name) {
-            tui.showError('Uso: /workflow run <nome>')
-            break
-          }
+          if (!name) { tui.showError('Uso: /workflow run <nome>'); break }
           tui.disableInput()
           try {
             const result = await runWorkflow(name, (msg) => tui.showSystem(msg))
@@ -1052,14 +1158,29 @@ async function runInteractive(
             tui.showError(`Workflow: ${err instanceof Error ? err.message : String(err)}`)
           }
           tui.enableInput()
+        } else if (sub === 'info' || sub === 'detalhe') {
+          const name = args[1]
+          if (!name) { tui.showError('Uso: /workflow info <nome>'); break }
+          const wf = getWorkflow(name)
+          if (wf) { tui.showSystem(formatWorkflowDetail(wf)) }
+          else { tui.showError(`Workflow nao encontrado: ${name}`) }
         } else if (sub === 'delete' || sub === 'deletar') {
           const name = args[1]
           if (!name) { tui.showError('Uso: /workflow delete <nome>'); break }
-          if (deleteWorkflow(name)) {
-            tui.showSystem(`Workflow removido: ${name}`)
-          } else {
-            tui.showError(`Workflow nao encontrado: ${name}`)
-          }
+          if (deleteWorkflow(name)) { tui.showSystem(`Workflow removido: ${name}`) }
+          else { tui.showError(`Workflow nao encontrado: ${name}`) }
+        } else if (sub === 'enable' || sub === 'ativar') {
+          const name = args[1]
+          if (!name) { tui.showError('Uso: /workflow enable <nome>'); break }
+          const updated = updateWorkflow(name, { enabled: true })
+          if (updated) { tui.showSystem(`Workflow ativado: ${updated.name}`) }
+          else { tui.showError(`Workflow nao encontrado: ${name}`) }
+        } else if (sub === 'disable' || sub === 'desativar') {
+          const name = args[1]
+          if (!name) { tui.showError('Uso: /workflow disable <nome>'); break }
+          const updated = updateWorkflow(name, { enabled: false })
+          if (updated) { tui.showSystem(`Workflow desativado: ${updated.name}`) }
+          else { tui.showError(`Workflow nao encontrado: ${name}`) }
         } else {
           // Treat as "run <name>"
           tui.disableInput()
@@ -1325,6 +1446,221 @@ async function runInteractive(
         break
       }
 
+      // ── Memory/RAG commands ────────────────────────────────
+
+      case 'indexar':
+      case 'index':
+      case 'reindex': {
+        tui.showSystem('Indexando memoria local...')
+        const stats = buildIndex()
+        tui.showSystem(
+          `Indexacao concluida: ${stats.indexed} fonte(s) indexada(s), ${stats.skipped} sem alteracao. Total: ${stats.total} chunks.`,
+        )
+        break
+      }
+
+      case 'memoria':
+      case 'memory': {
+        const query = args.join(' ')
+        if (query) {
+          const results = queryMemory(query)
+          tui.showSystem(formatQueryResults(results))
+        } else {
+          const stats = getIndexStats()
+          const builtStr = stats.builtAt
+            ? new Date(stats.builtAt).toLocaleString('pt-BR')
+            : 'nunca'
+          tui.showSystem(
+            `Memory RAG Index:\n  Chunks: ${stats.chunks}\n  Fontes: ${stats.sources}\n  Ultima indexacao: ${builtStr}`,
+          )
+        }
+        break
+      }
+
+      // ── Vault commands ────────────────────────────────────
+
+      case 'vault': {
+        const sub = args[0]?.toLowerCase()
+        if (!sub || sub === 'status') {
+          tui.showSystem(formatVaultStatus(getVaultStatus()))
+        } else if (sub === 'backup') {
+          tui.showSystem('Realizando backup...')
+          const msg = args.slice(1).join(' ') || undefined
+          const result = await performBackup(msg)
+          tui.showSystem(result)
+        } else if (sub === 'sync' || sub === 'push') {
+          tui.showSystem('Sincronizando com remote...')
+          const result = await syncBackupToRemote()
+          tui.showSystem(result)
+        } else if (sub === 'init') {
+          const result = await initShadowBackup()
+          tui.showSystem(result)
+          startAutoBackup(30)
+          tui.showSystem('Auto-backup ativado (a cada 30 minutos).')
+        } else {
+          tui.showError('Uso: /vault [status|backup|sync|init]')
+        }
+        break
+      }
+
+      case 'backup': {
+        tui.showSystem('Realizando backup...')
+        const result = await performBackup()
+        tui.showSystem(result)
+        break
+      }
+
+      // ── Windows Agent commands ─────────────────────────────
+
+      case 'clipboard':
+      case 'area': {
+        tui.showSystem('Lendo clipboard...')
+        const clip = await readClipboardContent()
+        switch (clip.type) {
+          case 'text':
+            tui.showSystem(`Clipboard (texto):\n${clip.text}`)
+            break
+          case 'image':
+            tui.showSystem(clip.text)
+            break
+          case 'empty':
+            tui.showSystem('Clipboard vazio.')
+            break
+          case 'error':
+            tui.showError(clip.text)
+            break
+        }
+        break
+      }
+
+      case 'tela':
+      case 'screen': {
+        tui.showSystem('Analisando tela...')
+        const ctx = await analyzeScreenContext()
+        tui.showSystem(ctx)
+        break
+      }
+
+      case 'ps1': {
+        const script = args.join(' ')
+        if (!script.trim()) {
+          tui.showError('Uso: /ps1 <script powershell>')
+          break
+        }
+        tui.showSystem('Executando script...')
+        const result = await executePowerShellScript(script)
+        const parts: string[] = []
+        if (result.stdout.trim()) parts.push(result.stdout.trim())
+        if (result.stderr.trim()) parts.push(`stderr: ${result.stderr.trim()}`)
+        parts.push(`(exit: ${result.exitCode}, ${result.duration}ms)`)
+        tui.showSystem(parts.join('\n'))
+        break
+      }
+
+      // ── Project management commands ──────────────────────
+
+      case 'projeto':
+      case 'project': {
+        const ref = args.join(' ')
+        if (ref) {
+          // Set active project or show details
+          const project = getProject(ref)
+          if (project) {
+            setActiveProject(project.id)
+            tui.showSystem(formatProjectDetail(project))
+          } else {
+            // Try auto-detect if "auto"
+            if (ref === 'auto') {
+              const detected = autoDetectProject(process.cwd())
+              if (detected) {
+                setActiveProject(detected.id)
+                tui.showSystem(`Projeto detectado: ${formatProjectDetail(detected)}`)
+              } else {
+                tui.showError('Nenhum projeto detectado no diretorio atual.')
+              }
+            } else {
+              tui.showError(`Projeto nao encontrado: "${ref}"`)
+            }
+          }
+        } else {
+          const active = getActiveProject()
+          if (active) {
+            tui.showSystem(formatProjectDetail(active))
+          } else {
+            tui.showSystem('Nenhum projeto ativo. Use /projeto <nome> ou /projeto auto')
+          }
+        }
+        break
+      }
+
+      case 'projetos':
+      case 'projects': {
+        tui.showSystem(formatProjectList(listProjects()))
+        break
+      }
+
+      case 'sessao':
+      case 'session': {
+        const action = args[0]
+        const active = getActiveProject()
+        if (!active) {
+          tui.showError('Nenhum projeto ativo. Use /projeto primeiro.')
+          break
+        }
+        if (action === 'start' || action === 'iniciar') {
+          const notes = args.slice(1).join(' ')
+          const session = startSession(active.id, notes)
+          if (session) {
+            tui.showSystem(`Sessao iniciada para "${active.name}" [${session.id}]`)
+          }
+        } else if (action === 'stop' || action === 'parar') {
+          const open = getOpenSession(active.id)
+          if (open) {
+            const ended = endSession(open.id, args.slice(1).join(' '))
+            if (ended) {
+              tui.showSystem(`Sessao encerrada: ${ended.durationMinutes} minutos em "${active.name}"`)
+            }
+          } else {
+            tui.showSystem('Nenhuma sessao aberta.')
+          }
+        } else {
+          const open = getOpenSession(active.id)
+          if (open) {
+            const elapsed = Math.round((Date.now() - new Date(open.startedAt).getTime()) / 60_000)
+            tui.showSystem(`Sessao aberta: ${elapsed} minutos em "${active.name}"`)
+          } else {
+            tui.showSystem('Nenhuma sessao aberta. Use /sessao start')
+          }
+        }
+        break
+      }
+
+      case 'relatorio':
+      case 'report': {
+        const active = getActiveProject()
+        if (!active) {
+          tui.showError('Nenhum projeto ativo. Use /projeto primeiro.')
+          break
+        }
+        const period = (args[0] as 'today' | 'week' | 'month') || 'today'
+        tui.showSystem('Gerando relatorio...')
+        const report = await generateWorkReport(active.id, period, 'pt')
+        if (report) {
+          tui.showSystem(report.markdown)
+        } else {
+          tui.showError('Falha ao gerar relatorio.')
+        }
+        break
+      }
+
+      case 'oportunidades':
+      case 'opportunities': {
+        const status = args[0] || undefined
+        const opps = listOpportunities(status as any)
+        tui.showSystem(formatOpportunityList(opps))
+        break
+      }
+
       // ── People management commands ────────────────────────
 
       case 'people':
@@ -1509,6 +1845,7 @@ async function runInteractive(
     stopTasks()
     stopPomodoroTimer()
     stopAllMonitors()
+    stopAutoBackup()
     tui.stop()
     process.exit(0)
   }

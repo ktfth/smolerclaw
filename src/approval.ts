@@ -15,7 +15,7 @@ export function needsApproval(
 
   if (mode === 'confirm-writes') {
     // Only confirm write operations and commands
-    return ['write_file', 'edit_file', 'run_command'].includes(toolName)
+    return ['write_file', 'edit_file', 'run_command', 'execute_powershell_script'].includes(toolName)
   }
 
   if (mode === 'confirm-all') {
@@ -37,6 +37,12 @@ export function formatApprovalPrompt(toolName: string, input: Record<string, unk
     case 'run_command': {
       const cmd = String(input.command || '')
       return `Run: ${cmd.length > 60 ? cmd.slice(0, 57) + '...' : cmd}`
+    }
+    case 'execute_powershell_script': {
+      const script = String(input.script || '')
+      const firstLine = script.split('\n')[0] || ''
+      const lines = script.split('\n').length
+      return `PowerShell (${lines} line${lines > 1 ? 's' : ''}): ${firstLine.length > 50 ? firstLine.slice(0, 47) + '...' : firstLine}`
     }
     default:
       return `${toolName}: ${JSON.stringify(input).slice(0, 60)}`

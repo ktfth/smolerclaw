@@ -3,8 +3,10 @@
  * Stores people, interaction logs, delegated tasks, and follow-up reminders.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { atomicWriteFile } from './vault'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -56,7 +58,7 @@ let _data: PeopleData = { people: [], interactions: [], delegations: [] }
 const DATA_FILE = () => join(_dataDir, 'people.json')
 
 function save(): void {
-  writeFileSync(DATA_FILE(), JSON.stringify(_data, null, 2))
+  atomicWriteFile(DATA_FILE(), JSON.stringify(_data, null, 2))
 }
 
 function load(): void {
@@ -437,12 +439,7 @@ export function generatePeopleDashboard(): string {
 // ─── Helpers ────────────────────────────────────────────────
 
 function genId(): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
-  let id = ''
-  for (let i = 0; i < 6; i++) {
-    id += chars[Math.floor(Math.random() * chars.length)]
-  }
-  return id
+  return randomUUID().slice(0, 8)
 }
 
 function formatDate(isoDate: string): string {

@@ -43,6 +43,13 @@ export class TUI {
     '/decisions', '/decisoes',
     '/email', '/rascunho',
     '/memo', '/memos', '/note', '/notas', '/tags', '/memotags', '/rmmemo', '/rmnota',
+    '/index', '/indexar', '/reindex', '/memory', '/memoria',
+    '/clipboard', '/area', '/tela', '/screen', '/ps1',
+    '/refresh', '/renovar', '/vault', '/backup',
+    '/feeds', '/fontes', '/addfeed', '/novafonte', '/rmfeed', '/rmfonte',
+    '/disablefeed', '/desativarfonte', '/enablefeed', '/ativarfonte',
+    '/projeto', '/project', '/projetos', '/projects', '/sessao', '/session',
+    '/relatorio', '/report', '/oportunidades', '/opportunities',
     // Portugues
     '/anotar', '/ajuda', '/limpar', '/commitar', '/modo', '/copiar',
     '/novo', '/carregar', '/sessoes', '/deletar', '/modelo', '/exportar',
@@ -53,6 +60,56 @@ export class TUI {
     '/pessoas', '/equipe', '/familia', '/pessoa', '/novapessoa', '/addpessoa',
     '/delegar', '/delegacoes', '/delegados', '/painel', '/contatos',
   ]
+
+  /** Subcommand/argument completions per command */
+  private subcommands: Record<string, string[]> = {
+    // Model selection
+    '/model': ['haiku', 'sonnet', 'sonnet-4.6', 'opus', 'opus-4.6'],
+    '/modelo': ['haiku', 'sonnet', 'sonnet-4.6', 'opus', 'opus-4.6'],
+    // News categories
+    '/news': ['business', 'tech', 'finance', 'brazil', 'world', 'security'],
+    '/noticias': ['business', 'tech', 'finance', 'brazil', 'world', 'security'],
+    // App launcher
+    '/open': ['excel', 'word', 'powerpoint', 'outlook', 'onenote', 'teams', 'edge', 'chrome', 'firefox', 'calculator', 'notepad', 'terminal', 'explorer', 'vscode', 'cursor', 'paint', 'snip', 'settings', 'taskmanager'],
+    '/abrir': ['excel', 'word', 'powerpoint', 'outlook', 'onenote', 'teams', 'edge', 'chrome', 'firefox', 'calculator', 'notepad', 'terminal', 'explorer', 'vscode', 'cursor', 'paint', 'snip', 'settings', 'taskmanager'],
+    // Work sessions
+    '/sessao': ['start', 'stop', 'status'],
+    '/session': ['start', 'stop', 'status'],
+    // Reports
+    '/relatorio': ['today', 'week', 'month'],
+    '/report': ['today', 'week', 'month'],
+    // Project
+    '/projeto': ['auto'],
+    '/project': ['auto'],
+    // Opportunities filter
+    '/oportunidades': ['nova', 'em_analise', 'aceita', 'recusada', 'concluida'],
+    '/opportunities': ['nova', 'em_analise', 'aceita', 'recusada', 'concluida'],
+    // Persona
+    '/persona': ['default', 'business'],
+    '/modo': ['default', 'business'],
+    // People groups
+    '/people': ['equipe', 'familia', 'contato'],
+    '/pessoas': ['equipe', 'familia', 'contato'],
+    // Investigation types
+    '/investigar': ['bug', 'feature', 'test', 'audit', 'incident'],
+    '/investigate': ['bug', 'feature', 'test', 'audit', 'incident'],
+    // Finance
+    '/entrada': [],
+    '/saida': [],
+    // Language
+    '/lang': ['pt', 'en', 'auto'],
+    '/idioma': ['pt', 'en', 'auto'],
+    // Pomodoro
+    '/pomodoro': ['start', 'stop', 'status'],
+    '/foco': ['start', 'stop', 'status'],
+    // Monitor
+    '/monitor': ['start', 'stop', 'list'],
+    '/vigiar': ['start', 'stop', 'list'],
+    // Workflow
+    '/vault': ['status', 'backup', 'sync', 'init'],
+    '/workflow': ['list', 'run', 'info', 'create', 'delete', 'enable', 'disable'],
+    '/fluxo': ['list', 'run', 'info', 'create', 'delete', 'ativar', 'desativar'],
+  }
 
   private onSubmit: ((s: string) => void) | null = null
   private onCancel: (() => void) | null = null
@@ -383,6 +440,70 @@ export class TUI {
     }
   }
 
+  /**
+   * Complete a partial input. Handles both command and subcommand completion.
+   * Returns the completed value and optional list of matches to display.
+   */
+  private completeInput(input: string): { value: string; options?: string } | null {
+    const parts = input.split(' ')
+    const cmd = parts[0]
+
+    // Phase 1: completing the command itself (no space yet)
+    if (parts.length === 1) {
+      const matches = this.commands.filter((c) => c.startsWith(cmd))
+      if (matches.length === 1) {
+        // Check if this command has subcommands
+        const sub = this.subcommands[matches[0]]
+        if (sub && sub.length > 0) {
+          return { value: matches[0] + ' ', options: `Opcoes: ${sub.join('  ')}` }
+        }
+        return { value: matches[0] + ' ' }
+      }
+      if (matches.length > 1) {
+        let prefix = matches[0]
+        for (const m of matches) {
+          while (!m.startsWith(prefix)) prefix = prefix.slice(0, -1)
+        }
+        return {
+          value: prefix.length > input.length ? prefix : input,
+          options: matches.join('  '),
+        }
+      }
+      return null
+    }
+
+    // Phase 2: completing a subcommand/argument
+    const sub = this.subcommands[cmd]
+    if (!sub || sub.length === 0) return null
+
+    const partial = parts[parts.length - 1].toLowerCase()
+    const matches = sub.filter((s) => s.toLowerCase().startsWith(partial))
+
+    if (matches.length === 1) {
+      parts[parts.length - 1] = matches[0]
+      return { value: parts.join(' ') + ' ' }
+    }
+    if (matches.length > 1) {
+      // Find common prefix among matches
+      let prefix = matches[0]
+      for (const m of matches) {
+        while (!m.toLowerCase().startsWith(prefix.toLowerCase())) prefix = prefix.slice(0, -1)
+      }
+      if (prefix.length > partial.length) {
+        parts[parts.length - 1] = prefix
+        return { value: parts.join(' '), options: matches.join('  ') }
+      }
+      return { value: input, options: matches.join('  ') }
+    }
+
+    // No matches — show all options if partial is empty
+    if (!partial && sub.length > 0) {
+      return { value: input, options: sub.join('  ') }
+    }
+
+    return null
+  }
+
   private renderInput(): void {
     const sepRow = this.height - 1
     const inputRow = this.height
@@ -441,25 +562,17 @@ export class TUI {
     // Ignore input during streaming
     if (this.isStreaming) return
 
-    // Tab — command completion
+    // Tab — command + subcommand completion
     if (key === '\t') {
       if (this.inputBuf.startsWith('/')) {
-        const matches = this.commands.filter((c) => c.startsWith(this.inputBuf))
-        if (matches.length === 1) {
-          this.inputBuf = matches[0] + ' '
+        const completed = this.completeInput(this.inputBuf)
+        if (completed) {
+          this.inputBuf = completed.value
           this.inputPos = this.inputBuf.length
           this.renderInput()
-        } else if (matches.length > 1) {
-          // Find common prefix
-          let prefix = matches[0]
-          for (const m of matches) {
-            while (!m.startsWith(prefix)) prefix = prefix.slice(0, -1)
+          if (completed.options) {
+            this.showSystem(completed.options)
           }
-          if (prefix.length > this.inputBuf.length) {
-            this.inputBuf = prefix
-            this.inputPos = this.inputBuf.length
-          }
-          this.showSystem(matches.join('  '))
         }
       }
       return

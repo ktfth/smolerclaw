@@ -1,24 +1,58 @@
 /**
- * Workflow automation — named sequences of Windows actions.
- * E.g. "iniciar-dia" opens Outlook + Teams + Excel.
+ * Workflow automation — flexible named sequences of actions.
+ *
+ * Supports: open apps, open URLs, run commands, wait, notify (toast),
+ * conditional steps (if_app_running), variables, and error handling.
+ *
+ * Security: run_command uses Bun.spawn with args array. open_url
+ * validates HTTP(S) scheme. All step timeouts use Promise.race.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { openApp, getKnownApps } from './windows'
+import { randomUUID } from 'node:crypto'
+import { atomicWriteFile } from './vault'
+import { openApp, openUrl, getKnownApps } from './windows'
 import { IS_WINDOWS } from './platform'
 
 // ─── Types ──────────────────────────────────────────────────
 
+export type StepAction =
+  | 'open_app'
+  | 'open_url'
+  | 'run_command'
+  | 'wait'
+  | 'notify'
+  | 'if_app_running'
+  | 'log'
+
 export interface WorkflowStep {
-  action: 'open_app' | 'open_url' | 'run_command' | 'wait'
-  target: string       // app name, URL, command, or seconds
+  action: StepAction
+  target: string              // app name, URL, command, seconds, message, or app to check
+  on_error?: 'stop' | 'skip' | 'continue'  // default: 'continue'
+  condition_steps?: WorkflowStep[]          // steps to run if condition is true (for if_app_running)
+  label?: string              // optional human-readable label
 }
 
 export interface Workflow {
+  id: string
   name: string
   description: string
   steps: WorkflowStep[]
+  tags: string[]
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkflowRunResult {
+  workflow: string
+  success: boolean
+  stepsRun: number
+  stepsSkipped: number
+  stepsFailed: number
+  log: string[]
+  duration: number
 }
 
 // ─── Storage ────────────────────────────────────────────────
@@ -29,43 +63,75 @@ let _workflows: Workflow[] = []
 const DATA_FILE = () => join(_dataDir, 'workflows.json')
 
 function save(): void {
-  writeFileSync(DATA_FILE(), JSON.stringify(_workflows, null, 2))
+  atomicWriteFile(DATA_FILE(), JSON.stringify(_workflows, null, 2))
 }
 
 function load(): void {
   const file = DATA_FILE()
   if (!existsSync(file)) {
-    // Seed with default workflows
-    _workflows = DEFAULT_WORKFLOWS
+    _workflows = seedDefaults()
     save()
     return
   }
-  try { _workflows = JSON.parse(readFileSync(file, 'utf-8')) }
-  catch { _workflows = DEFAULT_WORKFLOWS; save() }
+  try {
+    const data = JSON.parse(readFileSync(file, 'utf-8'))
+    if (!Array.isArray(data)) {
+      _workflows = seedDefaults()
+      save()
+      return
+    }
+    // Migrate old format (no id) to new format
+    _workflows = data.map((w: Record<string, unknown>) => ({
+      id: (w.id as string) || genId(),
+      name: (w.name as string) || 'unnamed',
+      description: (w.description as string) || '',
+      steps: Array.isArray(w.steps) ? w.steps : [],
+      tags: Array.isArray(w.tags) ? w.tags : [],
+      enabled: w.enabled !== false,
+      createdAt: (w.createdAt as string) || new Date().toISOString(),
+      updatedAt: (w.updatedAt as string) || new Date().toISOString(),
+    }))
+  } catch {
+    _workflows = seedDefaults()
+    save()
+  }
 }
 
-// ─── Defaults ───────────────────────────────────────────────
-
-const DEFAULT_WORKFLOWS: Workflow[] = [
-  {
-    name: 'iniciar-dia',
-    description: 'Abrir terminal e Postman',
-    steps: [
-      { action: 'open_app', target: 'terminal' },
-      { action: 'wait', target: '2' },
-      { action: 'open_app', target: 'postman' },
-    ],
-  },
-  {
-    name: 'dev',
-    description: 'Abrir ambiente de desenvolvimento: VSCode e Terminal',
-    steps: [
-      { action: 'open_app', target: 'vscode' },
-      { action: 'wait', target: '1' },
-      { action: 'open_app', target: 'terminal' },
-    ],
-  },
-]
+function seedDefaults(): Workflow[] {
+  const now = new Date().toISOString()
+  return [
+    {
+      id: genId(),
+      name: 'iniciar-dia',
+      description: 'Abrir apps de trabalho: terminal e ferramentas',
+      steps: [
+        { action: 'notify', target: 'Iniciando ambiente de trabalho...' },
+        { action: 'open_app', target: 'terminal', label: 'Terminal' },
+        { action: 'wait', target: '2' },
+        { action: 'open_app', target: 'vscode', label: 'VS Code', on_error: 'skip' },
+        { action: 'notify', target: 'Ambiente pronto!' },
+      ],
+      tags: ['trabalho', 'diario'],
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: genId(),
+      name: 'dev',
+      description: 'Ambiente de desenvolvimento: VSCode + Terminal',
+      steps: [
+        { action: 'open_app', target: 'vscode', label: 'VS Code' },
+        { action: 'wait', target: '1' },
+        { action: 'open_app', target: 'terminal', label: 'Terminal' },
+      ],
+      tags: ['dev'],
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+  ]
+}
 
 // ─── Init ───────────────────────────────────────────────────
 
@@ -75,123 +141,362 @@ export function initWorkflows(dataDir: string): void {
   load()
 }
 
-// ─── Operations ─────────────────────────────────────────────
+// ─── CRUD ───────────────────────────────────────────────────
 
-export function getWorkflow(name: string): Workflow | null {
-  return _workflows.find((w) => w.name.toLowerCase() === name.toLowerCase()) || null
+export function getWorkflow(nameOrId: string): Workflow | null {
+  const lower = nameOrId.toLowerCase().trim()
+  return (
+    _workflows.find((w) => w.id === nameOrId) ||
+    _workflows.find((w) => w.name.toLowerCase() === lower) ||
+    _workflows.find((w) => w.name.toLowerCase().includes(lower)) ||
+    null
+  )
 }
 
-export function listWorkflows(): Workflow[] {
-  return [..._workflows]
+export function listWorkflows(tag?: string): Workflow[] {
+  let result = [..._workflows]
+  if (tag) {
+    const lower = tag.toLowerCase()
+    result = result.filter((w) => w.tags.some((t) => t.toLowerCase() === lower))
+  }
+  return result
 }
 
-export function createWorkflow(name: string, description: string, steps: WorkflowStep[]): Workflow {
+export function createWorkflow(
+  name: string,
+  description: string,
+  steps: WorkflowStep[],
+  tags: string[] = [],
+): Workflow {
+  const now = new Date().toISOString()
   // Remove existing with same name
-  _workflows = _workflows.filter((w) => w.name.toLowerCase() !== name.toLowerCase())
-  const workflow: Workflow = { name: name.toLowerCase(), description, steps }
+  _workflows = _workflows.filter((w) => w.name.toLowerCase() !== name.toLowerCase().trim())
+  const workflow: Workflow = {
+    id: genId(),
+    name: name.toLowerCase().trim(),
+    description: description.trim(),
+    steps,
+    tags: tags.map((t) => t.toLowerCase().trim()).filter(Boolean),
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  }
   _workflows = [..._workflows, workflow]
   save()
   return workflow
 }
 
-export function deleteWorkflow(name: string): boolean {
-  const before = _workflows.length
-  _workflows = _workflows.filter((w) => w.name.toLowerCase() !== name.toLowerCase())
-  if (_workflows.length === before) return false
+export function updateWorkflow(
+  nameOrId: string,
+  updates: Partial<Pick<Workflow, 'description' | 'steps' | 'tags' | 'enabled'>>,
+): Workflow | null {
+  const found = getWorkflow(nameOrId)
+  if (!found) return null
+
+  _workflows = _workflows.map((w) =>
+    w.id === found.id
+      ? { ...w, ...updates, updatedAt: new Date().toISOString() }
+      : w,
+  )
+  save()
+  return _workflows.find((w) => w.id === found.id) || null
+}
+
+export function deleteWorkflow(nameOrId: string): boolean {
+  const found = getWorkflow(nameOrId)
+  if (!found) return false
+  _workflows = _workflows.filter((w) => w.id !== found.id)
   save()
   return true
 }
 
+export function duplicateWorkflow(nameOrId: string, newName: string): Workflow | null {
+  const source = getWorkflow(nameOrId)
+  if (!source) return null
+  return createWorkflow(
+    newName,
+    source.description,
+    JSON.parse(JSON.stringify(source.steps)),
+    [...source.tags],
+  )
+}
+
+export function addStepToWorkflow(
+  nameOrId: string,
+  step: WorkflowStep,
+  position?: number,
+): Workflow | null {
+  const found = getWorkflow(nameOrId)
+  if (!found) return null
+
+  const newSteps = [...found.steps]
+  if (position !== undefined && position >= 0 && position <= newSteps.length) {
+    newSteps.splice(position, 0, step)
+  } else {
+    newSteps.push(step)
+  }
+  return updateWorkflow(found.id, { steps: newSteps })
+}
+
+export function removeStepFromWorkflow(
+  nameOrId: string,
+  stepIndex: number,
+): Workflow | null {
+  const found = getWorkflow(nameOrId)
+  if (!found || stepIndex < 0 || stepIndex >= found.steps.length) return null
+
+  const newSteps = [...found.steps.slice(0, stepIndex), ...found.steps.slice(stepIndex + 1)]
+  return updateWorkflow(found.id, { steps: newSteps })
+}
+
+// ─── Execution ──────────────────────────────────────────────
+
 /**
  * Execute a workflow step by step.
- * Returns a log of what was done.
+ * Returns structured result with log and stats.
  */
 export async function runWorkflow(
-  name: string,
+  nameOrId: string,
   onStep?: (msg: string) => void,
 ): Promise<string> {
-  const workflow = getWorkflow(name)
+  const workflow = getWorkflow(nameOrId)
   if (!workflow) {
     const available = _workflows.map((w) => w.name).join(', ')
-    return `Workflow nao encontrado: "${name}". Disponiveis: ${available}`
+    return `Workflow nao encontrado: "${nameOrId}". Disponiveis: ${available}`
   }
 
-  if (!IS_WINDOWS) {
-    return 'Error: workflows are only available on Windows.'
+  if (!workflow.enabled) {
+    return `Workflow "${workflow.name}" esta desativado.`
   }
 
-  const log: string[] = [`Executando workflow: "${workflow.name}" — ${workflow.description}`]
+  const result = await executeSteps(workflow.name, workflow.steps, onStep)
+  return formatRunResult(result)
+}
 
-  for (let i = 0; i < workflow.steps.length; i++) {
-    const step = workflow.steps[i]
+async function executeSteps(
+  workflowName: string,
+  steps: WorkflowStep[],
+  onStep?: (msg: string) => void,
+): Promise<WorkflowRunResult> {
+  const start = performance.now()
+  const log: string[] = [`Executando workflow: "${workflowName}"`]
+  let stepsRun = 0
+  let stepsSkipped = 0
+  let stepsFailed = 0
+  let success = true
 
-    switch (step.action) {
-      case 'open_app': {
-        onStep?.(`[${i + 1}/${workflow.steps.length}] Abrindo ${step.target}...`)
-        const result = await openApp(step.target)
-        log.push(`  ${i + 1}. ${result}`)
-        break
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]
+    const label = step.label || `${step.action}:${step.target}`
+    const prefix = `[${i + 1}/${steps.length}]`
+    const onError = step.on_error || 'continue'
+
+    onStep?.(`${prefix} ${label}...`)
+
+    try {
+      const stepResult = await executeStep(step, onStep)
+      log.push(`  ${prefix} ${stepResult}`)
+      stepsRun++
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err)
+      stepsFailed++
+
+      switch (onError) {
+        case 'stop':
+          log.push(`  ${prefix} ERRO (parando): ${errMsg}`)
+          success = false
+          return { workflow: workflowName, success, stepsRun, stepsSkipped, stepsFailed, log, duration: Math.round(performance.now() - start) }
+        case 'skip':
+          log.push(`  ${prefix} ERRO (pulado): ${errMsg}`)
+          stepsSkipped++
+          break
+        case 'continue':
+        default:
+          log.push(`  ${prefix} ERRO (continuando): ${errMsg}`)
+          break
       }
+    }
+  }
 
-      case 'open_url': {
-        onStep?.(`[${i + 1}/${workflow.steps.length}] Abrindo ${step.target}...`)
-        // Reuse openApp with 'edge' or just use Start-Process
-        const proc = Bun.spawn(
-          ['powershell', '-NoProfile', '-NonInteractive', '-Command', `Start-Process '${step.target}'`],
-          { stdout: 'pipe', stderr: 'pipe' },
-        )
-        const timer = setTimeout(() => proc.kill(), 10_000)
-        await Promise.all([
+  return {
+    workflow: workflowName,
+    success,
+    stepsRun,
+    stepsSkipped,
+    stepsFailed,
+    log,
+    duration: Math.round(performance.now() - start),
+  }
+}
+
+async function executeStep(
+  step: WorkflowStep,
+  onStep?: (msg: string) => void,
+): Promise<string> {
+  switch (step.action) {
+    case 'open_app': {
+      if (!IS_WINDOWS) return `skip: ${step.target} (not Windows)`
+      const result = await openApp(step.target)
+      return result
+    }
+
+    case 'open_url': {
+      if (!IS_WINDOWS) return `skip: ${step.target} (not Windows)`
+      const url = step.target.trim()
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        throw new Error(`URL invalida (deve comecar com http/https): ${url}`)
+      }
+      const result = await openUrl(url)
+      return result
+    }
+
+    case 'run_command': {
+      if (!IS_WINDOWS) return `skip: command (not Windows)`
+      const cmd = step.target
+      if (!cmd.trim()) throw new Error('Comando vazio')
+
+      const proc = Bun.spawn(
+        ['powershell', '-NoProfile', '-NonInteractive', '-Command', cmd],
+        { stdout: 'pipe', stderr: 'pipe' },
+      )
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => { proc.kill(); reject(new Error('Command timeout (30s)')) }, 30_000)
+      })
+
+      const execPromise = (async () => {
+        const [stdout, stderr] = await Promise.all([
           new Response(proc.stdout).text(),
           new Response(proc.stderr).text(),
         ])
-        await proc.exited
-        clearTimeout(timer)
-        log.push(`  ${i + 1}. Opened: ${step.target}`)
-        break
-      }
+        const exitCode = await proc.exited
+        if (exitCode !== 0 && stderr.trim()) {
+          throw new Error(`exit ${exitCode}: ${stderr.trim().slice(0, 200)}`)
+        }
+        return stdout.trim().slice(0, 200)
+      })()
 
-      case 'run_command': {
-        onStep?.(`[${i + 1}/${workflow.steps.length}] Executando: ${step.target}...`)
-        const proc = Bun.spawn(
-          ['powershell', '-NoProfile', '-NonInteractive', '-Command', step.target],
-          { stdout: 'pipe', stderr: 'pipe' },
-        )
-        const timer = setTimeout(() => proc.kill(), 30_000)
+      const output = await Promise.race([execPromise, timeoutPromise])
+      return `Command: ${cmd.slice(0, 60)}${output ? ' -> ' + output : ''}`
+    }
+
+    case 'wait': {
+      const secs = Math.max(0, Math.min(parseInt(step.target) || 1, 60))
+      await new Promise((r) => setTimeout(r, secs * 1000))
+      return `Wait: ${secs}s`
+    }
+
+    case 'notify': {
+      if (IS_WINDOWS) {
+        try {
+          const msg = step.target.replace(/'/g, "''")
+          const proc = Bun.spawn(
+            ['powershell', '-NoProfile', '-NonInteractive', '-Command',
+              `[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; [System.Windows.Forms.MessageBox]::Show('${msg}', 'smolerclaw', 'OK', 'Information') | Out-Null`],
+            { stdout: 'pipe', stderr: 'pipe' },
+          )
+          setTimeout(() => proc.kill(), 10_000)
+          // Don't await — non-blocking notification
+        } catch { /* best effort */ }
+      }
+      return `Notify: ${step.target}`
+    }
+
+    case 'if_app_running': {
+      if (!IS_WINDOWS) return `skip: condition (not Windows)`
+      const appName = step.target.toLowerCase()
+
+      const proc = Bun.spawn(
+        ['powershell', '-NoProfile', '-NonInteractive', '-Command',
+          `(Get-Process -Name '${appName}' -ErrorAction SilentlyContinue) -ne $null`],
+        { stdout: 'pipe', stderr: 'pipe' },
+      )
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => { proc.kill(); reject(new Error('condition timeout')) }, 5_000)
+      })
+
+      const execPromise = (async () => {
         const [stdout] = await Promise.all([
           new Response(proc.stdout).text(),
           new Response(proc.stderr).text(),
         ])
         await proc.exited
-        clearTimeout(timer)
-        const preview = stdout.trim().slice(0, 100)
-        log.push(`  ${i + 1}. Command: ${step.target}${preview ? ' -> ' + preview : ''}`)
-        break
-      }
+        return stdout.trim().toLowerCase() === 'true'
+      })()
 
-      case 'wait': {
-        const secs = parseInt(step.target) || 1
-        onStep?.(`[${i + 1}/${workflow.steps.length}] Aguardando ${secs}s...`)
-        await new Promise((r) => setTimeout(r, secs * 1000))
-        log.push(`  ${i + 1}. Wait: ${secs}s`)
-        break
+      const isRunning = await Promise.race([execPromise, timeoutPromise])
+
+      if (isRunning && step.condition_steps && step.condition_steps.length > 0) {
+        const subResult = await executeSteps(`${step.target}-conditional`, step.condition_steps, onStep)
+        return `Condition: ${appName} running=true, ran ${subResult.stepsRun} sub-steps`
       }
+      return `Condition: ${appName} running=${isRunning}${!isRunning ? ' (skipped sub-steps)' : ''}`
     }
-  }
 
-  log.push(`\nWorkflow "${workflow.name}" concluido.`)
-  return log.join('\n')
+    case 'log': {
+      return `Log: ${step.target}`
+    }
+
+    default:
+      throw new Error(`Acao desconhecida: ${(step as WorkflowStep).action}`)
+  }
 }
 
 // ─── Formatting ─────────────────────────────────────────────
 
-export function formatWorkflowList(): string {
-  if (_workflows.length === 0) return 'Nenhum workflow configurado.'
+export function formatWorkflowList(workflows?: Workflow[]): string {
+  const list = workflows || _workflows
+  if (list.length === 0) return 'Nenhum workflow configurado.'
 
-  const lines = _workflows.map((w) => {
-    const steps = w.steps.map((s) => `${s.action}:${s.target}`).join(' -> ')
-    return `  ${w.name.padEnd(15)} ${w.description}\n${' '.repeat(17)}${steps}`
+  const lines = list.map((w) => {
+    const status = w.enabled ? '' : ' [DESATIVADO]'
+    const tags = w.tags.length > 0 ? ` [${w.tags.join(', ')}]` : ''
+    const stepsDesc = w.steps.map((s) => {
+      const label = s.label || s.target
+      return s.action === 'wait' ? `${s.target}s` : label
+    }).join(' -> ')
+    return `  ${w.name}${status}${tags} — ${w.description}\n${' '.repeat(4)}${stepsDesc}  {${w.id}}`
   })
 
-  return `Workflows (${_workflows.length}):\n${lines.join('\n\n')}`
+  return `Workflows (${list.length}):\n${lines.join('\n\n')}`
+}
+
+export function formatWorkflowDetail(workflow: Workflow): string {
+  const status = workflow.enabled ? 'ativo' : 'desativado'
+  const tags = workflow.tags.length > 0 ? `Tags: ${workflow.tags.map((t) => `#${t}`).join(' ')}` : ''
+  const lines: string[] = [
+    `--- Workflow {${workflow.id}} ---`,
+    `Nome: ${workflow.name}`,
+    `Descricao: ${workflow.description}`,
+    `Status: ${status}`,
+  ]
+  if (tags) lines.push(tags)
+  lines.push(`Criado: ${new Date(workflow.createdAt).toLocaleDateString('pt-BR')}`)
+  lines.push('')
+  lines.push('Steps:')
+  workflow.steps.forEach((s, i) => {
+    const label = s.label ? ` (${s.label})` : ''
+    const onErr = s.on_error && s.on_error !== 'continue' ? ` [on_error: ${s.on_error}]` : ''
+    lines.push(`  ${i + 1}. ${s.action}: ${s.target}${label}${onErr}`)
+    if (s.action === 'if_app_running' && s.condition_steps) {
+      for (const sub of s.condition_steps) {
+        lines.push(`     ↳ ${sub.action}: ${sub.target}`)
+      }
+    }
+  })
+  return lines.join('\n')
+}
+
+function formatRunResult(result: WorkflowRunResult): string {
+  const lines = [...result.log]
+  lines.push('')
+  lines.push(`Concluido em ${result.duration}ms — ${result.stepsRun} executados, ${result.stepsSkipped} pulados, ${result.stepsFailed} falhas`)
+  return lines.join('\n')
+}
+
+// ─── Helpers ────────────────────────────────────────────────
+
+function genId(): string {
+  return randomUUID().slice(0, 8)
 }

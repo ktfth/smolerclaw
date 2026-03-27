@@ -47,6 +47,13 @@ smolerclaw is a terminal AI assistant that lives on your Windows machine. It can
 - **Track finances** — income/expense logging with monthly summaries
 - **Log decisions** — record context and rationale for important choices
 - **Pomodoro timer** — focus sessions with toast notifications
+- **Local RAG memory** — TF-IDF + BM25 search across memos, materials, decisions, and sessions
+- **Project management** — track projects, work sessions, generate progress reports
+- **Opportunity pipeline** — register and filter demands by tech stack and priority
+- **PowerShell scripting** — execute .ps1 scripts with safety guards (blocks Defender/System32/destructive ops)
+- **Clipboard OCR** — read text or extract text from images via Windows.Media.Ocr
+- **Screen awareness** — map foreground window and all visible windows
+- **Session refresh** — renew Claude Code auth token without leaving the TUI
 
 ## TUI Commands
 
@@ -58,15 +65,17 @@ smolerclaw is a terminal AI assistant that lives on your Windows machine. It can
 /investigar    List investigations   /memo #tag     Save a note
 /email         Draft email           /pomodoro      Focus timer
 /model sonnet  Switch model          /export        Save to markdown
+/indexar       Build RAG index       /memoria <q>   Search local memory
+/projeto auto  Set active project    /projetos      List all projects
+/sessao start  Start work timer      /sessao stop   Stop work timer
+/relatorio     Progress report       /oportunidades List opportunities
+/clipboard     Read clipboard/OCR    /tela          Screen context
+/ps1 <script>  Run PowerShell        /refresh       Renew auth token
 ```
 
 ## Auth
 
-Three ways, in priority order:
-
-1. `ANTHROPIC_API_KEY` env var
-2. Claude Code subscription (auto-detected from `~/.claude/.credentials.json`)
-3. `apiKey` in `~/.config/smolerclaw/config.json`
+Claude Code subscription (auto-detected from `~/.claude/.credentials.json`). Use `/refresh` to renew the token if it expires during a session.
 
 ## Requirements
 
@@ -128,6 +137,13 @@ smolerclaw e um assistente de IA no terminal que vive na sua maquina Windows. El
 - **Controle financeiro** — registro de entradas/saidas com resumo mensal
 - **Registrar decisoes** — guardar contexto e justificativa de escolhas importantes
 - **Timer Pomodoro** — sessoes de foco com notificacoes toast
+- **Memoria RAG local** — busca TF-IDF + BM25 em memos, materiais, decisoes e sessoes
+- **Gestao de projetos** — rastrear projetos, sessoes de trabalho, gerar relatorios de progresso
+- **Pipeline de oportunidades** — registrar e filtrar demandas por tech stack e prioridade
+- **Scripts PowerShell** — executar .ps1 com safety guards (bloqueia Defender/System32/ops destrutivas)
+- **OCR de clipboard** — ler texto ou extrair texto de imagens via Windows.Media.Ocr
+- **Consciencia de tela** — mapear janela em foco e todas as janelas visiveis
+- **Renovacao de sessao** — renovar token de autenticacao Claude Code sem sair da TUI
 
 ## Comandos na TUI
 
@@ -139,15 +155,17 @@ smolerclaw e um assistente de IA no terminal que vive na sua maquina Windows. El
 /investigar    Listar investigacoes  /memo #tag     Salvar anotacao
 /email         Rascunho de email     /foco          Timer Pomodoro
 /modelo sonnet Trocar modelo         /exportar      Salvar em markdown
+/indexar       Construir indice RAG  /memoria <q>   Buscar na memoria
+/projeto auto  Definir projeto ativo /projetos      Listar projetos
+/sessao start  Iniciar timer         /sessao stop   Parar timer
+/relatorio     Relatorio progresso   /oportunidades Listar oportunidades
+/area          Ler clipboard/OCR     /tela          Contexto de tela
+/ps1 <script>  Executar PowerShell   /refresh       Renovar token auth
 ```
 
 ## Autenticacao
 
-Tres formas, em ordem de prioridade:
-
-1. Variavel de ambiente `ANTHROPIC_API_KEY`
-2. Assinatura Claude Code (detectada automaticamente de `~/.claude/.credentials.json`)
-3. `apiKey` em `~/.config/smolerclaw/config.json`
+Assinatura Claude Code (detectada automaticamente de `~/.claude/.credentials.json`). Use `/refresh` para renovar o token se expirar durante a sessao.
 
 ## Requisitos
 

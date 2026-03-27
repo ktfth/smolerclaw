@@ -2,8 +2,10 @@
  * Simple personal finance tracker — income/expense by category.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { atomicWriteFile } from './vault'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -24,7 +26,7 @@ let _transactions: Transaction[] = []
 const DATA_FILE = () => join(_dataDir, 'finance.json')
 
 function save(): void {
-  writeFileSync(DATA_FILE(), JSON.stringify(_transactions, null, 2))
+  atomicWriteFile(DATA_FILE(), JSON.stringify(_transactions, null, 2))
 }
 
 function load(): void {
@@ -136,10 +138,7 @@ export function getRecentTransactions(limit = 10): string {
 // ─── Helpers ────────────────────────────────────────────────
 
 function genId(): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
-  let id = ''
-  for (let i = 0; i < 6; i++) id += chars[Math.floor(Math.random() * chars.length)]
-  return id
+  return randomUUID().slice(0, 8)
 }
 
 function formatMonth(m: number): string {

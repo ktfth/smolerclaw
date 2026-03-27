@@ -10,6 +10,7 @@ import { fetchNews } from './news'
 import { listTasks, formatTaskList } from './tasks'
 import { getPendingFollowUps, getDelegations, formatFollowUps, formatDelegationList } from './people'
 import { IS_WINDOWS } from './platform'
+import { getProjectBriefingSummary } from './projects'
 
 let _dataDir = ''
 const LAST_RUN_FILE = () => join(_dataDir, 'last-morning.txt')
@@ -80,6 +81,12 @@ export async function generateMorningBriefing(): Promise<string> {
   if (overdue.length > 0) {
     sections.push('\n--- Delegacoes atrasadas ---')
     sections.push(formatDelegationList(overdue))
+  }
+
+  // Project summary
+  const projectSummary = getProjectBriefingSummary()
+  if (projectSummary) {
+    sections.push(`\n${projectSummary}`)
   }
 
   // Calendar (Windows only)

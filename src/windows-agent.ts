@@ -1,0 +1,432 @@
+/**
+ * Windows Agent — deep OS integration layer.
+ *
+ * Provides PowerShell script execution with safety guards,
+ * clipboard OCR, and UI awareness (foreground windows).
+ *
+ * Security model:
+ *   - Blocked patterns: Defender disabling, System32 writes, registry tampering
+ *   - All scripts run with -NoProfile -NonInteractive
+ *   - Temp .ps1 files are cleaned up after execution
+ *   - ANSI escape sequences stripped from all output
+ *   - The tool is classified as 'dangerous' in tool-safety, requiring
+ *     explicit user approval when toolApproval != 'auto'
+ */
+
+import { writeFileSync, unlinkSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { randomUUID } from 'node:crypto'
+import { IS_WINDOWS } from './platform'
+
+// ─── Constants ──────────────────────────────────────────────
+
+const PS_TIMEOUT_MS = 30_000
+const MAX_SCRIPT_LENGTH = 50_000
+const MAX_OUTPUT_LENGTH = 100_000
+
+// ANSI escape sequence regex for cleaning PowerShell output
+const ANSI_RE = /[\x1b\x9b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nq-uy=><~]/g
+
+// ─── Safety Guards ──────────────────────────────────────────
+
+/** Patterns that are ALWAYS blocked — no bypass possible */
+const BLOCKED_PATTERNS: ReadonlyArray<{ pattern: RegExp; reason: string }> = [
+  { pattern: /Set-MpPreference\s.*-Disable/i, reason: 'Tentativa de desativar Windows Defender' },
+  { pattern: /Disable-WindowsOptionalFeature.*Defender/i, reason: 'Tentativa de desativar Windows Defender' },
+  { pattern: /Stop-Service\s.*WinDefend/i, reason: 'Tentativa de parar Windows Defender' },
+  { pattern: /sc\s+(stop|delete|disable)\s+WinDefend/i, reason: 'Tentativa de desabilitar Windows Defender via sc' },
+  { pattern: /New-ItemProperty.*DisableAntiSpyware/i, reason: 'Tentativa de desativar proteção via registro' },
+  { pattern: /Remove-Item\s.*\\Windows\\System32/i, reason: 'Tentativa de deletar arquivos do System32' },
+  { pattern: /Remove-Item\s.*\\Windows\\SysWOW64/i, reason: 'Tentativa de deletar arquivos do SysWOW64' },
+  { pattern: /Format-Volume/i, reason: 'Tentativa de formatar volume' },
+  { pattern: /Clear-Disk/i, reason: 'Tentativa de limpar disco' },
+  { pattern: /Stop-Computer/i, reason: 'Tentativa de desligar computador' },
+  { pattern: /Restart-Computer/i, reason: 'Tentativa de reiniciar computador' },
+  { pattern: /Set-ExecutionPolicy\s+Unrestricted/i, reason: 'Tentativa de mudar politica de execução permanentemente' },
+  { pattern: /\bnet\s+user\s+.*\/add/i, reason: 'Tentativa de criar usuario' },
+  { pattern: /\bnet\s+localgroup\s+administrators/i, reason: 'Tentativa de modificar grupo Administrators' },
+  { pattern: /Invoke-Expression.*DownloadString/i, reason: 'Tentativa de execução remota (IEX + download)' },
+  { pattern: /\biex\s*\(\s*\(?\s*New-Object/i, reason: 'Tentativa de execução remota (IEX + WebClient)' },
+]
+
+/** Patterns that require explicit confirmation (flagged as 'dangerous') */
+const RISKY_PATTERNS: ReadonlyArray<{ pattern: RegExp; reason: string }> = [
+  { pattern: /\\Windows\\System32/i, reason: 'Acesso a System32' },
+  { pattern: /\\Windows\\SysWOW64/i, reason: 'Acesso a SysWOW64' },
+  { pattern: /HKLM:|HKCU:/i, reason: 'Acesso ao registro do Windows' },
+  { pattern: /New-Service|Set-Service|Remove-Service/i, reason: 'Manipulação de serviços' },
+  { pattern: /New-NetFirewallRule|Remove-NetFirewallRule/i, reason: 'Alteração de regras de firewall' },
+  { pattern: /Start-Process\s.*-Verb\s+RunAs/i, reason: 'Elevação de privilegios (RunAs)' },
+  { pattern: /Set-ItemProperty\s.*\\CurrentVersion\\Run/i, reason: 'Modificação de programas de inicialização' },
+]
+
+export interface ScriptSafetyResult {
+  safe: boolean
+  blocked: boolean
+  reason?: string
+}
+
+/**
+ * Analyze a PowerShell script for safety.
+ * Returns whether it's safe, and if blocked, the reason.
+ */
+export function analyzeScriptSafety(script: string): ScriptSafetyResult {
+  // Check hard blocks first
+  for (const { pattern, reason } of BLOCKED_PATTERNS) {
+    if (pattern.test(script)) {
+      return { safe: false, blocked: true, reason }
+    }
+  }
+
+  // Check risky patterns (not blocked, but flagged)
+  for (const { pattern, reason } of RISKY_PATTERNS) {
+    if (pattern.test(script)) {
+      return { safe: false, blocked: false, reason }
+    }
+  }
+
+  return { safe: true, blocked: false }
+}
+
+// ─── PowerShell Script Execution ────────────────────────────
+
+export interface ScriptResult {
+  stdout: string
+  stderr: string
+  exitCode: number
+  duration: number
+}
+
+/**
+ * Execute a PowerShell script string with safety guards.
+ *
+ * Creates a temp .ps1 file, runs it with -ExecutionPolicy Bypass
+ * (scoped to this process only), and cleans up after.
+ */
+export async function executePowerShellScript(script: string): Promise<ScriptResult> {
+  if (!IS_WINDOWS) {
+    return { stdout: '', stderr: 'Error: PowerShell scripts only available on Windows.', exitCode: 1, duration: 0 }
+  }
+
+  if (!script.trim()) {
+    return { stdout: '', stderr: 'Error: script is empty.', exitCode: 1, duration: 0 }
+  }
+
+  if (script.length > MAX_SCRIPT_LENGTH) {
+    return { stdout: '', stderr: `Error: script too long (${script.length} chars, max ${MAX_SCRIPT_LENGTH}).`, exitCode: 1, duration: 0 }
+  }
+
+  // Safety check
+  const safety = analyzeScriptSafety(script)
+  if (safety.blocked) {
+    return { stdout: '', stderr: `BLOCKED: ${safety.reason}`, exitCode: 1, duration: 0 }
+  }
+
+  // Write temp .ps1 file
+  const scriptId = randomUUID().slice(0, 8)
+  const scriptPath = join(tmpdir(), `smolerclaw-${scriptId}.ps1`)
+
+  try {
+    writeFileSync(scriptPath, script, 'utf-8')
+
+    const start = performance.now()
+    const proc = Bun.spawn(
+      [
+        'powershell',
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', scriptPath,
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
+    )
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        proc.kill()
+        reject(new Error('Script timeout exceeded'))
+      }, PS_TIMEOUT_MS)
+    })
+
+    const execPromise = (async () => {
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      const exitCode = await proc.exited
+      return { stdout, stderr, exitCode }
+    })()
+
+    const { stdout, stderr, exitCode } = await Promise.race([execPromise, timeoutPromise])
+    const duration = Math.round(performance.now() - start)
+
+    return {
+      stdout: cleanOutput(stdout),
+      stderr: cleanOutput(stderr),
+      exitCode,
+      duration,
+    }
+  } finally {
+    // Always clean up the temp script
+    try {
+      if (existsSync(scriptPath)) unlinkSync(scriptPath)
+    } catch { /* best effort cleanup */ }
+  }
+}
+
+// ─── Clipboard Reading ──────────────────────────────────────
+
+export type ClipboardContentType = 'text' | 'image' | 'empty' | 'error'
+
+export interface ClipboardContent {
+  type: ClipboardContentType
+  text: string
+}
+
+/**
+ * Read clipboard content. Detects text or image (with OCR).
+ * Uses Windows PowerShell via System.Windows.Forms and Windows.Media.Ocr.
+ */
+export async function readClipboardContent(): Promise<ClipboardContent> {
+  if (!IS_WINDOWS) {
+    return { type: 'error', text: 'Clipboard reading only available on Windows.' }
+  }
+
+  // First try to get text
+  const textResult = await readClipboardText()
+  if (textResult.type === 'text') return textResult
+
+  // If no text, try image OCR
+  const ocrResult = await readClipboardImageOCR()
+  return ocrResult
+}
+
+async function readClipboardText(): Promise<ClipboardContent> {
+  const cmd = [
+    'Add-Type -AssemblyName System.Windows.Forms',
+    '$clip = [System.Windows.Forms.Clipboard]::GetText()',
+    'if ($clip) { $clip } else { "___EMPTY___" }',
+  ].join('; ')
+
+  try {
+    const proc = Bun.spawn(
+      ['powershell', '-NoProfile', '-NonInteractive', '-STA', '-Command', cmd],
+      { stdout: 'pipe', stderr: 'pipe' },
+    )
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => { proc.kill(); reject(new Error('clipboard timeout')) }, 10_000)
+    })
+
+    const execPromise = (async () => {
+      const [stdout] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      await proc.exited
+      return stdout
+    })()
+
+    const stdout = await Promise.race([execPromise, timeoutPromise])
+    const text = cleanOutput(stdout).trim()
+    if (text === '___EMPTY___' || !text) {
+      return { type: 'empty', text: '' }
+    }
+    return { type: 'text', text }
+  } catch {
+    return { type: 'error', text: 'Failed to read clipboard text.' }
+  }
+}
+
+async function readClipboardImageOCR(): Promise<ClipboardContent> {
+  // PowerShell script that:
+  // 1. Checks if clipboard has an image
+  // 2. Saves it to a temp file
+  // 3. Uses Windows.Media.Ocr to extract text
+  // 4. Returns the text and cleans up
+  const script = `
+Add-Type -AssemblyName System.Windows.Forms
+$img = [System.Windows.Forms.Clipboard]::GetImage()
+if (-not $img) {
+  Write-Output "___NO_IMAGE___"
+  exit
+}
+$tmpFile = [System.IO.Path]::Combine($env:TEMP, "smolerclaw-ocr-$(Get-Random).png")
+try {
+  $img.Save($tmpFile, [System.Drawing.Imaging.ImageFormat]::Png)
+  $null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]
+  $null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType = WindowsRuntime]
+  $null = [Windows.Storage.StorageFile, Windows.Foundation, ContentType = WindowsRuntime]
+
+  $asyncOp = [Windows.Storage.StorageFile]::GetFileFromPathAsync($tmpFile)
+  $taskFile = [System.WindowsRuntimeSystemExtensions]::AsTask($asyncOp)
+  $taskFile.Wait()
+  $storageFile = $taskFile.Result
+
+  $asyncStream = $storageFile.OpenAsync([Windows.Storage.FileAccessMode]::Read)
+  $taskStream = [System.WindowsRuntimeSystemExtensions]::AsTask($asyncStream)
+  $taskStream.Wait()
+  $stream = $taskStream.Result
+
+  $asyncDecoder = [Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)
+  $taskDecoder = [System.WindowsRuntimeSystemExtensions]::AsTask($asyncDecoder)
+  $taskDecoder.Wait()
+  $decoder = $taskDecoder.Result
+
+  $asyncBitmap = $decoder.GetSoftwareBitmapAsync()
+  $taskBitmap = [System.WindowsRuntimeSystemExtensions]::AsTask($asyncBitmap)
+  $taskBitmap.Wait()
+  $bitmap = $taskBitmap.Result
+
+  $ocrEngine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+  $asyncResult = $ocrEngine.RecognizeAsync($bitmap)
+  $taskResult = [System.WindowsRuntimeSystemExtensions]::AsTask($asyncResult)
+  $taskResult.Wait()
+  $result = $taskResult.Result
+
+  if ($result.Text) {
+    Write-Output $result.Text
+  } else {
+    Write-Output "___NO_TEXT___"
+  }
+} catch {
+  Write-Output "___OCR_ERROR___: $($_.Exception.Message)"
+} finally {
+  if (Test-Path $tmpFile) { Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue }
+}
+`
+
+  try {
+    const proc = Bun.spawn(
+      ['powershell', '-NoProfile', '-NonInteractive', '-STA', '-Command', script],
+      { stdout: 'pipe', stderr: 'pipe' },
+    )
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => { proc.kill(); reject(new Error('OCR timeout')) }, 20_000)
+    })
+
+    const execPromise = (async () => {
+      const [stdout] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      await proc.exited
+      return stdout
+    })()
+
+    const stdout = await Promise.race([execPromise, timeoutPromise])
+    const text = cleanOutput(stdout).trim()
+
+    if (text === '___NO_IMAGE___') {
+      return { type: 'empty', text: '' }
+    }
+    if (text === '___NO_TEXT___') {
+      return { type: 'image', text: '(Imagem detectada no clipboard, mas sem texto reconhecivel)' }
+    }
+    if (text.startsWith('___OCR_ERROR___')) {
+      return { type: 'error', text: `OCR falhou: ${text.replace('___OCR_ERROR___: ', '')}` }
+    }
+    if (text) {
+      return { type: 'image', text: `[OCR do clipboard]\n${text}` }
+    }
+    return { type: 'empty', text: '' }
+  } catch {
+    return { type: 'error', text: 'Failed to perform OCR on clipboard image.' }
+  }
+}
+
+// ─── UI Awareness ───────────────────────────────────────────
+
+export interface WindowInfo {
+  pid: number
+  name: string
+  title: string
+  memoryMB: number
+}
+
+/**
+ * Get detailed info about visible windows, including foreground window.
+ * Returns structured data about what the user is looking at.
+ */
+export async function analyzeScreenContext(): Promise<string> {
+  if (!IS_WINDOWS) {
+    return 'Error: screen context analysis only available on Windows.'
+  }
+
+  const script = `
+$sig = @'
+[DllImport("user32.dll")]
+public static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll")]
+public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+'@
+$User32 = Add-Type -MemberDefinition $sig -Name User32 -Namespace Win32 -PassThru
+
+$fgHwnd = $User32::GetForegroundWindow()
+$fgPid = 0
+$null = $User32::GetWindowThreadProcessId($fgHwnd, [ref]$fgPid)
+
+$fgProc = if ($fgPid -gt 0) { Get-Process -Id $fgPid -ErrorAction SilentlyContinue } else { $null }
+$fgName = if ($fgProc) { $fgProc.ProcessName } else { "unknown" }
+$fgTitle = if ($fgProc) { $fgProc.MainWindowTitle } else { "" }
+
+Write-Output "=== FOREGROUND ==="
+Write-Output "PID: $fgPid"
+Write-Output "Process: $fgName"
+Write-Output "Title: $fgTitle"
+Write-Output ""
+Write-Output "=== ALL VISIBLE WINDOWS ==="
+
+Get-Process | Where-Object { $_.MainWindowTitle -ne '' } |
+  Sort-Object -Property WorkingSet64 -Descending |
+  Select-Object -First 20 Id, ProcessName,
+    @{N='MemMB';E={[math]::Round($_.WorkingSet64/1MB,1)}},
+    MainWindowTitle |
+  ForEach-Object {
+    $marker = if ($_.Id -eq $fgPid) { " [ACTIVE]" } else { "" }
+    Write-Output "  PID:$($_.Id) | $($_.ProcessName) | $($_.MemMB)MB | $($_.MainWindowTitle)$marker"
+  }
+`
+
+  try {
+    const proc = Bun.spawn(
+      ['powershell', '-NoProfile', '-NonInteractive', '-Command', script],
+      { stdout: 'pipe', stderr: 'pipe' },
+    )
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => { proc.kill(); reject(new Error('screen context timeout')) }, 15_000)
+    })
+
+    const execPromise = (async () => {
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      await proc.exited
+      return { stdout, stderr }
+    })()
+
+    const { stdout, stderr } = await Promise.race([execPromise, timeoutPromise])
+    const output = cleanOutput(stdout).trim()
+    if (!output && stderr.trim()) {
+      return `Error: ${cleanOutput(stderr).trim()}`
+    }
+    return output || 'Nenhuma janela visivel encontrada.'
+  } catch (err) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`
+  }
+}
+
+// ─── Helpers ────────────────────────────────────────────────
+
+/** Strip ANSI escape sequences and trim output length */
+function cleanOutput(text: string): string {
+  const stripped = text.replace(ANSI_RE, '')
+  if (stripped.length > MAX_OUTPUT_LENGTH) {
+    return stripped.slice(0, MAX_OUTPUT_LENGTH) + `\n... (truncated, ${stripped.length} total chars)`
+  }
+  return stripped
+}

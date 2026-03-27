@@ -1,42 +1,209 @@
 /**
  * News radar — fetches headlines from RSS feeds and web sources.
- * Categories: business, tech, finance, brazil, world, security.
+ * Categories: business, tech, finance, brazil, world, security (+ custom).
+ *
+ * Feeds are customizable: default built-in feeds are always available,
+ * and users can add/remove custom feeds persisted in the data directory.
  */
+
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { atomicWriteFile } from './vault'
 
 // ─── RSS Feed Sources ───────────────────────────────────────
 
-interface NewsSource {
+export interface NewsSource {
   name: string
   url: string
   category: NewsCategory
+  builtin?: boolean
 }
 
-export type NewsCategory = 'business' | 'tech' | 'finance' | 'brazil' | 'world' | 'security'
+export type NewsCategory = 'business' | 'tech' | 'finance' | 'brazil' | 'world' | 'security' | string
 
-const FEEDS: readonly NewsSource[] = [
+const DEFAULT_FEEDS: readonly NewsSource[] = [
   // Business & Economy
-  { name: 'InfoMoney', url: 'https://www.infomoney.com.br/feed/', category: 'finance' },
-  { name: 'Valor Economico', url: 'https://pox.globo.com/rss/valor/', category: 'business' },
-  { name: 'Bloomberg Linea BR', url: 'https://www.bloomberglinea.com.br/feed/', category: 'finance' },
+  { name: 'InfoMoney', url: 'https://www.infomoney.com.br/feed/', category: 'finance', builtin: true },
+  { name: 'Valor Economico', url: 'https://pox.globo.com/rss/valor/', category: 'business', builtin: true },
+  { name: 'Bloomberg Linea BR', url: 'https://www.bloomberglinea.com.br/feed/', category: 'finance', builtin: true },
 
   // Tech
-  { name: 'TechCrunch', url: 'https://techcrunch.com/feed/', category: 'tech' },
-  { name: 'Hacker News (best)', url: 'https://hnrss.org/best', category: 'tech' },
-  { name: 'The Verge', url: 'https://www.theverge.com/rss/index.xml', category: 'tech' },
+  { name: 'TechCrunch', url: 'https://techcrunch.com/feed/', category: 'tech', builtin: true },
+  { name: 'Hacker News (best)', url: 'https://hnrss.org/best', category: 'tech', builtin: true },
+  { name: 'The Verge', url: 'https://www.theverge.com/rss/index.xml', category: 'tech', builtin: true },
 
   // Brazil
-  { name: 'G1', url: 'https://g1.globo.com/rss/g1/', category: 'brazil' },
-  { name: 'Folha', url: 'https://feeds.folha.uol.com.br/folha/cotidiano/rss091.xml', category: 'brazil' },
+  { name: 'G1', url: 'https://g1.globo.com/rss/g1/', category: 'brazil', builtin: true },
+  { name: 'Folha', url: 'https://feeds.folha.uol.com.br/folha/cotidiano/rss091.xml', category: 'brazil', builtin: true },
 
   // World
-  { name: 'BBC World', url: 'https://feeds.bbci.co.uk/news/world/rss.xml', category: 'world' },
-  { name: 'Reuters', url: 'https://www.reutersagency.com/feed/', category: 'world' },
+  { name: 'BBC World', url: 'https://feeds.bbci.co.uk/news/world/rss.xml', category: 'world', builtin: true },
+  { name: 'Reuters', url: 'https://www.reutersagency.com/feed/', category: 'world', builtin: true },
 
   // Cybersecurity
-  { name: 'The Hacker News', url: 'https://feeds.feedburner.com/TheHackersNews', category: 'security' },
-  { name: 'BleepingComputer', url: 'https://www.bleepingcomputer.com/feed/', category: 'security' },
-  { name: 'Krebs on Security', url: 'https://krebsonsecurity.com/feed/', category: 'security' },
+  { name: 'The Hacker News', url: 'https://feeds.feedburner.com/TheHackersNews', category: 'security', builtin: true },
+  { name: 'BleepingComputer', url: 'https://www.bleepingcomputer.com/feed/', category: 'security', builtin: true },
+  { name: 'Krebs on Security', url: 'https://krebsonsecurity.com/feed/', category: 'security', builtin: true },
 ]
+
+// ─── Custom Feed Management ─────────────────────────────────
+
+let _dataDir = ''
+let _customFeeds: NewsSource[] = []
+let _disabledFeeds: Set<string> = new Set()
+
+const CUSTOM_FEEDS_FILE = () => join(_dataDir, 'news-feeds.json')
+
+interface StoredFeedConfig {
+  custom: NewsSource[]
+  disabled: string[] // URLs of disabled built-in feeds
+}
+
+function saveCustomFeeds(): void {
+  if (!_dataDir) return
+  const data: StoredFeedConfig = {
+    custom: _customFeeds,
+    disabled: [..._disabledFeeds],
+  }
+  atomicWriteFile(CUSTOM_FEEDS_FILE(), JSON.stringify(data, null, 2))
+}
+
+function loadCustomFeeds(): void {
+  if (!_dataDir) return
+  const file = CUSTOM_FEEDS_FILE()
+  if (!existsSync(file)) {
+    _customFeeds = []
+    _disabledFeeds = new Set()
+    return
+  }
+  try {
+    const data: StoredFeedConfig = JSON.parse(readFileSync(file, 'utf-8'))
+    _customFeeds = data.custom || []
+    _disabledFeeds = new Set(data.disabled || [])
+  } catch {
+    _customFeeds = []
+    _disabledFeeds = new Set()
+  }
+}
+
+/**
+ * Initialize the news system with a data directory for custom feed persistence.
+ */
+export function initNews(dataDir: string): void {
+  _dataDir = dataDir
+  loadCustomFeeds()
+}
+
+/**
+ * Get all active feeds (built-in not disabled + custom).
+ */
+function getActiveFeeds(): NewsSource[] {
+  const builtins = DEFAULT_FEEDS.filter((f) => !_disabledFeeds.has(f.url))
+  return [...builtins, ..._customFeeds]
+}
+
+/**
+ * Add a custom RSS/Atom feed source.
+ */
+export function addNewsFeed(name: string, url: string, category: string): NewsSource | string {
+  const trimName = name.trim()
+  if (!trimName || trimName.length > 100) {
+    return 'Error: nome invalido (1-100 caracteres).'
+  }
+  const trimCat = category.trim().toLowerCase()
+  if (!trimCat || trimCat.length > 30) {
+    return 'Error: categoria invalida (1-30 caracteres).'
+  }
+  const trimUrl = url.trim()
+  if (!trimUrl.startsWith('http://') && !trimUrl.startsWith('https://')) {
+    return 'Error: URL deve comecar com http:// ou https://'
+  }
+  if (trimUrl.length > 500) {
+    return 'Error: URL muito longa (max 500 caracteres).'
+  }
+
+  // Check for duplicate URL
+  const allFeeds = [...DEFAULT_FEEDS, ..._customFeeds]
+  if (allFeeds.some((f) => f.url === trimUrl)) {
+    return 'Error: essa URL ja esta cadastrada.'
+  }
+
+  const feed: NewsSource = {
+    name: trimName,
+    url: trimUrl,
+    category: trimCat,
+  }
+  _customFeeds = [..._customFeeds, feed]
+  saveCustomFeeds()
+  return feed
+}
+
+/**
+ * Remove a custom feed by name or URL. Cannot remove built-in feeds (use disable instead).
+ */
+export function removeNewsFeed(nameOrUrl: string): boolean {
+  const lower = nameOrUrl.toLowerCase().trim()
+  const idx = _customFeeds.findIndex(
+    (f) => f.name.toLowerCase() === lower || f.url === nameOrUrl.trim(),
+  )
+  if (idx === -1) return false
+  _customFeeds = [..._customFeeds.slice(0, idx), ..._customFeeds.slice(idx + 1)]
+  saveCustomFeeds()
+  return true
+}
+
+/**
+ * Disable a built-in feed (it won't be fetched anymore).
+ */
+export function disableNewsFeed(nameOrUrl: string): boolean {
+  const lower = nameOrUrl.toLowerCase().trim()
+  const feed = DEFAULT_FEEDS.find(
+    (f) => f.name.toLowerCase() === lower || f.url === nameOrUrl.trim(),
+  )
+  if (!feed) return false
+  if (_disabledFeeds.has(feed.url)) return false // already disabled
+  _disabledFeeds = new Set([..._disabledFeeds, feed.url])
+  saveCustomFeeds()
+  return true
+}
+
+/**
+ * Re-enable a previously disabled built-in feed.
+ */
+export function enableNewsFeed(nameOrUrl: string): boolean {
+  const lower = nameOrUrl.toLowerCase().trim()
+  const feed = DEFAULT_FEEDS.find(
+    (f) => f.name.toLowerCase() === lower || f.url === nameOrUrl.trim(),
+  )
+  if (!feed) return false
+  if (!_disabledFeeds.has(feed.url)) return false // not disabled
+  _disabledFeeds = new Set([..._disabledFeeds].filter((u) => u !== feed.url))
+  saveCustomFeeds()
+  return true
+}
+
+/**
+ * List all feeds (built-in + custom) with their status.
+ */
+export function listNewsFeeds(): string {
+  const lines: string[] = ['Fontes de noticias:']
+
+  lines.push('\n  --- Built-in ---')
+  for (const f of DEFAULT_FEEDS) {
+    const status = _disabledFeeds.has(f.url) ? ' [DESATIVADO]' : ''
+    lines.push(`  (${f.category}) ${f.name}${status} — ${f.url}`)
+  }
+
+  if (_customFeeds.length > 0) {
+    lines.push('\n  --- Custom ---')
+    for (const f of _customFeeds) {
+      lines.push(`  (${f.category}) ${f.name} — ${f.url}`)
+    }
+  }
+
+  lines.push(`\nTotal: ${getActiveFeeds().length} ativas (${DEFAULT_FEEDS.length} built-in, ${_customFeeds.length} custom, ${_disabledFeeds.size} desativadas)`)
+  return lines.join('\n')
+}
 
 // ─── Constants ──────────────────────────────────────────────
 
@@ -181,9 +348,10 @@ export async function fetchNews(
     return getNewsCategories()
   }
 
+  const active = getActiveFeeds()
   const feeds = categories
-    ? FEEDS.filter((f) => categories.includes(f.category))
-    : FEEDS
+    ? active.filter((f) => categories.includes(f.category))
+    : active
 
   const results = await Promise.allSettled(
     feeds.map((feed) => fetchFeed(feed, cappedMax)),
@@ -270,11 +438,8 @@ async function fetchFeed(source: NewsSource, maxItems: number): Promise<NewsItem
     return items.slice(0, maxItems)
   } catch (err) {
     clearTimeout(timeout)
-    // Log errors for debugging but don't crash
-    if (process.env.DEBUG) {
-      console.error(`[news] ${source.name}: ${err instanceof Error ? err.message : err}`)
-    }
-    return []
+    // Rethrow so Promise.allSettled captures the error
+    throw err
   }
 }
 
@@ -328,8 +493,10 @@ function formatNews(items: NewsItem[], errors: string[]): string {
 }
 
 /**
- * Get list of available categories.
+ * Get list of available categories (including custom).
  */
 export function getNewsCategories(): string {
-  return 'Categorias: business, tech, finance, brazil, world, security\nUso: /news [categoria]'
+  const active = getActiveFeeds()
+  const categories = [...new Set(active.map((f) => f.category))].sort()
+  return `Categorias: ${categories.join(', ')}\nUso: /news [categoria]`
 }

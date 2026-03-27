@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync, renameSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Session, Message } from './types'
+import { atomicWriteFile } from './vault'
 
 export class SessionManager {
   private sessionsDir: string
@@ -101,7 +102,7 @@ export class SessionManager {
       updated: Date.now(),
     }
     const path = join(this.sessionsDir, `${newName}.json`)
-    writeFileSync(path, JSON.stringify(forked, null, 2))
+    atomicWriteFile(path, JSON.stringify(forked, null, 2))
     this.current = forked
     return forked
   }
@@ -189,7 +190,9 @@ export class SessionManager {
       try {
         return JSON.parse(readFileSync(path, 'utf-8'))
       } catch {
-        // Corrupted session file — start fresh
+        // Preserve corrupt file for recovery before overwriting
+        const corruptPath = join(this.sessionsDir, `${name}.corrupt.json`)
+        try { renameSync(path, corruptPath) } catch { /* best effort */ }
       }
     }
     const session: Session = {
@@ -199,12 +202,12 @@ export class SessionManager {
       created: Date.now(),
       updated: Date.now(),
     }
-    writeFileSync(path, JSON.stringify(session, null, 2))
+    atomicWriteFile(path, JSON.stringify(session, null, 2))
     return session
   }
 
   private save(): void {
     const path = join(this.sessionsDir, `${this.current.name}.json`)
-    writeFileSync(path, JSON.stringify(this.current, null, 2))
+    atomicWriteFile(path, JSON.stringify(this.current, null, 2))
   }
 }

@@ -5,9 +5,11 @@
  * Windows toast notifications via PowerShell.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { IS_WINDOWS } from './platform'
+import { atomicWriteFile } from './vault'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -30,7 +32,7 @@ let _onNotify: ((task: Task) => void) | null = null
 const TASKS_FILE = () => join(_dataDir, 'tasks.json')
 
 function save(): void {
-  writeFileSync(TASKS_FILE(), JSON.stringify(_tasks, null, 2))
+  atomicWriteFile(TASKS_FILE(), JSON.stringify(_tasks, null, 2))
 }
 
 function load(): void {
@@ -249,6 +251,21 @@ function checkDueTasks(): void {
   if (changed) save()
 }
 
+/** XML-encode a string for safe embedding in XML attributes/text. */
+function xmlEncode(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
+
+/** Sanitize a string for safe embedding in a PowerShell single-quoted string. */
+function psSingleQuoteEscape(s: string): string {
+  return s.replace(/'/g, "''")
+}
+
 /**
  * Fire a Windows toast notification for a task.
  * Uses PowerShell's BurntToast or built-in toast via .NET.
@@ -256,8 +273,8 @@ function checkDueTasks(): void {
 async function fireNotification(task: Task): Promise<void> {
   if (!IS_WINDOWS) return
 
-  // Use .NET toast notification (works without external modules)
-  const title = task.title.replace(/'/g, "''")
+  // XML-encode title to prevent injection via XML special chars
+  const title = xmlEncode(task.title)
   const cmd = [
     '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null',
     '[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null',
@@ -313,7 +330,8 @@ async function scheduleWindowsTask(task: Task): Promise<void> {
   ].join(':')
 
   // PowerShell command that shows a toast notification
-  const title = task.title.replace(/'/g, "''").replace(/"/g, '\\"')
+  // XML-encode title and escape for PowerShell double-quoted string
+  const title = xmlEncode(task.title).replace(/"/g, '""')
   const toastPs = [
     '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null;',
     '[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null;',
@@ -385,12 +403,7 @@ async function syncScheduledTasks(): Promise<void> {
 // ─── Helpers ────────────────────────────────────────────────
 
 function generateId(): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
-  let id = ''
-  for (let i = 0; i < 6; i++) {
-    id += chars[Math.floor(Math.random() * chars.length)]
-  }
-  return id
+  return randomUUID().slice(0, 8)
 }
 
 function formatDueTime(isoDate: string): string {

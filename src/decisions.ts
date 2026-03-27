@@ -2,8 +2,10 @@
  * Decision log — record important decisions with context and rationale.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { atomicWriteFile } from './vault'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -25,7 +27,7 @@ let _decisions: Decision[] = []
 const DATA_FILE = () => join(_dataDir, 'decisions.json')
 
 function save(): void {
-  writeFileSync(DATA_FILE(), JSON.stringify(_decisions, null, 2))
+  atomicWriteFile(DATA_FILE(), JSON.stringify(_decisions, null, 2))
 }
 
 function load(): void {
@@ -115,8 +117,5 @@ export function formatDecisionDetail(d: Decision): string {
 // ─── Helpers ────────────────────────────────────────────────
 
 function genId(): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
-  let id = ''
-  for (let i = 0; i < 6; i++) id += chars[Math.floor(Math.random() * chars.length)]
-  return id
+  return randomUUID().slice(0, 8)
 }

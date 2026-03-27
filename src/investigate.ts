@@ -9,8 +9,10 @@
  *   incident    — runtime/production incident
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join, resolve, relative } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { atomicWriteFile } from './vault'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -59,7 +61,7 @@ let _investigations: Investigation[] = []
 const DATA_FILE = () => join(_dataDir, 'investigations.json')
 
 function save(): void {
-  writeFileSync(DATA_FILE(), JSON.stringify(_investigations, null, 2))
+  atomicWriteFile(DATA_FILE(), JSON.stringify(_investigations, null, 2))
 }
 
 function load(): void {
@@ -103,6 +105,8 @@ export function openInvestigation(
   return inv
 }
 
+const MAX_EVIDENCE_SIZE = 50_000 // 50 KB max per evidence item
+
 export function collectEvidence(
   investigationRef: string,
   source: EvidenceSource,
@@ -113,11 +117,17 @@ export function collectEvidence(
   const inv = findInvestigation(investigationRef)
   if (!inv) return null
 
+  // Cap content size to prevent unbounded memory/disk growth
+  let trimmedContent = content.trim()
+  if (trimmedContent.length > MAX_EVIDENCE_SIZE) {
+    trimmedContent = trimmedContent.slice(0, MAX_EVIDENCE_SIZE) + `\n...(truncated, ${content.length} total chars)`
+  }
+
   const ev: Evidence = {
     id: genId(),
     source,
     label: label.trim(),
-    content: content.trim(),
+    content: trimmedContent,
     path: path?.trim(),
     timestamp: new Date().toISOString(),
   }
@@ -408,8 +418,5 @@ function severityBadge(severity: Finding['severity']): string {
 }
 
 function genId(): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
-  let id = ''
-  for (let i = 0; i < 6; i++) id += chars[Math.floor(Math.random() * chars.length)]
-  return id
+  return randomUUID().slice(0, 8)
 }

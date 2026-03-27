@@ -52,6 +52,10 @@ export function assessToolRisk(name: string, input: Record<string, unknown>): To
     case 'find_files':
     case 'search_files':
     case 'fetch_url':
+    case 'read_clipboard_content':
+    case 'analyze_screen_context':
+    case 'memory_status':
+    case 'recall_memory':
       return { level: 'safe' }
 
     case 'write_file':
@@ -79,6 +83,9 @@ export function assessToolRisk(name: string, input: Record<string, unknown>): To
 
       return { level: 'moderate', reason: cmd }
     }
+
+    case 'execute_powershell_script':
+      return { level: 'dangerous', reason: `PowerShell script execution` }
 
     default:
       return { level: 'moderate', reason: `unknown tool: ${name}` }

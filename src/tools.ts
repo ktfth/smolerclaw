@@ -3,13 +3,17 @@ import {
   readdirSync,
   readFileSync,
   writeFileSync,
-  renameSync,
   statSync,
   realpathSync,
 } from 'node:fs'
-import { resolve, relative, join, sep, dirname } from 'node:path'
+import { resolve, relative, join, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type Anthropic from '@anthropic-ai/sdk'
+import {
+  atomicWriteFile, getVaultStatus, formatVaultStatus,
+  initShadowBackup, performBackup, syncBackupToRemote,
+  isVaultInitialized,
+} from './vault'
 import { getShell, hasRipgrep, shouldExclude, SEARCH_EXCLUDES, IS_WINDOWS } from './platform'
 import { UndoStack } from './undo'
 import { type Plugin, executePlugin } from './plugins'
@@ -21,7 +25,12 @@ import { openEmailDraft, formatDraftPreview, type EmailDraft } from './email'
 import { startPomodoro, stopPomodoro, pomodoroStatus } from './pomodoro'
 import { addTransaction, getMonthSummary, getRecentTransactions } from './finance'
 import { logDecision, searchDecisions, listDecisions, formatDecisionList, formatDecisionDetail } from './decisions'
-import { runWorkflow, listWorkflows, formatWorkflowList } from './workflows'
+import {
+  runWorkflow, listWorkflows, getWorkflow, createWorkflow, deleteWorkflow,
+  updateWorkflow, duplicateWorkflow, addStepToWorkflow, removeStepFromWorkflow,
+  formatWorkflowList, formatWorkflowDetail,
+  type WorkflowStep,
+} from './workflows'
 import {
   openInvestigation, collectEvidence, addFinding, closeInvestigation,
   getInvestigation, listInvestigations, searchInvestigations, generateReport,
@@ -40,6 +49,25 @@ import {
   saveMaterial, searchMaterials, listMaterials, deleteMaterial, updateMaterial,
   getMaterial, formatMaterialList, formatMaterialDetail, formatMaterialCategories,
 } from './materials'
+import {
+  addNewsFeed, removeNewsFeed, disableNewsFeed, enableNewsFeed, listNewsFeeds,
+} from './news'
+import {
+  queryMemory, buildIndex, getIndexStats, formatQueryResults,
+  isMemoryInitialized,
+} from './memory'
+import {
+  executePowerShellScript, analyzeScriptSafety, analyzeScreenContext,
+  readClipboardContent, type ScriptResult,
+} from './windows-agent'
+import {
+  setActiveProject, getActiveProject, clearActiveProject,
+  addProject, getProject, listProjects, removeProject,
+  startSession, endSession, getOpenSession,
+  addOpportunity, updateOpportunityStatus, listOpportunities, removeOpportunity,
+  generateWorkReport, autoDetectProject,
+  formatProjectList, formatProjectDetail, formatOpportunityList,
+} from './projects'
 
 // Global undo stack shared across tool calls
 export const undoStack = new UndoStack()
@@ -735,6 +763,286 @@ export const MATERIAL_TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+// ─── Vault Tools (cross-platform) ───────────────────────
+
+export const VAULT_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'vault_status',
+    description:
+      'Show the integrity status of all data files: checksum verification, sizes, last backup time. ' +
+      'Use when the user asks about data health, backup status, or says "esta tudo salvo?", "meus dados estao seguros?".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'vault_backup',
+    description:
+      'Perform a manual backup of all data to the shadow backup repository. ' +
+      'Use when the user says "faz backup", "salva tudo", "sync".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        message: { type: 'string', description: 'Optional commit message for the backup.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'sync_cloud_context',
+    description:
+      'Push the backup to a configured remote repository (if set up). ' +
+      'Use when the user says "manda pro cloud", "sync remoto", "push backup".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'vault_init_backup',
+    description:
+      'Initialize the shadow backup system (creates a local git repo for data versioning). ' +
+      'Run once to enable automatic backups.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+]
+
+// ─── Project Management Tools (cross-platform) ─────────
+
+export const PROJECT_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'set_active_project',
+    description:
+      'Set which project the assistant should focus on. Auto-detects from the current directory if not registered. ' +
+      'Use when the user says "estou trabalhando no projeto X", "muda pro projeto Y", or starts work.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        name_or_id: { type: 'string', description: 'Project name, ID, or "auto" to detect from current directory.' },
+      },
+      required: ['name_or_id'],
+    },
+  },
+  {
+    name: 'report_work_progress',
+    description:
+      'Generate a work progress report with git commits, time tracked, and tasks completed. ' +
+      'Outputs a structured Markdown document. ' +
+      'Use when the user says "relatorio", "como estou no projeto", "resumo do trabalho", "progress report".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        project: { type: 'string', description: 'Project name/ID. Defaults to active project.' },
+        period: { type: 'string', enum: ['today', 'week', 'month'], description: 'Report period. Default: today.' },
+        lang: { type: 'string', enum: ['pt', 'en'], description: 'Report language. Default: pt.' },
+        save_to_file: { type: 'string', description: 'Optional file path to save the report. If omitted, returns as text.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'manage_work_session',
+    description:
+      'Start or stop a work session timer for time tracking. ' +
+      'Use when the user says "comecei a trabalhar", "parei de trabalhar", "timer", etc.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        action: { type: 'string', enum: ['start', 'stop', 'status'], description: 'Start, stop, or check session status.' },
+        notes: { type: 'string', description: 'Optional notes for the session.' },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: 'add_project',
+    description:
+      'Register a new project for tracking. ' +
+      'Use when the user mentions a new project or wants to track a directory.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string', description: 'Project name' },
+        path: { type: 'string', description: 'Filesystem path to the project root' },
+        description: { type: 'string', description: 'Brief project description. Optional.' },
+        tech_stack: { type: 'array', items: { type: 'string' }, description: 'Technologies used. Optional.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization. Optional.' },
+      },
+      required: ['name', 'path'],
+    },
+  },
+  {
+    name: 'list_projects',
+    description: 'List all registered projects with their status and tech stack.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        active_only: { type: 'boolean', description: 'Show only active projects. Default false.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'fetch_opportunities',
+    description:
+      'List pending opportunities/tasks filtered by tech stack or priority. ' +
+      'Use when the user asks "tem alguma demanda nova?", "oportunidades", "o que tem pra fazer?".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        status: { type: 'string', enum: ['nova', 'em_analise', 'aceita', 'recusada', 'concluida'], description: 'Filter by status. Optional.' },
+        tech: { type: 'array', items: { type: 'string' }, description: 'Filter by required tech. Optional.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'add_opportunity',
+    description:
+      'Register a new task/opportunity/demand for tracking. ' +
+      'Use when the user mentions a potential project, job lead, or new demand.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        title: { type: 'string', description: 'Opportunity title' },
+        description: { type: 'string', description: 'Details about the opportunity' },
+        source: { type: 'string', description: 'Where this came from (e.g. "LinkedIn", "email", "contato direto")' },
+        tech_required: { type: 'array', items: { type: 'string' }, description: 'Technologies required. Optional.' },
+        priority: { type: 'string', enum: ['alta', 'media', 'baixa'], description: 'Priority level. Default: media.' },
+        deadline: { type: 'string', description: 'Deadline if any (e.g. "30/04", "em 2 semanas"). Optional.' },
+      },
+      required: ['title', 'description', 'source'],
+    },
+  },
+  {
+    name: 'update_opportunity_status',
+    description: 'Update the status of an opportunity.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Opportunity ID' },
+        status: { type: 'string', enum: ['nova', 'em_analise', 'aceita', 'recusada', 'concluida'], description: 'New status' },
+      },
+      required: ['id', 'status'],
+    },
+  },
+]
+
+// ─── Windows Agent Tools (Windows-only) ─────────────────
+
+export const AGENT_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'execute_powershell_script',
+    description:
+      'Execute a PowerShell script on the local machine. The script runs in a temp .ps1 file with -ExecutionPolicy Bypass (scoped). ' +
+      'Safety guards block dangerous operations (Defender, System32, formatting). ' +
+      'Returns stdout, stderr, exit code, and duration. ' +
+      'Use for: automation, system queries, batch operations, registry reads, scheduled tasks.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        script: {
+          type: 'string',
+          description: 'The PowerShell script to execute. Multi-line supported.',
+        },
+      },
+      required: ['script'],
+    },
+  },
+  {
+    name: 'analyze_screen_context',
+    description:
+      'Get detailed information about the user\'s current screen: foreground window (what they are looking at), ' +
+      'all visible windows with PIDs, memory usage, and titles. Use to understand the user\'s current context. Read-only.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'read_clipboard_content',
+    description:
+      'Read the current clipboard content. Auto-detects text or image. ' +
+      'For images, performs OCR using Windows.Media.Ocr to extract text. ' +
+      'Use when the user says "le o que copiei", "o que tem no clipboard", "cola isso", etc. Read-only.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+]
+
+// ─── News Feed Management Tools (cross-platform) ────────
+
+export const NEWSFEED_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'manage_news_feeds',
+    description:
+      'Manage RSS/Atom news feed sources. Actions: add (add custom feed), remove (remove custom feed), ' +
+      'disable (disable a built-in feed), enable (re-enable a disabled built-in), list (show all feeds). ' +
+      'Use when the user says "adiciona essa fonte", "remove o feed", "desativa o TechCrunch", "mostra as fontes".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        action: { type: 'string', enum: ['add', 'remove', 'disable', 'enable', 'list'], description: 'Action to perform.' },
+        name: { type: 'string', description: 'Feed name (for add) or name/URL reference (for remove/disable/enable).' },
+        url: { type: 'string', description: 'RSS/Atom feed URL (required for add).' },
+        category: { type: 'string', description: 'Category for the feed (required for add). E.g. tech, finance, ai, devops.' },
+      },
+      required: ['action'],
+    },
+  },
+]
+
+// ─── Memory/RAG Tools (cross-platform) ──────────────────
+
+export const MEMORY_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'recall_memory',
+    description:
+      'Search the local RAG memory index for relevant information from memos, materials, decisions, and past sessions. ' +
+      'Use when the user asks "o que eu sei sobre...", "lembra de...", "busca na memoria...", or needs context from past interactions. ' +
+      'Returns the top 3 most relevant text fragments.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string', description: 'Natural language query to search the memory index' },
+        top_k: { type: 'number', description: 'Number of results to return. Default 3, max 10.' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'index_memory',
+    description:
+      'Build or update the local RAG memory index. Indexes memos, materials, decisions, and sessions. ' +
+      'Incremental — only re-indexes changed data. Use when the user says "atualiza a memoria", "reindexa", or after adding many new items.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'memory_status',
+    description: 'Show stats about the local RAG memory index: number of indexed chunks, sources, and last build time.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+]
+
 // ─── Archive Tools (cross-platform) ───────────────────────
 
 export const ARCHIVE_TOOLS: Anthropic.Tool[] = [
@@ -792,6 +1100,7 @@ export function registerWindowsTools(): void {
 
   if (IS_WINDOWS) {
     TOOLS.push(...WINDOWS_TOOLS)
+    TOOLS.push(...AGENT_TOOLS)
   } else {
     // Add get_news on all platforms (it's network-only)
     TOOLS.push(NEWS_TOOL)
@@ -805,6 +1114,10 @@ export function registerWindowsTools(): void {
   TOOLS.push(...TIER2_TOOLS)
   TOOLS.push(...INVESTIGATE_TOOLS)
   TOOLS.push(...MATERIAL_TOOLS)
+  TOOLS.push(...MEMORY_TOOLS)
+  TOOLS.push(...NEWSFEED_TOOLS)
+  TOOLS.push(...VAULT_TOOLS)
+  TOOLS.push(...PROJECT_TOOLS)
   TOOLS.push(...ARCHIVE_TOOLS)
 }
 
@@ -1091,6 +1404,223 @@ export async function executeTool(
         if (!id?.trim()) return 'Error: id is required.'
         return deleteMaterial(id) ? 'Material removido.' : `Material nao encontrado: "${id}"`
       }
+      // Windows Agent tools
+      case 'execute_powershell_script': {
+        const script = input.script as string
+        if (!script?.trim()) return 'Error: script is required.'
+        const safety = analyzeScriptSafety(script)
+        if (safety.blocked) return `BLOCKED: ${safety.reason}\nEsse tipo de operacao nao e permitido.`
+        if (!safety.safe && safety.reason) {
+          // Risky but not blocked — the approval system will handle confirmation
+          // via the 'dangerous' risk level in tool-safety.ts
+        }
+        const result: ScriptResult = await executePowerShellScript(script)
+        const parts: string[] = []
+        if (result.stdout.trim()) parts.push(`stdout:\n${result.stdout.trim()}`)
+        if (result.stderr.trim()) parts.push(`stderr:\n${result.stderr.trim()}`)
+        parts.push(`exit: ${result.exitCode} (${result.duration}ms)`)
+        return parts.join('\n\n')
+      }
+      case 'analyze_screen_context':
+        return await analyzeScreenContext()
+      case 'read_clipboard_content': {
+        const clip = await readClipboardContent()
+        switch (clip.type) {
+          case 'text':
+            return `Clipboard (texto):\n${clip.text}`
+          case 'image':
+            return clip.text // Already formatted with [OCR do clipboard] prefix
+          case 'empty':
+            return 'Clipboard vazio.'
+          case 'error':
+            return `Erro ao ler clipboard: ${clip.text}`
+        }
+      }
+      // News feed management
+      case 'manage_news_feeds': {
+        const action = input.action as string
+        switch (action) {
+          case 'list':
+            return listNewsFeeds()
+          case 'add': {
+            const name = input.name as string
+            const url = input.url as string
+            const category = input.category as string
+            if (!name?.trim()) return 'Error: name is required for add.'
+            if (!url?.trim()) return 'Error: url is required for add.'
+            if (!category?.trim()) return 'Error: category is required for add.'
+            const result = addNewsFeed(name, url, category)
+            if (typeof result === 'string') return result
+            return `Fonte adicionada: ${result.name} (${result.category}) — ${result.url}`
+          }
+          case 'remove': {
+            const ref = input.name as string
+            if (!ref?.trim()) return 'Error: name or URL is required.'
+            return removeNewsFeed(ref) ? `Fonte removida: ${ref}` : `Fonte custom nao encontrada: "${ref}"`
+          }
+          case 'disable': {
+            const ref = input.name as string
+            if (!ref?.trim()) return 'Error: name or URL is required.'
+            return disableNewsFeed(ref) ? `Fonte desativada: ${ref}` : `Fonte built-in nao encontrada ou ja desativada: "${ref}"`
+          }
+          case 'enable': {
+            const ref = input.name as string
+            if (!ref?.trim()) return 'Error: name or URL is required.'
+            return enableNewsFeed(ref) ? `Fonte reativada: ${ref}` : `Fonte nao encontrada ou nao esta desativada: "${ref}"`
+          }
+          default:
+            return 'Error: action must be add, remove, disable, enable, or list.'
+        }
+      }
+      // Memory/RAG tools
+      case 'recall_memory': {
+        if (!isMemoryInitialized()) return 'Error: memory not initialized. Run /indexar first.'
+        const query = input.query as string
+        if (!query?.trim()) return 'Error: query is required.'
+        const topK = Math.min(Math.max((input.top_k as number) || 3, 1), 10)
+        const results = queryMemory(query, topK)
+        return formatQueryResults(results)
+      }
+      case 'index_memory': {
+        if (!isMemoryInitialized()) return 'Error: memory not initialized.'
+        const stats = buildIndex()
+        return `Indexacao concluida: ${stats.indexed} fonte(s) indexada(s), ${stats.skipped} sem alteracao. Total: ${stats.total} chunks.`
+      }
+      case 'memory_status': {
+        if (!isMemoryInitialized()) return 'Memory: nao inicializada.'
+        const stats = getIndexStats()
+        const builtStr = stats.builtAt
+          ? new Date(stats.builtAt).toLocaleString('pt-BR')
+          : 'nunca'
+        return `Memory RAG Index:\n  Chunks: ${stats.chunks}\n  Fontes: ${stats.sources}\n  Ultima indexacao: ${builtStr}`
+      }
+      // Vault tools
+      case 'vault_status': {
+        if (!isVaultInitialized()) return 'Vault nao inicializado.'
+        return formatVaultStatus(getVaultStatus())
+      }
+      case 'vault_backup': {
+        if (!isVaultInitialized()) return 'Vault nao inicializado.'
+        const msg = (input.message as string) || undefined
+        return await performBackup(msg)
+      }
+      case 'sync_cloud_context': {
+        if (!isVaultInitialized()) return 'Vault nao inicializado.'
+        return await syncBackupToRemote()
+      }
+      case 'vault_init_backup': {
+        if (!isVaultInitialized()) return 'Vault nao inicializado.'
+        return await initShadowBackup()
+      }
+      // Project management tools
+      case 'set_active_project': {
+        const ref = input.name_or_id as string
+        if (!ref?.trim()) return 'Error: name_or_id is required.'
+        if (ref === 'auto') {
+          const detected = autoDetectProject(process.cwd())
+          if (!detected) return 'Nenhum projeto detectado no diretorio atual (nao e um repositorio git).'
+          setActiveProject(detected.id)
+          return `Projeto ativo: "${detected.name}" (${detected.path}) — auto-detectado [${detected.id}]`
+        }
+        const project = setActiveProject(ref)
+        if (!project) return `Projeto nao encontrado: "${ref}". Use /projetos para listar ou add_project para criar.`
+        return `Projeto ativo: "${project.name}" (${project.path}) [${project.id}]`
+      }
+      case 'report_work_progress': {
+        const projectRef = (input.project as string) || ''
+        const period = (input.period as 'today' | 'week' | 'month') || 'today'
+        const lang = (input.lang as 'pt' | 'en') || 'pt'
+        const savePath = input.save_to_file as string | undefined
+
+        let targetId = projectRef
+        if (!targetId) {
+          const active = getActiveProject()
+          if (!active) return 'Nenhum projeto ativo. Use set_active_project primeiro.'
+          targetId = active.id
+        }
+
+        const report = await generateWorkReport(targetId, period, lang)
+        if (!report) return `Projeto nao encontrado: "${targetId}"`
+
+        if (savePath) {
+          writeFileSync(savePath, report.markdown, 'utf-8')
+          return `Relatorio salvo em: ${savePath}\n\n${report.markdown}`
+        }
+        return report.markdown
+      }
+      case 'manage_work_session': {
+        const action = input.action as string
+        const notes = (input.notes as string) || ''
+
+        const active = getActiveProject()
+        if (!active) return 'Nenhum projeto ativo. Use set_active_project primeiro.'
+
+        switch (action) {
+          case 'start': {
+            const session = startSession(active.id, notes)
+            if (!session) return 'Erro ao iniciar sessao.'
+            return `Sessao iniciada para "${active.name}" as ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}. [${session.id}]`
+          }
+          case 'stop': {
+            const open = getOpenSession(active.id)
+            if (!open) return 'Nenhuma sessao aberta para este projeto.'
+            const ended = endSession(open.id, notes)
+            if (!ended) return 'Erro ao encerrar sessao.'
+            return `Sessao encerrada: ${ended.durationMinutes} minutos trabalhados em "${active.name}".`
+          }
+          case 'status': {
+            const open = getOpenSession(active.id)
+            if (!open) return `Nenhuma sessao aberta para "${active.name}".`
+            const started = new Date(open.startedAt)
+            const elapsed = Math.round((Date.now() - started.getTime()) / 60_000)
+            return `Sessao aberta: "${active.name}" — ${elapsed} minutos (desde ${started.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})`
+          }
+          default:
+            return 'Error: action must be start, stop, or status.'
+        }
+      }
+      case 'add_project': {
+        const name = input.name as string
+        if (!name?.trim()) return 'Error: name is required.'
+        const path = input.path as string
+        if (!path?.trim()) return 'Error: path is required.'
+        const desc = (input.description as string) || ''
+        const tech = (input.tech_stack as string[]) || []
+        const tags = (input.tags as string[]) || []
+        const project = addProject(name, path, desc, tags, tech)
+        return `Projeto registrado: "${project.name}" (${project.path}) [${project.id}]`
+      }
+      case 'list_projects': {
+        const activeOnly = (input.active_only as boolean) || false
+        return formatProjectList(listProjects(activeOnly))
+      }
+      case 'fetch_opportunities': {
+        const status = input.status as string | undefined
+        const tech = input.tech as string[] | undefined
+        const opps = listOpportunities(status as any, tech)
+        return formatOpportunityList(opps)
+      }
+      case 'add_opportunity': {
+        const title = input.title as string
+        if (!title?.trim()) return 'Error: title is required.'
+        const desc = input.description as string
+        if (!desc?.trim()) return 'Error: description is required.'
+        const source = input.source as string
+        if (!source?.trim()) return 'Error: source is required.'
+        const tech = (input.tech_required as string[]) || []
+        const priority = (input.priority as 'alta' | 'media' | 'baixa') || 'media'
+        const deadline = (input.deadline as string) || null
+        const opp = addOpportunity(title, desc, source, tech, priority, deadline)
+        return `Oportunidade registrada: "${opp.title}" (${opp.priority}) [${opp.id}]`
+      }
+      case 'update_opportunity_status': {
+        const id = input.id as string
+        if (!id?.trim()) return 'Error: id is required.'
+        const status = input.status as 'nova' | 'em_analise' | 'aceita' | 'recusada' | 'concluida'
+        const opp = updateOpportunityStatus(id, status)
+        if (!opp) return `Oportunidade nao encontrada: "${id}"`
+        return `Oportunidade atualizada: "${opp.title}" -> ${status}`
+      }
       // Archive tools
       case 'archive_session': {
         if (!_sessionManager) return 'Error: session manager not initialized.'
@@ -1146,11 +1676,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
  * Atomic write: write to temp file then rename.
  * Prevents corruption from crash/power loss mid-write.
  */
-function atomicWrite(filePath: string, content: string): void {
-  const tmp = join(dirname(filePath), `.smolerclaw-${randomUUID().slice(0, 8)}.tmp`)
-  writeFileSync(tmp, content)
-  renameSync(tmp, filePath)
-}
+
 
 function guardPath(filePath: string): string | null {
   const resolved = resolve(filePath)
@@ -1222,7 +1748,7 @@ function toolWriteFile(input: Record<string, unknown>): string {
   const content = input.content as string
   const existed = existsSync(path)
   undoStack.saveState(path)
-  atomicWrite(path, content)
+  atomicWriteFile(path, content)
   const lines = content.split('\n').length
   return `${existed ? 'Updated' : 'Created'}: ${path} (${lines} lines)`
 }
@@ -1250,7 +1776,7 @@ function toolEditFile(input: Record<string, unknown>): string {
   undoStack.saveState(path)
   // Use split/join instead of String.replace to avoid $& back-reference issues
   const updated = content.split(oldText).join(newText)
-  atomicWrite(path, updated)
+  atomicWriteFile(path, updated)
 
   const oldLines = oldText.split('\n').length
   const newLines = newText.split('\n').length
