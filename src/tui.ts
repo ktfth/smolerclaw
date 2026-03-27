@@ -329,6 +329,219 @@ export class TUI {
   /** Flag set when user presses 'a' for approve-all */
   _approveAllRequested = false
 
+  // ── Session Picker ──────────────────────────────────────
+
+  /**
+   * Interactive session picker. Renders a navigable list over the message area.
+   * Returns the selected action or null if cancelled.
+   */
+  promptSessionPicker(
+    entries: SessionPickerEntry[],
+  ): Promise<SessionPickerResult | null> {
+    if (entries.length === 0) {
+      this.showSystem('No sessions found.')
+      return Promise.resolve(null)
+    }
+
+    return new Promise<SessionPickerResult | null>((resolve) => {
+      let cursor = entries.findIndex((e) => e.isCurrent)
+      if (cursor < 0) cursor = 0
+      let filter = ''
+      let filterMode = false
+
+      const filtered = (): SessionPickerEntry[] => {
+        if (!filter) return entries
+        const q = filter.toLowerCase()
+        return entries.filter((e) => e.name.toLowerCase().includes(q))
+      }
+
+      const renderPicker = (): void => {
+        const headerH = 2
+        const footerH = 2
+        const avail = this.height - headerH - footerH
+
+        const items = filtered()
+        if (cursor >= items.length) cursor = Math.max(0, items.length - 1)
+
+        // Calculate visible window (scroll if list exceeds available space)
+        const titleLines = 2 // title + blank
+        const hintLines = 2  // blank + hints
+        const listAvail = avail - titleLines - hintLines
+        const maxVisible = Math.max(1, listAvail)
+
+        let scrollStart = 0
+        if (items.length > maxVisible) {
+          scrollStart = Math.max(0, cursor - Math.floor(maxVisible / 2))
+          scrollStart = Math.min(scrollStart, items.length - maxVisible)
+        }
+        const visibleItems = items.slice(scrollStart, scrollStart + maxVisible)
+
+        w(A.hide)
+        // Title
+        w(A.to(headerH + 1, 1))
+        w(A.clearLine)
+        if (filterMode) {
+          w(`  ${C.heading}${A.bold}Sessions${A.reset}  ${A.dim}filter: ${filter}█${A.reset}`)
+        } else {
+          w(`  ${C.heading}${A.bold}Sessions${A.reset}  ${A.dim}(${items.length})${A.reset}`)
+        }
+        w(A.to(headerH + 2, 1))
+        w(A.clearLine)
+
+        // List
+        for (let i = 0; i < maxVisible; i++) {
+          const row = headerH + titleLines + i + 1
+          w(A.to(row, 1))
+          w(A.clearLine)
+          if (i >= visibleItems.length) continue
+
+          const entry = visibleItems[i]
+          const idx = scrollStart + i
+          const isSelected = idx === cursor
+          const marker = entry.isCurrent ? '*' : ' '
+          const archLabel = entry.isArchived ? `${A.dim}[arch] ${A.reset}` : '       '
+          const msgs = `${entry.messageCount} msgs`.padEnd(10)
+          const age = formatPickerAge(entry.updated)
+
+          if (isSelected) {
+            w(`  ${C.prompt}${A.bold}› ${marker} ${archLabel}${C.prompt}${A.bold}${entry.name.padEnd(20)}${A.reset} ${A.dim}${msgs} ${age}${A.reset}`)
+          } else {
+            const nameColor = entry.isArchived ? A.dim : C.sys
+            w(`    ${marker} ${archLabel}${nameColor}${entry.name.padEnd(20)}${A.reset} ${A.dim}${msgs} ${age}${A.reset}`)
+          }
+        }
+
+        // Clear remaining rows
+        for (let i = visibleItems.length; i < maxVisible; i++) {
+          const row = headerH + titleLines + i + 1
+          w(A.to(row, 1))
+          w(A.clearLine)
+        }
+
+        // Scroll indicator
+        const indicatorRow = headerH + titleLines + maxVisible + 1
+        w(A.to(indicatorRow, 1))
+        w(A.clearLine)
+        if (items.length > maxVisible) {
+          const pct = Math.round(((cursor + 1) / items.length) * 100)
+          w(`  ${A.dim}${scrollStart > 0 ? '↑' : ' '} ${pct}% ${scrollStart + maxVisible < items.length ? '↓' : ' '}${A.reset}`)
+        }
+
+        // Hints
+        const hintRow = this.height - footerH
+        w(A.to(hintRow, 1))
+        w(A.clearLine)
+        w(`  ${A.dim}↑↓ navigate  Enter select  Esc cancel  / filter  d delete  a archive${A.reset}`)
+      }
+
+      const cleanup = (result: SessionPickerResult | null): void => {
+        process.stdin.removeListener('data', handler)
+        // Restore message area
+        this.renderAll()
+        resolve(result)
+      }
+
+      const handler = (data: Buffer): void => {
+        const key = data.toString('utf-8')
+        const items = filtered()
+
+        // Esc — exit filter mode or cancel picker
+        if (key === '\x1b' && data.length === 1) {
+          if (filterMode) {
+            filterMode = false
+            filter = ''
+            renderPicker()
+          } else {
+            cleanup(null)
+          }
+          return
+        }
+
+        // Ctrl+C — cancel
+        if (key === '\x03') {
+          cleanup(null)
+          return
+        }
+
+        // Enter — select
+        if (key === '\r' || key === '\n') {
+          if (items.length > 0 && cursor < items.length) {
+            cleanup({ action: 'load', name: items[cursor].name })
+          }
+          return
+        }
+
+        // Arrow keys
+        if (key === '\x1b[A') { // Up
+          if (cursor > 0) { cursor--; renderPicker() }
+          return
+        }
+        if (key === '\x1b[B') { // Down
+          if (cursor < items.length - 1) { cursor++; renderPicker() }
+          return
+        }
+
+        // 'd' — delete (only outside filter mode)
+        if (key === 'd' && filterMode === false) {
+          if (items.length > 0 && cursor < items.length) {
+            const entry = items[cursor]
+            if (!entry.isCurrent) {
+              cleanup({ action: 'delete', name: entry.name, isArchived: entry.isArchived })
+            }
+          }
+          return
+        }
+
+        // 'a' — archive/unarchive (only outside filter mode)
+        if (key === 'a' && filterMode === false) {
+          if (items.length > 0 && cursor < items.length) {
+            const entry = items[cursor]
+            if (!entry.isCurrent) {
+              const action = entry.isArchived ? 'unarchive' : 'archive'
+              cleanup({ action, name: entry.name })
+            }
+          }
+          return
+        }
+
+        // '/' — toggle filter mode
+        if (key === '/' && filterMode === false) {
+          filterMode = true
+          filter = ''
+          renderPicker()
+          return
+        }
+
+        // In filter mode, handle typing
+        if (filterMode) {
+          // Backspace in filter
+          if (key === '\x7f' || key === '\b') {
+            if (filter.length > 0) {
+              filter = filter.slice(0, -1)
+              cursor = 0
+              renderPicker()
+            } else {
+              // Exit filter mode on backspace with empty filter
+              filterMode = false
+              renderPicker()
+            }
+            return
+          }
+          // Printable char in filter
+          if (key.length === 1 && key >= ' ') {
+            filter += key
+            cursor = 0
+            renderPicker()
+            return
+          }
+        }
+      }
+
+      process.stdin.on('data', handler)
+      renderPicker()
+    })
+  }
+
   showUsage(msg: string): void {
     this.lines.push({ text: `  ${A.dim}tokens: ${msg}${A.reset}` })
     this.renderAll()
@@ -803,4 +1016,34 @@ function nextCharLength(s: string, pos: number): number {
     return 2
   }
   return 1
+}
+
+// ─── Session Picker Types ─────────────────────────────────
+
+export interface SessionPickerEntry {
+  name: string
+  messageCount: number
+  updated: number
+  isCurrent: boolean
+  isArchived: boolean
+}
+
+export type SessionPickerResult =
+  | { action: 'load'; name: string }
+  | { action: 'delete'; name: string; isArchived?: boolean }
+  | { action: 'archive'; name: string }
+  | { action: 'unarchive'; name: string }
+
+function formatPickerAge(timestamp: number): string {
+  const diff = Date.now() - timestamp
+  const secs = Math.floor(diff / 1000)
+  if (secs < 60) return 'just now'
+  const mins = Math.floor(secs / 60)
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days}d ago`
+  const months = Math.floor(days / 30)
+  return `${months}mo ago`
 }

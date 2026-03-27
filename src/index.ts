@@ -6,6 +6,7 @@ import { ClaudeProvider } from './claude'
 import { SessionManager } from './session'
 import { loadSkills, buildSystemPrompt, formatSkillList } from './skills'
 import { TUI } from './tui'
+import type { SessionPickerEntry } from './tui'
 import { TokenTracker } from './tokens'
 import { exportToMarkdown } from './export'
 import { resolveModel, formatModelList, modelDisplayName } from './models'
@@ -413,19 +414,68 @@ async function runInteractive(
       case 'sessions':
       case 'sessoes':
       case 'ls': {
-        const list = sessions.list()
-        if (list.length === 0) {
-          tui.showSystem('No saved sessions.')
-          break
-        }
-        const details = list.map((name) => {
+        const active: SessionPickerEntry[] = sessions.list().map((name) => {
           const info = sessions.getInfo(name)
-          const marker = name === sessions.session.name ? ' *' : '  '
-          const age = info ? formatAge(info.updated) : ''
-          const msgs = info ? `${info.messageCount} msgs` : ''
-          return `${marker} ${name.padEnd(20)} ${msgs.padEnd(10)} ${age}`
+          return {
+            name,
+            messageCount: info?.messageCount ?? 0,
+            updated: info?.updated ?? 0,
+            isCurrent: name === sessions.session.name,
+            isArchived: false,
+          }
         })
-        tui.showSystem('Sessions:\n' + details.join('\n'))
+        const archived: SessionPickerEntry[] = sessions.listArchived().map((name) => {
+          const info = sessions.getArchivedInfo(name)
+          return {
+            name,
+            messageCount: info?.messageCount ?? 0,
+            updated: info?.updated ?? 0,
+            isCurrent: false,
+            isArchived: true,
+          }
+        })
+        const pickerResult = await tui.promptSessionPicker([...active, ...archived])
+        if (pickerResult) {
+          switch (pickerResult.action) {
+            case 'load': {
+              const target = pickerResult.name
+              const wasArchived = archived.some((e) => e.name === target)
+              if (wasArchived) sessions.unarchive(target)
+              sessions.switchTo(target)
+              tui.clearMessages()
+              for (const msg of sessions.messages) {
+                if (msg.role === 'user') tui.addUserMessage(msg.content)
+                else tui.addAssistantMessage(msg.content)
+              }
+              tui.updateSession(target)
+              tui.showSystem(`Loaded: ${target}`)
+              break
+            }
+            case 'delete': {
+              const target = pickerResult.name
+              const deleted = pickerResult.isArchived
+                ? sessions.deleteArchived(target)
+                : sessions.delete(target)
+              if (deleted) tui.showSystem(`Deleted: ${target}`)
+              else tui.showError(`Not found: ${target}`)
+              break
+            }
+            case 'archive':
+              if (sessions.archive(pickerResult.name)) {
+                tui.showSystem(`Archived: ${pickerResult.name}`)
+              } else {
+                tui.showError(`Failed to archive: ${pickerResult.name}`)
+              }
+              break
+            case 'unarchive':
+              if (sessions.unarchive(pickerResult.name)) {
+                tui.showSystem(`Restored: ${pickerResult.name}`)
+              } else {
+                tui.showError(`Not found in archive: ${pickerResult.name}`)
+              }
+              break
+          }
+        }
         break
       }
 
