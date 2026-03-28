@@ -38,6 +38,7 @@ import { initMemory, buildIndex, queryMemory, getIndexStats, formatQueryResults 
 import { initVault, getVaultStatus, formatVaultStatus, initShadowBackup, performBackup, syncBackupToRemote, startAutoBackup, stopAutoBackup } from './vault'
 import { executePowerShellScript, analyzeScreenContext, readClipboardContent } from './windows-agent'
 import { initPitwall } from './pitwall'
+import { initDecisionEngine } from './services/decision-engine'
 import {
   initProjects, setActiveProject, getActiveProject, autoDetectProject,
   listProjects, getProject, startSession, endSession, getOpenSession,
@@ -218,6 +219,7 @@ async function runInteractive(
   initMemory(config.dataDir)
   initProjects(config.dataDir)
   initPitwall(config.dataDir)
+  initDecisionEngine(config.dataDir)
   initMonitor((msg) => tui.showSystem(`\n*** ${msg} ***\n`))
   initTasks(config.dataDir, (task: Task) => {
     tui.showSystem(`\n*** LEMBRETE: ${task.title} ***\n`)

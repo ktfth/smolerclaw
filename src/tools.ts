@@ -77,6 +77,13 @@ import {
   buildDependencyGraph, calculateBlastRadius, planRefactor,
   formatBlastRadius, formatRefactorPlan,
 } from './services/dependency-graph'
+import {
+  analyzeTradeoffs, correlateIncident, logIncident,
+  listTradeoffs, listIncidents, searchIncidents, searchTradeoffs, getTradeoff,
+  formatTradeoffList, formatIncidentList, formatIncidentDetail,
+  DEFAULT_CRITERIA,
+  type TradeoffContext, type TradeoffOption, type TradeoffCriterion,
+} from './services/decision-engine'
 
 // Global undo stack shared across tool calls
 export const undoStack = new UndoStack()
@@ -1041,6 +1048,169 @@ export const BLAST_RADIUS_TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+// ─── Decision Engine Tools (cross-platform) ─────────────
+
+export const DECISION_ENGINE_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'evaluate_architecture_tradeoffs',
+    description:
+      'Analyze trade-offs between architectural options using a weighted evaluation matrix. ' +
+      'Returns an ADR (Architecture Decision Record) with recommendation. ' +
+      'Default criteria: Maintainability (30%), Performance (25%), Learning Curve (20%), Infrastructure Cost (25%). ' +
+      'Use when comparing technologies, frameworks, patterns, or infrastructure choices.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Title of the decision, e.g., "Redis vs SQLite for session storage".',
+        },
+        background: {
+          type: 'string',
+          description: 'Context and background of the decision — why is this decision needed?',
+        },
+        constraints: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Project constraints, e.g., "Must run on Kubernetes", "Budget < $100/mo".',
+        },
+        stakeholders: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'People/teams affected, e.g., "Backend Team", "DevOps".',
+        },
+        options: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Option name, e.g., "Redis".' },
+              description: { type: 'string', description: 'Brief description of this option.' },
+              scores: {
+                type: 'object',
+                description: 'Scores for each criterion (1-5). Keys: maintainability, performance, learning_curve, infrastructure_cost.',
+              },
+              pros: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Advantages of this option.',
+              },
+              cons: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Disadvantages of this option.',
+              },
+            },
+            required: ['name', 'description', 'scores', 'pros', 'cons'],
+          },
+          description: 'List of options to compare (minimum 2).',
+        },
+        custom_criteria: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Criterion name.' },
+              weight: { type: 'number', description: 'Weight (0.0-1.0). Must sum to 1.0 across all criteria.' },
+              description: { type: 'string', description: 'What this criterion measures.' },
+            },
+            required: ['name', 'weight', 'description'],
+          },
+          description: 'Optional custom criteria. If not provided, uses default criteria.',
+        },
+      },
+      required: ['title', 'background', 'options'],
+    },
+  },
+  {
+    name: 'correlate_incident',
+    description:
+      'Analyze an error or bug and search for similar past incidents, related decisions, and relevant materials. ' +
+      'Returns correlation matches with suggested solutions and actions based on historical data. ' +
+      'Use when debugging, troubleshooting, or investigating an error.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        description: {
+          type: 'string',
+          description: 'Description of the current error or bug.',
+        },
+        stacktrace: {
+          type: 'string',
+          description: 'Optional stacktrace or error output for better matching.',
+        },
+      },
+      required: ['description'],
+    },
+  },
+  {
+    name: 'log_incident',
+    description:
+      'Log a resolved incident for future correlation. This feeds the Post-Mortem database. ' +
+      'Use after resolving a bug to help accelerate future debugging.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        title: { type: 'string', description: 'Short title of the incident.' },
+        description: { type: 'string', description: 'Detailed description of what happened.' },
+        root_cause: { type: 'string', description: 'Root cause analysis.' },
+        solution: { type: 'string', description: 'How the incident was resolved.' },
+        stacktrace: { type: 'string', description: 'Optional stacktrace for better correlation.' },
+        related_decisions: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'IDs of related decisions from the Decision Log.',
+        },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Tags for categorization, e.g., "memory-leak", "timeout", "auth".',
+        },
+      },
+      required: ['title', 'description', 'root_cause', 'solution'],
+    },
+  },
+  {
+    name: 'list_tradeoff_analyses',
+    description:
+      'List past architecture trade-off analyses. Use to review previous decisions and their rationale.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        limit: { type: 'number', description: 'Maximum number of results (default 10).' },
+        query: { type: 'string', description: 'Optional search query to filter results.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'list_incidents',
+    description:
+      'List logged incidents from the Post-Mortem database. Use to review past issues and solutions.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        limit: { type: 'number', description: 'Maximum number of results (default 10).' },
+        query: { type: 'string', description: 'Optional search query to filter results.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_tradeoff_adr',
+    description:
+      'Get the full ADR (Architecture Decision Record) for a past trade-off analysis by ID. ' +
+      'Returns the complete Markdown document.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'ID of the trade-off analysis.' },
+      },
+      required: ['id'],
+    },
+  },
+]
+
 // ─── Windows Agent Tools (Windows-only) ─────────────────
 
 export const AGENT_TOOLS: Anthropic.Tool[] = [
@@ -1227,6 +1397,7 @@ export function registerWindowsTools(): void {
   TOOLS.push(...PITWALL_TOOLS)
   TOOLS.push(...BLAST_RADIUS_TOOLS)
   TOOLS.push(...ARCHIVE_TOOLS)
+  TOOLS.push(...DECISION_ENGINE_TOOLS)
 }
 
 // ─── Tool Execution ──────────────────────────────────────────
@@ -1850,6 +2021,106 @@ export async function executeTool(
           return `  ${name.padEnd(20)} ${msgs.padEnd(10)} ${age}`
         })
         return `Sessoes arquivadas (${list.length}):\n${details.join('\n')}`
+      }
+      // Decision Engine tools
+      case 'evaluate_architecture_tradeoffs': {
+        const title = input.title as string
+        if (!title?.trim()) return 'Error: title is required.'
+        const background = input.background as string
+        if (!background?.trim()) return 'Error: background is required.'
+        const optionsInput = input.options as Array<{
+          name: string
+          description: string
+          scores: Record<string, number>
+          pros: string[]
+          cons: string[]
+        }>
+        if (!optionsInput || optionsInput.length < 2) {
+          return 'Error: at least 2 options are required.'
+        }
+
+        const context: TradeoffContext = {
+          title: title.trim(),
+          background: background.trim(),
+          constraints: (input.constraints as string[]) || [],
+          stakeholders: (input.stakeholders as string[]) || [],
+        }
+
+        const options: TradeoffOption[] = optionsInput.map((o) => ({
+          name: o.name.trim(),
+          description: o.description.trim(),
+          scores: o.scores,
+          pros: o.pros || [],
+          cons: o.cons || [],
+        }))
+
+        const customCriteria = input.custom_criteria as TradeoffCriterion[] | undefined
+        const criteria = customCriteria && customCriteria.length > 0
+          ? customCriteria
+          : DEFAULT_CRITERIA
+
+        const result = analyzeTradeoffs(context, options, criteria)
+        return result.adr
+      }
+      case 'correlate_incident': {
+        const description = input.description as string
+        if (!description?.trim()) return 'Error: description is required.'
+        const stacktrace = input.stacktrace as string | undefined
+
+        const result = correlateIncident(description, stacktrace)
+        return result.summary
+      }
+      case 'log_incident': {
+        const title = input.title as string
+        if (!title?.trim()) return 'Error: title is required.'
+        const description = input.description as string
+        if (!description?.trim()) return 'Error: description is required.'
+        const rootCause = input.root_cause as string
+        if (!rootCause?.trim()) return 'Error: root_cause is required.'
+        const solution = input.solution as string
+        if (!solution?.trim()) return 'Error: solution is required.'
+
+        const incident = logIncident(
+          title,
+          description,
+          rootCause,
+          solution,
+          input.stacktrace as string | undefined,
+          (input.related_decisions as string[]) || [],
+          (input.tags as string[]) || [],
+        )
+        return `Incidente registrado: "${incident.title}"  {${incident.id}}\n` +
+          `  Causa: ${incident.rootCause.slice(0, 80)}${incident.rootCause.length > 80 ? '...' : ''}\n` +
+          `  Solucao: ${incident.solution.slice(0, 80)}${incident.solution.length > 80 ? '...' : ''}`
+      }
+      case 'list_tradeoff_analyses': {
+        const limit = (input.limit as number) || 10
+        const query = input.query as string | undefined
+
+        const results = query
+          ? searchTradeoffs(query).slice(0, limit)
+          : listTradeoffs(limit)
+
+        return formatTradeoffList(results)
+      }
+      case 'list_incidents': {
+        const limit = (input.limit as number) || 10
+        const query = input.query as string | undefined
+
+        const results = query
+          ? searchIncidents(query).slice(0, limit)
+          : listIncidents(limit)
+
+        return formatIncidentList(results)
+      }
+      case 'get_tradeoff_adr': {
+        const id = input.id as string
+        if (!id?.trim()) return 'Error: id is required.'
+
+        const tradeoff = getTradeoff(id)
+        if (!tradeoff) return `Trade-off nao encontrado: "${id}"`
+
+        return tradeoff.adr
       }
       default: {
         // Check plugins
