@@ -45,6 +45,7 @@ import {
   listOpportunities, generateWorkReport, getProjectBriefingSummary,
   formatProjectList, formatProjectDetail, formatOpportunityList,
 } from './projects'
+import { initDocsEngine, runSelfReflection } from './services/docs-engine'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Message, ToolCall } from './types'
@@ -220,6 +221,10 @@ async function runInteractive(
   initProjects(config.dataDir)
   initPitwall(config.dataDir)
   initDecisionEngine(config.dataDir)
+  initDocsEngine(config.dataDir, (insight) => {
+    // Non-blocking notification when an immediate insight is generated
+    tui.showSystem(`\n*** Meta-Insight: ${insight.title} ***\n${insight.recommendation}\n`)
+  })
   initMonitor((msg) => tui.showSystem(`\n*** ${msg} ***\n`))
   initTasks(config.dataDir, (task: Task) => {
     tui.showSystem(`\n*** LEMBRETE: ${task.title} ***\n`)
@@ -759,6 +764,9 @@ async function runInteractive(
             '  /tasks /tarefas         Listar pendentes',
             '  /done /feito            Marcar como concluida',
             '  /rmtask /rmtarefa       Remover tarefa',
+            '',
+            'Meta-Learning:',
+            '  /reflect /reflexao      Analisa uso e gera insights',
             '',
             'Tab completes commands. Use \\ at end of line for multi-line.',
             '',
@@ -1525,6 +1533,23 @@ async function runInteractive(
         break
       }
 
+      // ── Meta-Learning commands ──────────────────────────────
+
+      case 'reflect':
+      case 'reflexao':
+      case 'aprender': {
+        tui.showSystem('Executando reflexao de uso...')
+        tui.disableInput()
+        try {
+          const result = await runSelfReflection()
+          tui.showSystem(result.summary)
+        } catch (err) {
+          tui.showError(`Reflexao falhou: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        tui.enableInput()
+        break
+      }
+
       // ── Memory/RAG commands ────────────────────────────────
 
       case 'indexar':
@@ -1926,6 +1951,12 @@ async function runInteractive(
     stopPomodoroTimer()
     stopAllMonitors()
     stopAutoBackup()
+
+    // Run self-reflection asynchronously before exit (non-blocking)
+    runSelfReflection().catch(() => {
+      // Best effort - don't block exit if reflection fails
+    })
+
     tui.stop()
     process.exit(0)
   }
