@@ -6,7 +6,7 @@ import { ClaudeProvider } from './claude'
 import { SessionManager } from './session'
 import { loadSkills, buildSystemPrompt, formatSkillList } from './skills'
 import { TUI } from './tui'
-import type { SessionPickerEntry, NewsPickerEntry } from './tui'
+import type { SessionPickerEntry, NewsPickerEntry, DashboardLayout, DashboardPanel } from './tui'
 import { TokenTracker } from './tokens'
 import { exportToMarkdown } from './export'
 import { resolveModel, formatModelList, modelDisplayName } from './models'
@@ -1950,8 +1950,39 @@ async function runInteractive(
   // Morning briefing — first run of the day
   if (isFirstRunToday(config.dataDir)) {
     try {
-      const briefing = await generateMorningBriefing()
-      tui.showSystem(briefing)
+      // Generate dashboard layout for morning briefing
+      const dashboardData = await generateDashboardBriefing()
+
+      if (dashboardData.panels.length > 0) {
+        // Enter Dashboard Mode for the morning briefing
+        tui.enterDashboardMode(dashboardData)
+
+        // After 30 seconds or user input, return to chat mode
+        const exitDashboardHandler = (): void => {
+          tui.enterChatMode()
+          tui.showSystem('Briefing exibido. Pressione qualquer tecla para continuar.')
+          process.stdin.removeListener('data', exitDashboardHandler)
+        }
+
+        // Auto-exit dashboard after 30 seconds
+        setTimeout(() => {
+          if (tui.getViewMode() === 'dashboard') {
+            tui.enterChatMode()
+          }
+        }, 30_000)
+
+        // Exit on any key press
+        process.stdin.once('data', () => {
+          if (tui.getViewMode() === 'dashboard') {
+            tui.enterChatMode()
+          }
+        })
+      } else {
+        // Fallback to text briefing if dashboard data is empty
+        const briefing = await generateMorningBriefing()
+        tui.showSystem(briefing)
+      }
+
       markMorningDone()
     } catch {
       // Don't block startup if briefing fails
@@ -1961,6 +1992,149 @@ async function runInteractive(
   // Auto-submit initial prompt if provided
   if (initialPrompt) {
     await handleSubmit(initialPrompt)
+  }
+}
+
+/**
+ * Generate dashboard layout data for morning briefing.
+ * Returns panels for tasks, follow-ups, calendar, and news.
+ */
+async function generateDashboardBriefing(): Promise<DashboardLayout> {
+  const panels: DashboardPanel[] = []
+
+  // Greeting based on time of day
+  const hour = new Date().getHours()
+  const greeting = hour < 12 ? 'BOM DIA' : hour < 18 ? 'BOA TARDE' : 'BOA NOITE'
+  const dateStr = new Date().toLocaleDateString('pt-BR', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+
+  // Tasks panel
+  const tasks = listTasks()
+  const todayTasks = tasks.filter((t) => {
+    if (!t.dueAt) return true // Include tasks without due date
+    const due = new Date(t.dueAt)
+    const today = new Date()
+    return due.toDateString() === today.toDateString()
+  })
+
+  if (todayTasks.length > 0 || tasks.length > 0) {
+    const taskLines = todayTasks.slice(0, 8).map((t) => {
+      const time = t.dueAt
+        ? new Date(t.dueAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+        : ''
+      return `${time ? `[${time}] ` : ''}${t.title}`
+    })
+
+    if (tasks.length > todayTasks.length) {
+      taskLines.push(`... +${tasks.length - todayTasks.length} outras`)
+    }
+
+    panels.push({
+      id: 'tasks',
+      title: `${greeting}! Tarefas (${todayTasks.length})`,
+      content: taskLines.length > 0 ? taskLines : ['Nenhuma tarefa para hoje'],
+    })
+  }
+
+  // Follow-ups panel
+  const followUps = getPendingFollowUps()
+  if (followUps.length > 0) {
+    const followUpLines = followUps.slice(0, 6).map((f) => {
+      const personName = f.person.name || 'Alguem'
+      const summary = f.interaction.summary || 'Follow-up pendente'
+      return `${personName}: ${summary.slice(0, 30)}...`
+    })
+
+    panels.push({
+      id: 'followups',
+      title: `Follow-ups (${followUps.length})`,
+      content: followUpLines,
+    })
+  }
+
+  // Delegations panel (overdue)
+  const delegations = getDelegations()
+  const overdue = delegations.filter((d) => d.status === 'atrasado')
+  if (overdue.length > 0) {
+    const overdueLines = overdue.slice(0, 5).map((d) => {
+      // Look up person name by ID
+      const person = findPerson(d.personId)
+      const personName = person?.name || 'Alguem'
+      return `${personName}: ${d.task.slice(0, 25)}...`
+    })
+
+    panels.push({
+      id: 'delegations',
+      title: `Atrasados (${overdue.length})`,
+      content: overdueLines,
+    })
+  }
+
+  // Calendar panel (Windows only)
+  try {
+    const events = await getOutlookEvents()
+    const eventLines = events.split('\n').filter((l) => l.trim()).slice(0, 6)
+
+    if (eventLines.length > 0) {
+      panels.push({
+        id: 'calendar',
+        title: 'Agenda',
+        content: eventLines,
+      })
+    }
+  } catch {
+    // Skip calendar if not available
+  }
+
+  // Project summary
+  const projectSummary = getProjectBriefingSummary()
+  if (projectSummary) {
+    const projectLines = projectSummary.split('\n').filter((l) => l.trim()).slice(0, 5)
+    panels.push({
+      id: 'project',
+      title: 'Projetos',
+      content: projectLines,
+    })
+  }
+
+  // News panel (limited)
+  try {
+    const news = await fetchNews(['finance', 'business', 'tech'], 2)
+    const newsLines = news.split('\n').filter((l) => l.trim()).slice(0, 6)
+
+    if (newsLines.length > 0) {
+      panels.push({
+        id: 'news',
+        title: 'Noticias',
+        content: newsLines,
+      })
+    }
+  } catch {
+    // Skip news if fetch fails
+  }
+
+  // If no panels, add a simple greeting panel
+  if (panels.length === 0) {
+    panels.push({
+      id: 'greeting',
+      title: greeting,
+      content: [
+        dateStr,
+        '',
+        'Nenhuma tarefa ou evento pendente.',
+        'Use /ajuda para ver comandos disponíveis.',
+      ],
+    })
+  }
+
+  return {
+    panels,
+    columns: Math.min(2, panels.length),
+    gap: 1,
   }
 }
 

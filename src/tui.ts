@@ -2,12 +2,27 @@ import { A, C, CSI, w, stripAnsi, wrapText, visibleLength, displayWidth } from '
 import { renderMarkdown } from './markdown'
 import { InputHistory } from './history'
 import { join } from 'node:path'
+import {
+  ViewManager,
+  renderStatusBar,
+  renderBox,
+  renderSplitView,
+  renderTable,
+  setScrollRegion,
+  resetScrollRegion,
+  type ViewMode,
+  type DashboardLayout,
+  type DashboardPanel,
+  type StatusBarConfig,
+} from './tui/index'
 
 // ─── TUI ─────────────────────────────────────────────────────
 
 interface Line {
   text: string
 }
+
+export type { ViewMode, DashboardLayout, DashboardPanel }
 
 export class TUI {
   private width = 80
@@ -25,6 +40,17 @@ export class TUI {
   private spinnerTimer: ReturnType<typeof setInterval> | null = null
   private streamStartTime = 0
   private sessionCost = ''
+
+  // View mode state
+  private viewMode: ViewMode = 'chat'
+  private viewManager: ViewManager
+  private dashboardContent: DashboardPanel[] = []
+  private statusBarEnabled = true
+  private inputTokens = 0
+  private outputTokens = 0
+  private activeProject = ''
+  private vaultStatus: 'ok' | 'warn' | 'error' = 'ok'
+  private stickyStatusRow = 0
   private commands = [
     // English
     '/help', '/clear', '/commit', '/persona', '/copy', '/fork',
@@ -122,7 +148,9 @@ export class TUI {
     private sessionName: string,
     private authInfo: string = '',
     private dataDir?: string,
-  ) {}
+  ) {
+    this.viewManager = new ViewManager()
+  }
 
   start(handlers: {
     onSubmit: (s: string) => void
@@ -814,19 +842,196 @@ export class TUI {
     w(A.hide)
   }
 
+  // ── View Mode API ─────────────────────────────────────────
+
+  /**
+   * Get current view mode.
+   */
+  getViewMode(): ViewMode {
+    return this.viewMode
+  }
+
+  /**
+   * Switch to chat mode (normal conversation view).
+   */
+  enterChatMode(): void {
+    if (this.viewMode === 'chat') return
+
+    this.viewMode = 'chat'
+    this.viewManager.enterChatMode()
+    resetScrollRegion()
+    this.render()
+  }
+
+  /**
+   * Switch to dashboard mode with custom panels.
+   */
+  enterDashboardMode(layout: DashboardLayout): void {
+    this.viewMode = 'dashboard'
+    this.dashboardContent = layout.panels
+    this.viewManager.enterDashboardMode(layout)
+
+    // Set scroll region to protect header and footer
+    setScrollRegion(3, this.height - 2)
+
+    this.renderDashboard()
+  }
+
+  /**
+   * Update dashboard content without full re-render.
+   */
+  updateDashboardPanel(panelId: string, content: string[]): void {
+    const panel = this.dashboardContent.find((p) => p.id === panelId)
+    if (panel) {
+      panel.content = content
+      if (this.viewMode === 'dashboard') {
+        this.renderDashboard()
+      }
+    }
+  }
+
+  /**
+   * Update the sticky status bar info.
+   */
+  updateStatusBar(info: {
+    project?: string
+    inputTokens?: number
+    outputTokens?: number
+    vaultStatus?: 'ok' | 'warn' | 'error'
+  }): void {
+    if (info.project !== undefined) this.activeProject = info.project
+    if (info.inputTokens !== undefined) this.inputTokens = info.inputTokens
+    if (info.outputTokens !== undefined) this.outputTokens = info.outputTokens
+    if (info.vaultStatus !== undefined) this.vaultStatus = info.vaultStatus
+
+    this.renderStickyStatusBar()
+  }
+
+  /**
+   * Enable or disable the sticky status bar.
+   */
+  setStatusBarEnabled(enabled: boolean): void {
+    this.statusBarEnabled = enabled
+    this.render()
+  }
+
+  // ── Dashboard Rendering ───────────────────────────────────
+
+  private renderDashboard(): void {
+    w(A.hide)
+    w(A.clear)
+
+    // Header
+    this.renderHeader()
+
+    // Calculate panel layout
+    const headerH = 2
+    const footerH = 2 + (this.statusBarEnabled ? 1 : 0)
+    const contentHeight = this.height - headerH - footerH
+
+    const panels = this.dashboardContent
+    const columns = Math.min(2, panels.length)
+    const rows = Math.ceil(panels.length / columns)
+    const gap = 1
+
+    const panelWidth = Math.floor((this.width - gap * (columns + 1)) / columns)
+    const panelHeight = Math.floor((contentHeight - gap * (rows + 1)) / rows)
+
+    let panelIdx = 0
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < columns && panelIdx < panels.length; col++) {
+        const panel = panels[panelIdx]
+        const startRow = headerH + gap + row * (panelHeight + gap) + 1
+        const startCol = gap + col * (panelWidth + gap) + 1
+
+        this.drawDashboardPanel(panel, startRow, startCol, panelWidth, panelHeight)
+        panelIdx++
+      }
+    }
+
+    // Sticky status bar
+    if (this.statusBarEnabled) {
+      this.renderStickyStatusBar()
+    }
+
+    // Input line
+    this.renderInput()
+    w(A.show)
+  }
+
+  private drawDashboardPanel(
+    panel: DashboardPanel,
+    row: number,
+    col: number,
+    width: number,
+    height: number,
+  ): void {
+    // Draw panel border
+    const boxLines = renderBox(
+      panel.content.slice(0, height - 2),
+      width,
+      { title: panel.title, borderColor: A.dim, titleColor: C.heading },
+    )
+
+    for (let i = 0; i < boxLines.length && i < height; i++) {
+      w(A.to(row + i, col))
+      w(boxLines[i])
+    }
+  }
+
+  private renderStickyStatusBar(): void {
+    if (!this.statusBarEnabled) return
+
+    const statusRow = this.height - 2
+    this.stickyStatusRow = statusRow
+
+    const config: StatusBarConfig = {
+      model: this.model,
+      project: this.activeProject || undefined,
+      tokens: { input: this.inputTokens, output: this.outputTokens },
+      sessionCost: this.sessionCost || undefined,
+      vaultStatus: this.vaultStatus,
+    }
+
+    w(A.to(statusRow, 1))
+    w(renderStatusBar(config, this.width))
+  }
+
   // ── Rendering ───────────────────────────────────────────
 
   private render(): void {
+    // Route to appropriate render based on view mode
+    if (this.viewMode === 'dashboard') {
+      this.renderDashboard()
+      return
+    }
+
     w(A.hide)
     w(A.clear)
     this.renderHeader()
     this.renderMessages()
+
+    // Render sticky status bar in chat mode if enabled
+    if (this.statusBarEnabled) {
+      this.renderStickyStatusBar()
+    }
+
     this.renderInput()
     w(A.show)
   }
 
   private renderAll(): void {
+    if (this.viewMode === 'dashboard') {
+      this.renderDashboard()
+      return
+    }
+
     this.renderMessages()
+
+    if (this.statusBarEnabled) {
+      this.renderStickyStatusBar()
+    }
+
     this.renderInput()
   }
 
@@ -848,7 +1053,9 @@ export class TUI {
 
   private renderMessages(): void {
     const headerH = 2
-    const footerH = 2
+    // Account for status bar when enabled
+    const statusBarH = this.statusBarEnabled ? 1 : 0
+    const footerH = 2 + statusBarH
     const avail = this.height - headerH - footerH
 
     const allLines = [...this.lines, ...this.streamLines]
@@ -1167,6 +1374,17 @@ export class TUI {
   private onResize(): void {
     this.width = process.stdout.columns || 80
     this.height = process.stdout.rows || 24
+
+    // Update view manager dimensions
+    this.viewManager.updateDimensions(this.width, this.height)
+
+    // Reset scroll region when dimensions change
+    if (this.viewMode === 'dashboard') {
+      setScrollRegion(3, this.height - 2)
+    } else {
+      resetScrollRegion()
+    }
+
     this.render()
   }
 
