@@ -68,6 +68,7 @@ const TRACKED_FILES = [
   'opportunities.json',
   'workflows.json',
   'news-feeds.json',
+  'pitwall-baselines.json',
   'rag/rag-index.json',
 ]
 

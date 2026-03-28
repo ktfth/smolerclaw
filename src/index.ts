@@ -6,7 +6,7 @@ import { ClaudeProvider } from './claude'
 import { SessionManager } from './session'
 import { loadSkills, buildSystemPrompt, formatSkillList } from './skills'
 import { TUI } from './tui'
-import type { SessionPickerEntry } from './tui'
+import type { SessionPickerEntry, NewsPickerEntry } from './tui'
 import { TokenTracker } from './tokens'
 import { exportToMarkdown } from './export'
 import { resolveModel, formatModelList, modelDisplayName } from './models'
@@ -20,7 +20,7 @@ import { loadPlugins, pluginsToTools, formatPluginList, getPluginDir } from './p
 import { formatApprovalPrompt, formatEditDiff } from './approval'
 import { extractImages } from './images'
 import { openApp, openFile, openUrl, getRunningApps, getSystemInfo, getDateTimeInfo, getOutlookEvents, getKnownApps } from './windows'
-import { fetchNews, getNewsCategories, initNews, addNewsFeed, removeNewsFeed, disableNewsFeed, enableNewsFeed, listNewsFeeds, type NewsCategory } from './news'
+import { fetchNews, fetchNewsItems, getNewsCategories, initNews, addNewsFeed, removeNewsFeed, disableNewsFeed, enableNewsFeed, listNewsFeeds, type NewsCategory, type NewsItem } from './news'
 import { generateBriefing } from './briefing'
 import { initTasks, stopTasks, addTask, completeTask, removeTask, listTasks, formatTaskList, parseTime, type Task } from './tasks'
 import { initPeople, addPerson, findPerson, listPeople, logInteraction, delegateTask, getDelegations, getPendingFollowUps, markFollowUpDone, formatPeopleList, formatPersonDetail, formatDelegationList, formatFollowUps, generatePeopleDashboard, type PersonGroup, type InteractionType } from './people'
@@ -37,6 +37,7 @@ import { initInvestigations } from './investigate'
 import { initMemory, buildIndex, queryMemory, getIndexStats, formatQueryResults } from './memory'
 import { initVault, getVaultStatus, formatVaultStatus, initShadowBackup, performBackup, syncBackupToRemote, startAutoBackup, stopAutoBackup } from './vault'
 import { executePowerShellScript, analyzeScreenContext, readClipboardContent } from './windows-agent'
+import { initPitwall } from './pitwall'
 import {
   initProjects, setActiveProject, getActiveProject, autoDetectProject,
   listProjects, getProject, startSession, endSession, getOpenSession,
@@ -95,9 +96,9 @@ async function main(): Promise<void> {
 
     claude = claudeProvider
   }
-  const sessionName = cliArgs.session || 'default'
   const sessions = new SessionManager(config.dataDir)
-  if (cliArgs.session) sessions.switchTo(cliArgs.session)
+  const sessionName = cliArgs.session || sessions.getLastSession() || 'default'
+  if (sessionName !== 'default') sessions.switchTo(sessionName)
   const skills = loadSkills(config.skillsDir)
   const systemPrompt = buildSystemPrompt(config.systemPrompt, skills, config.language)
   const enableTools = !cliArgs.noTools
@@ -216,6 +217,7 @@ async function runInteractive(
   initInvestigations(config.dataDir)
   initMemory(config.dataDir)
   initProjects(config.dataDir)
+  initPitwall(config.dataDir)
   initMonitor((msg) => tui.showSystem(`\n*** ${msg} ***\n`))
   initTasks(config.dataDir, (task: Task) => {
     tui.showSystem(`\n*** LEMBRETE: ${task.title} ***\n`)
@@ -1012,8 +1014,33 @@ async function runInteractive(
         }
         tui.disableInput()
         try {
-          const news = await fetchNews(category ? [category] : undefined)
-          tui.showSystem(news)
+          const { items, errors } = await fetchNewsItems(category ? [category] : undefined)
+          if (items.length === 0) {
+            tui.showSystem(errors.length > 0
+              ? `Nenhuma noticia encontrada.\nFalhas: ${errors.join(', ')}`
+              : 'Nenhuma noticia encontrada.')
+            tui.enableInput()
+            break
+          }
+
+          const pickerEntries: NewsPickerEntry[] = items.map((item: NewsItem) => ({
+            title: item.title,
+            link: item.link,
+            source: item.source,
+            category: item.category,
+            time: item.pubDate
+              ? item.pubDate.toLocaleTimeString('pt-BR', {
+                  hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo',
+                })
+              : '',
+          }))
+
+          const selectedLink = await tui.promptNewsPicker(pickerEntries)
+          if (selectedLink) {
+            const { openUrl } = await import('./windows')
+            openUrl(selectedLink)
+            tui.showSystem(`Abrindo: ${selectedLink}`)
+          }
         } catch (err) {
           tui.showError(`Falha ao buscar noticias: ${err instanceof Error ? err.message : String(err)}`)
         }
@@ -1892,6 +1919,7 @@ async function runInteractive(
   }
 
   function cleanup(): void {
+    sessions.saveLastSession()
     stopTasks()
     stopPomodoroTimer()
     stopAllMonitors()

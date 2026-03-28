@@ -68,6 +68,15 @@ import {
   generateWorkReport, autoDetectProject,
   formatProjectList, formatProjectDetail, formatOpportunityList,
 } from './projects'
+import {
+  benchmark, saveBaseline, resetBaseline,
+  compareToBaseline, listBaselines, removeBaseline,
+  formatBaselineList,
+} from './pitwall'
+import {
+  buildDependencyGraph, calculateBlastRadius, planRefactor,
+  formatBlastRadius, formatRefactorPlan,
+} from './services/dependency-graph'
 
 // Global undo stack shared across tool calls
 export const undoStack = new UndoStack()
@@ -935,6 +944,103 @@ export const PROJECT_TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+// ─── Pit Wall Tools (cross-platform) ────────────────────
+
+export const PITWALL_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'pitwall_benchmark',
+    description:
+      'Benchmark a local script or command — captures wall-clock time, child process peak memory, and CPU overhead. ' +
+      'Compares against saved baseline and alerts on regressions > 10%. ' +
+      'Use when the user says "benchmark", "mede a performance", "testa a velocidade", "pit wall".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        command: { type: 'string', description: 'Shell command to benchmark (e.g. "bun run build", "bun test").' },
+        key: { type: 'string', description: 'Unique label for this benchmark. Auto-derived from command if omitted.' },
+        iterations: { type: 'number', description: 'Number of runs (uses median). Default 1, max 10.' },
+        warmup: { type: 'boolean', description: 'Run one warmup iteration before measuring (discarded). Default false.' },
+        cwd: { type: 'string', description: 'Working directory. Defaults to cwd.' },
+      },
+      required: ['command'],
+    },
+  },
+  {
+    name: 'pitwall_save_baseline',
+    description:
+      'Benchmark a command and save results as the performance baseline for future comparisons. ' +
+      'Default: 3 runs with warmup. Use "reset" to replace (not blend) an existing baseline.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        command: { type: 'string', description: 'Command to benchmark and save as baseline.' },
+        key: { type: 'string', description: 'Benchmark label. Auto-derived from command if omitted.' },
+        iterations: { type: 'number', description: 'Number of runs to measure. Default 3.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags for this baseline (e.g. "build", "test").' },
+        reset: { type: 'boolean', description: 'If true, replaces existing baseline entirely. Default false (blends).' },
+        cwd: { type: 'string', description: 'Working directory. Defaults to cwd.' },
+      },
+      required: ['command'],
+    },
+  },
+  {
+    name: 'pitwall_status',
+    description:
+      'List all saved performance baselines with their metrics, spread, and age. ' +
+      'Use when the user asks "quais baselines tenho?", "pit wall status", "mostra as metricas".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'pitwall_remove_baseline',
+    description: 'Remove a saved performance baseline by its key.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        key: { type: 'string', description: 'The script key of the baseline to remove.' },
+      },
+      required: ['key'],
+    },
+  },
+]
+
+// ─── Blast Radius Tools (cross-platform) ────────────────
+
+export const BLAST_RADIUS_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'analyze_blast_radius',
+    description:
+      'Analyze the blast radius of changing a TypeScript file — shows all modules that import it (directly and transitively). ' +
+      'Use when the user says "blast radius", "impacto da mudanca", "quem depende de", "o que quebra se mudar".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        file: { type: 'string', description: 'Path to the target file to analyze (relative or absolute).' },
+        project_dir: { type: 'string', description: 'Root directory of the TypeScript project. Defaults to cwd.' },
+      },
+      required: ['file'],
+    },
+  },
+  {
+    name: 'plan_refactor',
+    description:
+      'Generate a safe refactor order for updating dependents of a TypeScript file. ' +
+      'Returns a numbered sequence: change the target first, then update dependents bottom-up. ' +
+      'Use when the user says "plano de refatoracao", "ordem de atualizacao", "como refatorar seguro".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        file: { type: 'string', description: 'Path to the target file being refactored.' },
+        project_dir: { type: 'string', description: 'Root directory of the TypeScript project. Defaults to cwd.' },
+      },
+      required: ['file'],
+    },
+  },
+]
+
 // ─── Windows Agent Tools (Windows-only) ─────────────────
 
 export const AGENT_TOOLS: Anthropic.Tool[] = [
@@ -1118,6 +1224,8 @@ export function registerWindowsTools(): void {
   TOOLS.push(...NEWSFEED_TOOLS)
   TOOLS.push(...VAULT_TOOLS)
   TOOLS.push(...PROJECT_TOOLS)
+  TOOLS.push(...PITWALL_TOOLS)
+  TOOLS.push(...BLAST_RADIUS_TOOLS)
   TOOLS.push(...ARCHIVE_TOOLS)
 }
 
@@ -1620,6 +1728,93 @@ export async function executeTool(
         const opp = updateOpportunityStatus(id, status)
         if (!opp) return `Oportunidade nao encontrada: "${id}"`
         return `Oportunidade atualizada: "${opp.title}" -> ${status}`
+      }
+      // Pit Wall tools
+      case 'pitwall_benchmark': {
+        const command = input.command as string
+        if (!command?.trim()) return 'Error: command is required.'
+        const key = input.key as string | undefined
+        const iterations = Math.min(Math.max((input.iterations as number) || 1, 1), 10)
+        const warmup = (input.warmup as boolean) || false
+        const cwd = input.cwd as string | undefined
+
+        const run = await benchmark(command, { scriptKey: key, cwd, iterations, warmup })
+
+        if (run.exitCode !== 0) {
+          const report = compareToBaseline(run)
+          return `AVISO: Comando terminou com exit code ${run.exitCode}. Metricas podem nao ser confiaveis.\n\n${report.markdown}`
+        }
+
+        return compareToBaseline(run).markdown
+      }
+      case 'pitwall_save_baseline': {
+        const command = input.command as string
+        if (!command?.trim()) return 'Error: command is required.'
+        const key = input.key as string | undefined
+        const iterations = Math.min(Math.max((input.iterations as number) || 3, 1), 10)
+        const tags = (input.tags as string[]) || []
+        const shouldReset = (input.reset as boolean) || false
+        const cwd = input.cwd as string | undefined
+
+        const run = await benchmark(command, { scriptKey: key, cwd, iterations, warmup: true })
+
+        if (run.exitCode !== 0) {
+          return `Error: Comando falhou (exit code ${run.exitCode}). Corrija o comando antes de salvar baseline.\n` +
+            (run.stderr ? `Stderr: ${run.stderr.slice(0, 300)}` : '')
+        }
+
+        const baseline = shouldReset
+          ? resetBaseline(run, tags)
+          : saveBaseline(run, tags)
+
+        const durationMs = baseline.metrics.durationNs / 1e6
+        return `Baseline salvo: "${baseline.scriptKey}" (${baseline.runs} run${baseline.runs > 1 ? 's' : ''})\n` +
+          `  Duracao: ${durationMs.toFixed(2)}ms\n` +
+          `  Memoria: ${(baseline.metrics.peakMemoryBytes / 1024 / 1024).toFixed(1)}MB\n` +
+          `  CPU (user): ${(baseline.metrics.cpuUserUs / 1000).toFixed(2)}ms`
+      }
+      case 'pitwall_status': {
+        return formatBaselineList(listBaselines())
+      }
+      case 'pitwall_remove_baseline': {
+        const key = input.key as string
+        if (!key?.trim()) return 'Error: key is required.'
+        return removeBaseline(key)
+          ? `Baseline removido: "${key}"`
+          : `Baseline nao encontrado: "${key}"`
+      }
+      // Blast Radius tools
+      case 'analyze_blast_radius': {
+        const file = input.file as string
+        if (!file?.trim()) return 'Error: file is required.'
+        const projectDir = resolve((input.project_dir as string) || process.cwd())
+        const absFile = resolve(projectDir, file)
+        if (!absFile.startsWith(projectDir + sep)) {
+          return 'Error: file must be inside project_dir.'
+        }
+        try {
+          const graph = buildDependencyGraph(projectDir)
+          const blast = calculateBlastRadius(graph, absFile)
+          return formatBlastRadius(blast)
+        } catch (err) {
+          return `Error: ${err instanceof Error ? err.message : String(err)}`
+        }
+      }
+      case 'plan_refactor': {
+        const file = input.file as string
+        if (!file?.trim()) return 'Error: file is required.'
+        const projectDir = resolve((input.project_dir as string) || process.cwd())
+        const absFile = resolve(projectDir, file)
+        if (!absFile.startsWith(projectDir + sep)) {
+          return 'Error: file must be inside project_dir.'
+        }
+        try {
+          const graph = buildDependencyGraph(projectDir)
+          const plan = planRefactor(graph, absFile)
+          return formatRefactorPlan(plan)
+        } catch (err) {
+          return `Error: ${err instanceof Error ? err.message : String(err)}`
+        }
       }
       // Archive tools
       case 'archive_session': {

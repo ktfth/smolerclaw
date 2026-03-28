@@ -47,8 +47,11 @@ export function markMorningDone(): void {
 export async function generateMorningBriefing(): Promise<string> {
   const sections: string[] = []
 
+  const hour = new Date().getHours()
+  const greeting = hour < 12 ? 'BOM DIA' : hour < 18 ? 'BOA TARDE' : 'BOA NOITE'
+
   sections.push('==============================')
-  sections.push('  BOM DIA! Briefing do dia')
+  sections.push(`  ${greeting}! Briefing do dia`)
   sections.push('==============================\n')
 
   // Date & time

@@ -114,6 +114,8 @@ export class TUI {
   private onSubmit: ((s: string) => void) | null = null
   private onCancel: (() => void) | null = null
   private onExit: (() => void) | null = null
+  private pickerActive = false
+  private lastCtrlCTime = 0
 
   constructor(
     private model: string,
@@ -344,6 +346,7 @@ export class TUI {
     }
 
     return new Promise<SessionPickerResult | null>((resolve) => {
+      this.pickerActive = true
       let cursor = entries.findIndex((e) => e.isCurrent)
       if (cursor < 0) cursor = 0
       let filter = ''
@@ -431,10 +434,11 @@ export class TUI {
         const hintRow = this.height - footerH
         w(A.to(hintRow, 1))
         w(A.clearLine)
-        w(`  ${A.dim}↑↓ navigate  Enter select  Esc cancel  / filter  d delete  a archive${A.reset}`)
+        w(`  ${A.dim}W/S or ↑↓ navigate  Enter select  Esc cancel  / filter  d delete  a archive${A.reset}`)
       }
 
       const cleanup = (result: SessionPickerResult | null): void => {
+        this.pickerActive = false
         process.stdin.removeListener('data', handler)
         // Restore message area
         this.renderAll()
@@ -471,12 +475,12 @@ export class TUI {
           return
         }
 
-        // Arrow keys
-        if (key === '\x1b[A') { // Up
+        // Arrow keys + W/S navigation
+        if (key === '\x1b[A' || (key === 'w' && !filterMode)) { // Up
           if (cursor > 0) { cursor--; renderPicker() }
           return
         }
-        if (key === '\x1b[B') { // Down
+        if (key === '\x1b[B' || (key === 's' && !filterMode)) { // Down
           if (cursor < items.length - 1) { cursor++; renderPicker() }
           return
         }
@@ -528,6 +532,223 @@ export class TUI {
             return
           }
           // Printable char in filter
+          if (key.length === 1 && key >= ' ') {
+            filter += key
+            cursor = 0
+            renderPicker()
+            return
+          }
+        }
+      }
+
+      process.stdin.on('data', handler)
+      renderPicker()
+    })
+  }
+
+  // ── News Picker ────────────────────────────────────────────
+
+  /**
+   * Interactive news picker. Navigate with W/S or arrows, Enter to open in browser.
+   * Returns the selected item's link or null if cancelled.
+   */
+  promptNewsPicker(
+    items: NewsPickerEntry[],
+  ): Promise<string | null> {
+    if (items.length === 0) {
+      this.showSystem('Nenhuma noticia encontrada.')
+      return Promise.resolve(null)
+    }
+
+    return new Promise<string | null>((resolve) => {
+      this.pickerActive = true
+      let cursor = 0
+      let filter = ''
+      let filterMode = false
+      let categoryFilter = ''
+
+      const categories = [...new Set(items.map((i) => i.category))].sort()
+
+      const filtered = (): NewsPickerEntry[] => {
+        let result = categoryFilter
+          ? items.filter((i) => i.category === categoryFilter)
+          : items
+        if (filter) {
+          const q = filter.toLowerCase()
+          result = result.filter((i) =>
+            i.title.toLowerCase().includes(q) || i.source.toLowerCase().includes(q),
+          )
+        }
+        return result
+      }
+
+      const categoryLabel = (cat: string): string => {
+        const labels: Record<string, string> = {
+          business: 'Negocios', tech: 'Tecnologia', finance: 'Financas',
+          brazil: 'Brasil', world: 'Mundo', security: 'Ciberseguranca',
+        }
+        return labels[cat] || cat
+      }
+
+      const renderPicker = (): void => {
+        const headerH = 2
+        const footerH = 2
+        const avail = this.height - headerH - footerH
+
+        const list = filtered()
+        if (cursor >= list.length) cursor = Math.max(0, list.length - 1)
+
+        const titleLines = 2
+        const hintLines = 2
+        const listAvail = avail - titleLines - hintLines
+        const maxVisible = Math.max(1, listAvail)
+
+        let scrollStart = 0
+        if (list.length > maxVisible) {
+          scrollStart = Math.max(0, cursor - Math.floor(maxVisible / 2))
+          scrollStart = Math.min(scrollStart, list.length - maxVisible)
+        }
+        const visibleItems = list.slice(scrollStart, scrollStart + maxVisible)
+
+        w(A.hide)
+        // Title
+        w(A.to(headerH + 1, 1))
+        w(A.clearLine)
+        if (filterMode) {
+          w(`  ${C.heading}${A.bold}Noticias${A.reset}  ${A.dim}filtro: ${filter}█${A.reset}`)
+        } else {
+          const catLabel = categoryFilter ? categoryLabel(categoryFilter) : 'Todas'
+          w(`  ${C.heading}${A.bold}Noticias${A.reset}  ${A.dim}(${list.length}) ${catLabel}${A.reset}`)
+        }
+        w(A.to(headerH + 2, 1))
+        w(A.clearLine)
+
+        // List
+        for (let i = 0; i < maxVisible; i++) {
+          const row = headerH + titleLines + i + 1
+          w(A.to(row, 1))
+          w(A.clearLine)
+          if (i >= visibleItems.length) continue
+
+          const entry = visibleItems[i]
+          const isSelected = (scrollStart + i) === cursor
+          const time = entry.time ? `[${entry.time}]` : '       '
+          const maxTitleW = this.width - 30
+          const title = entry.title.length > maxTitleW
+            ? entry.title.slice(0, maxTitleW - 1) + '\u2026'
+            : entry.title
+
+          if (isSelected) {
+            w(`  ${C.prompt}${A.bold}› ${time} ${title}${A.reset} ${A.dim}(${entry.source})${A.reset}`)
+          } else {
+            w(`    ${A.dim}${time}${A.reset} ${C.sys}${title}${A.reset} ${A.dim}(${entry.source})${A.reset}`)
+          }
+        }
+
+        // Clear remaining
+        for (let i = visibleItems.length; i < maxVisible; i++) {
+          const row = headerH + titleLines + i + 1
+          w(A.to(row, 1))
+          w(A.clearLine)
+        }
+
+        // Scroll indicator
+        const indicatorRow = headerH + titleLines + maxVisible + 1
+        w(A.to(indicatorRow, 1))
+        w(A.clearLine)
+        if (list.length > maxVisible) {
+          const pct = Math.round(((cursor + 1) / list.length) * 100)
+          w(`  ${A.dim}${scrollStart > 0 ? '\u2191' : ' '} ${pct}% ${scrollStart + maxVisible < list.length ? '\u2193' : ' '}${A.reset}`)
+        }
+
+        // Hints
+        const hintRow = this.height - footerH
+        w(A.to(hintRow, 1))
+        w(A.clearLine)
+        w(`  ${A.dim}W/S or \u2191\u2193 navigate  Enter open  Esc cancel  / filter  Tab category${A.reset}`)
+      }
+
+      const cleanup = (result: string | null): void => {
+        this.pickerActive = false
+        process.stdin.removeListener('data', handler)
+        this.renderAll()
+        resolve(result)
+      }
+
+      const handler = (data: Buffer): void => {
+        const key = data.toString('utf-8')
+        const list = filtered()
+
+        // Esc
+        if (key === '\x1b' && data.length === 1) {
+          if (filterMode) {
+            filterMode = false
+            filter = ''
+            renderPicker()
+          } else {
+            cleanup(null)
+          }
+          return
+        }
+
+        // Ctrl+C
+        if (key === '\x03') {
+          cleanup(null)
+          return
+        }
+
+        // Enter — open link
+        if (key === '\r' || key === '\n') {
+          if (list.length > 0 && cursor < list.length) {
+            cleanup(list[cursor].link)
+          }
+          return
+        }
+
+        // Arrow keys + W/S navigation
+        if (key === '\x1b[A' || (key === 'w' && !filterMode)) {
+          if (cursor > 0) { cursor--; renderPicker() }
+          return
+        }
+        if (key === '\x1b[B' || (key === 's' && !filterMode)) {
+          if (cursor < list.length - 1) { cursor++; renderPicker() }
+          return
+        }
+
+        // Tab — cycle category filter
+        if (key === '\t') {
+          if (!categoryFilter) {
+            categoryFilter = categories[0] || ''
+          } else {
+            const idx = categories.indexOf(categoryFilter)
+            categoryFilter = idx < categories.length - 1 ? categories[idx + 1] : ''
+          }
+          cursor = 0
+          renderPicker()
+          return
+        }
+
+        // '/' — toggle filter mode
+        if (key === '/' && !filterMode) {
+          filterMode = true
+          filter = ''
+          renderPicker()
+          return
+        }
+
+        // Filter mode typing
+        if (filterMode) {
+          if (key === '\x7f' || key === '\b') {
+            if (filter.length > 0) {
+              filter = filter.slice(0, -1)
+              cursor = 0
+              renderPicker()
+            } else {
+              filterMode = false
+              renderPicker()
+            }
+            return
+          }
           if (key.length === 1 && key >= ' ') {
             filter += key
             cursor = 0
@@ -748,15 +969,39 @@ export class TUI {
   // ── Input Handling ──────────────────────────────────────
 
   private onKey(data: Buffer): void {
+    // Suppress main input while a picker (sessions/news) is active
+    if (this.pickerActive) return
+
     const key = data.toString('utf-8')
 
-    // Ctrl+C
+    // Ctrl+C — clear input first, double-tap to exit
     if (key === '\x03') {
       if (this.isStreaming) {
         this.onCancel?.()
-      } else {
-        this.onExit?.()
+        return
       }
+
+      const now = Date.now()
+      const DOUBLE_TAP_MS = 1500
+
+      if (this.inputBuf.length > 0) {
+        // First: clear the input field
+        this.inputBuf = ''
+        this.inputPos = 0
+        this.lastCtrlCTime = now
+        this.renderInput()
+        return
+      }
+
+      // Input already empty — check for double-tap
+      if (now - this.lastCtrlCTime < DOUBLE_TAP_MS) {
+        this.onExit?.()
+        return
+      }
+
+      // First tap with empty input — show hint and record time
+      this.lastCtrlCTime = now
+      this.showSystem('Pressione Ctrl+C novamente para sair.')
       return
     }
 
@@ -1033,6 +1278,16 @@ export type SessionPickerResult =
   | { action: 'delete'; name: string; isArchived?: boolean }
   | { action: 'archive'; name: string }
   | { action: 'unarchive'; name: string }
+
+// ─── News Picker Types ───────────────────────────────────
+
+export interface NewsPickerEntry {
+  title: string
+  link: string
+  source: string
+  category: string
+  time: string    // formatted time string e.g. "21:30"
+}
 
 function formatPickerAge(timestamp: number): string {
   const diff = Date.now() - timestamp

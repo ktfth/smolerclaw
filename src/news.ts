@@ -213,7 +213,7 @@ const FETCH_TIMEOUT_MS = 10_000
 
 // ─── RSS Parser (minimal, no dependencies) ──────────────────
 
-interface NewsItem {
+export interface NewsItem {
   title: string
   link: string
   source: string
@@ -310,21 +310,87 @@ function extractTag(xml: string, tag: string): string | null {
   return match ? match[1].trim() : null
 }
 
+/**
+ * Decode raw XML bytes using the correct charset.
+ * Priority: HTTP Content-Type charset > XML prolog encoding > UTF-8 fallback.
+ * Handles ISO-8859-1 / Windows-1252 feeds (common in Brazilian sources).
+ */
+function decodeXml(raw: Buffer, contentType: string | null): string {
+  const encoding = detectEncoding(raw, contentType)
+  try {
+    return new TextDecoder(encoding).decode(raw)
+  } catch {
+    // Unknown encoding label — fall back to latin1 then utf-8
+    try {
+      return new TextDecoder('latin1').decode(raw)
+    } catch {
+      return new TextDecoder('utf-8', { fatal: false }).decode(raw)
+    }
+  }
+}
+
+function detectEncoding(raw: Buffer, contentType: string | null): string {
+  // 1) Check HTTP Content-Type header: charset=xxx
+  if (contentType) {
+    const match = contentType.match(/charset\s*=\s*["']?([^\s;"']+)/i)
+    if (match) return normalizeEncoding(match[1])
+  }
+
+  // 2) Check XML prolog: <?xml ... encoding="xxx" ?>
+  // Read only the first 200 bytes as ASCII to find the prolog
+  const head = raw.subarray(0, 200).toString('ascii')
+  const xmlMatch = head.match(/<\?xml[^?]+encoding\s*=\s*["']([^"']+)["']/i)
+  if (xmlMatch) return normalizeEncoding(xmlMatch[1])
+
+  // 3) Default to UTF-8
+  return 'utf-8'
+}
+
+/** Normalize encoding names to labels accepted by TextDecoder. */
+function normalizeEncoding(enc: string): string {
+  const lower = enc.toLowerCase().replace(/[^a-z0-9]/g, '')
+  // Map common aliases
+  if (lower === 'iso88591' || lower === 'latin1') return 'iso-8859-1'
+  if (lower === 'windows1252' || lower === 'cp1252') return 'windows-1252'
+  if (lower === 'utf8') return 'utf-8'
+  if (lower === 'usascii' || lower === 'ascii') return 'utf-8'
+  // Return as-is for TextDecoder to handle
+  return enc.trim().toLowerCase()
+}
+
 function extractAtomLink(xml: string): string | null {
   const regex = /<link[^>]+href="([^"]+)"[^>]*\/?>/i
   const match = regex.exec(xml)
   return match ? match[1] : null
 }
 
+/** Map of named HTML entities commonly found in RSS feeds. */
+const HTML_ENTITIES: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  // Portuguese accented vowels
+  aacute: 'á', Aacute: 'Á', agrave: 'à', Agrave: 'À',
+  atilde: 'ã', Atilde: 'Ã', acirc: 'â', Acirc: 'Â',
+  eacute: 'é', Eacute: 'É', egrave: 'è', Egrave: 'È',
+  ecirc: 'ê', Ecirc: 'Ê',
+  iacute: 'í', Iacute: 'Í',
+  oacute: 'ó', Oacute: 'Ó', otilde: 'õ', Otilde: 'Õ',
+  ocirc: 'ô', Ocirc: 'Ô',
+  uacute: 'ú', Uacute: 'Ú', uuml: 'ü', Uuml: 'Ü',
+  ccedil: 'ç', Ccedil: 'Ç',
+  ntilde: 'ñ', Ntilde: 'Ñ',
+  // Typographic punctuation
+  rsquo: '\u2019', lsquo: '\u2018', rdquo: '\u201D', ldquo: '\u201C',
+  mdash: '\u2014', ndash: '\u2013', hellip: '\u2026', bull: '\u2022',
+  laquo: '\u00AB', raquo: '\u00BB',
+  trade: '\u2122', copy: '\u00A9', reg: '\u00AE', euro: '\u20AC',
+  pound: '\u00A3', yen: '\u00A5', cent: '\u00A2', deg: '\u00B0',
+  middot: '\u00B7', times: '\u00D7', divide: '\u00F7',
+}
+
 function cleanHtml(text: string): string {
   return text
     .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, ' ')
+    .replace(/&([a-zA-Z]+);/g, (full, name) => HTML_ENTITIES[name] ?? full)
     .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
     .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
     .trim()
@@ -336,16 +402,17 @@ function cleanHtml(text: string): string {
  * Fetch news from all or filtered categories.
  * Returns formatted text output.
  */
-export async function fetchNews(
+/**
+ * Fetch news items as structured data (for the interactive picker).
+ */
+export async function fetchNewsItems(
   categories?: NewsCategory[],
   maxPerSource = 5,
-): Promise<string> {
-  // Validate maxPerSource
+): Promise<{ items: NewsItem[]; errors: string[] }> {
   const cappedMax = Math.max(1, Math.min(maxPerSource, MAX_ITEMS_PER_FEED))
 
-  // Guard against empty categories array
   if (categories && categories.length === 0) {
-    return getNewsCategories()
+    return { items: [], errors: [] }
   }
 
   const active = getActiveFeeds()
@@ -357,32 +424,48 @@ export async function fetchNews(
     feeds.map((feed) => fetchFeed(feed, cappedMax)),
   )
 
-  const allItems: NewsItem[] = []
+  const items: NewsItem[] = []
   const errors: string[] = []
 
   for (let i = 0; i < results.length; i++) {
     const result = results[i]
     if (result.status === 'fulfilled') {
-      allItems.push(...result.value)
+      items.push(...result.value)
     } else {
       errors.push(`${feeds[i].name}: ${summarizeError(result.reason)}`)
     }
   }
 
-  if (allItems.length === 0) {
-    return errors.length > 0
-      ? `Nenhuma noticia encontrada.\nFalhas: ${errors.join(', ')}`
-      : 'Nenhuma noticia encontrada.'
-  }
-
-  // Sort by date (newest first)
-  allItems.sort((a, b) => {
+  items.sort((a, b) => {
     const da = a.pubDate?.getTime() || 0
     const db = b.pubDate?.getTime() || 0
     return db - da
   })
 
-  return formatNews(allItems, errors)
+  return { items, errors }
+}
+
+/**
+ * Fetch news from all or filtered categories.
+ * Returns formatted text output (used by tools and briefing).
+ */
+export async function fetchNews(
+  categories?: NewsCategory[],
+  maxPerSource = 5,
+): Promise<string> {
+  if (categories && categories.length === 0) {
+    return getNewsCategories()
+  }
+
+  const { items, errors } = await fetchNewsItems(categories, maxPerSource)
+
+  if (items.length === 0) {
+    return errors.length > 0
+      ? `Nenhuma noticia encontrada.\nFalhas: ${errors.join(', ')}`
+      : 'Nenhuma noticia encontrada.'
+  }
+
+  return formatNews(items, errors)
 }
 
 function summarizeError(err: unknown): string {
@@ -433,7 +516,8 @@ async function fetchFeed(source: NewsSource, maxItems: number): Promise<NewsItem
       chunks.push(value)
     }
 
-    const xml = new TextDecoder().decode(Buffer.concat(chunks))
+    const raw = Buffer.concat(chunks)
+    const xml = decodeXml(raw, resp.headers.get('content-type'))
     const items = parseRss(xml, source.name, source.category)
     return items.slice(0, maxItems)
   } catch (err) {

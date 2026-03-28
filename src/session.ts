@@ -59,6 +59,7 @@ export class SessionManager {
 
   switchTo(name: string): Session {
     this.current = this.loadOrCreate(name)
+    this.saveLastSession()
     return this.current
   }
 
@@ -204,6 +205,25 @@ export class SessionManager {
     }
     atomicWriteFile(path, JSON.stringify(session, null, 2))
     return session
+  }
+
+  /** Save the current session name so it can be restored on next startup. */
+  saveLastSession(): void {
+    const file = join(this.sessionsDir, '..', 'last-session.txt')
+    atomicWriteFile(file, this.current.name)
+  }
+
+  /** Load the last used session name, or null if none saved. */
+  getLastSession(): string | null {
+    const file = join(this.sessionsDir, '..', 'last-session.txt')
+    if (!existsSync(file)) return null
+    try {
+      const name = readFileSync(file, 'utf-8').trim()
+      if (!name || !existsSync(join(this.sessionsDir, `${name}.json`))) return null
+      return name
+    } catch {
+      return null
+    }
   }
 
   private save(): void {
