@@ -18,6 +18,8 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { IS_WINDOWS } from './platform'
+import { eventBus } from './core/event-bus'
+import type { ContextChangedEvent } from './types'
 
 // ─── Constants ──────────────────────────────────────────────
 
@@ -27,6 +29,10 @@ const MAX_OUTPUT_LENGTH = 100_000
 
 // ANSI escape sequence regex for cleaning PowerShell output
 const ANSI_RE = /[\x1b\x9b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nq-uy=><~]/g
+
+// ─── Context Tracking State ──────────────────────────────────
+
+let _currentContext: { dir: string; foregroundWindow?: string } | null = null
 
 // ─── Safety Guards ──────────────────────────────────────────
 
@@ -418,6 +424,64 @@ Get-Process | Where-Object { $_.MainWindowTitle -ne '' } |
   } catch (err) {
     return `Error: ${err instanceof Error ? err.message : String(err)}`
   }
+}
+
+// ─── Context Change Detection ───────────────────────────────
+
+/**
+ * Check current context (directory + foreground window) and emit event if changed.
+ * Call this periodically or after relevant operations.
+ */
+export async function checkContextChange(currentDir: string): Promise<void> {
+  let foregroundWindow: string | undefined
+
+  // Get foreground window info if on Windows
+  if (IS_WINDOWS) {
+    try {
+      const context = await analyzeScreenContext()
+      // Extract foreground window from the output
+      const match = context.match(/Process:\s*(\S+)/)
+      foregroundWindow = match?.[1]
+    } catch {
+      // Ignore errors — context detection is best-effort
+    }
+  }
+
+  const previousDir = _currentContext?.dir
+  const previousWindow = _currentContext?.foregroundWindow
+
+  // Check if context actually changed
+  const dirChanged = previousDir !== currentDir
+  const windowChanged = foregroundWindow && previousWindow !== foregroundWindow
+
+  if (dirChanged || windowChanged) {
+    const event: ContextChangedEvent = {
+      previousDir,
+      currentDir,
+      foregroundWindow,
+      timestamp: Date.now(),
+    }
+
+    // Update tracked context
+    _currentContext = { dir: currentDir, foregroundWindow }
+
+    // Emit the event synchronously for UI updates
+    eventBus.emit('context:changed', event)
+  }
+}
+
+/**
+ * Initialize context tracking with current directory.
+ */
+export function initContextTracking(currentDir: string): void {
+  _currentContext = { dir: currentDir }
+}
+
+/**
+ * Get current tracked context.
+ */
+export function getCurrentContext(): { dir: string; foregroundWindow?: string } | null {
+  return _currentContext
 }
 
 // ─── Helpers ────────────────────────────────────────────────

@@ -61,3 +61,85 @@ export type ChatEvent =
   | { type: 'context_trimmed'; dropped: number }
   | { type: 'done' }
   | { type: 'error'; error: string }
+
+// ─── Event Bus Types ─────────────────────────────────────────
+
+/**
+ * Context change event — emitted when the active working context changes.
+ * Used by Windows Agent when detecting directory or window changes.
+ */
+export interface ContextChangedEvent {
+  previousDir?: string
+  currentDir: string
+  foregroundWindow?: string
+  timestamp: number
+}
+
+/**
+ * File saved event — emitted after any file write operation.
+ * Used to trigger backup routines and RAG re-indexing.
+ */
+export interface FileSavedEvent {
+  filePath: string
+  size: number
+  isTracked: boolean // true if part of TRACKED_FILES in vault
+  timestamp: number
+}
+
+/**
+ * Telemetry alert event — emitted when metrics exceed thresholds.
+ * Used for cost warnings, token limits, and performance alerts.
+ */
+export interface TelemetryAlertEvent {
+  alertType: 'cost_warning' | 'token_limit' | 'rate_limit' | 'error_rate' | 'performance'
+  message: string
+  value?: number
+  threshold?: number
+  timestamp: number
+}
+
+/**
+ * Task completed event — emitted when a background or user task finishes.
+ * Used to update TUI status and trigger follow-up actions.
+ */
+export interface TaskCompletedEvent {
+  taskId: string
+  taskType: 'backup' | 'rag_index' | 'pomodoro' | 'monitor' | 'workflow' | 'user_task'
+  success: boolean
+  message?: string
+  duration?: number
+  timestamp: number
+}
+
+/**
+ * Status update event — generic event for TUI status bar updates.
+ * Used for non-blocking UI updates from any module.
+ */
+export interface StatusUpdateEvent {
+  source: string
+  message: string
+  level: 'info' | 'warning' | 'error' | 'success'
+  timestamp: number
+}
+
+/**
+ * Session changed event — emitted when switching sessions.
+ */
+export interface SessionChangedEvent {
+  previousSession?: string
+  currentSession: string
+  timestamp: number
+}
+
+/**
+ * Map of event names to their payload types.
+ * This enables strict typing for the event bus.
+ */
+export interface EventBusEvents {
+  'context:changed': ContextChangedEvent
+  'file:saved': FileSavedEvent
+  'telemetry:alert': TelemetryAlertEvent
+  'task:completed': TaskCompletedEvent
+  'status:update': StatusUpdateEvent
+  'session:changed': SessionChangedEvent
+}

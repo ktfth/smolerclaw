@@ -15,6 +15,14 @@ import {
   type DashboardPanel,
   type StatusBarConfig,
 } from './tui/index'
+import { eventBus } from './core/event-bus'
+import type {
+  ContextChangedEvent,
+  TelemetryAlertEvent,
+  TaskCompletedEvent,
+  StatusUpdateEvent,
+  SessionChangedEvent,
+} from './types'
 
 // ─── TUI ─────────────────────────────────────────────────────
 
@@ -142,6 +150,8 @@ export class TUI {
   private onExit: (() => void) | null = null
   private pickerActive = false
   private lastCtrlCTime = 0
+  private eventUnsubscribers: Array<() => void> = []
+  private statusBarContext = '' // Context info for status bar
 
   constructor(
     private model: string,
@@ -169,6 +179,9 @@ export class TUI {
       this.history = new InputHistory(join(this.dataDir, 'history'))
     }
 
+    // Subscribe to global events for reactive UI updates
+    this.setupEventListeners()
+
     w(A.altOn)
     process.stdin.setRawMode?.(true)
     process.stdin.resume()
@@ -178,8 +191,103 @@ export class TUI {
     this.render()
   }
 
+  /**
+   * Set up event bus listeners for reactive UI updates.
+   * All listeners are synchronous to ensure immediate UI feedback.
+   */
+  private setupEventListeners(): void {
+    // Context changed — update status bar with current directory
+    this.eventUnsubscribers.push(
+      eventBus.on('context:changed', (event: ContextChangedEvent) => {
+        this.statusBarContext = event.foregroundWindow || ''
+        this.renderHeader()
+      }),
+    )
+
+    // Status updates — show system messages for important updates
+    this.eventUnsubscribers.push(
+      eventBus.on('status:update', (event: StatusUpdateEvent) => {
+        const prefix = event.level === 'error' ? C.err
+          : event.level === 'warning' ? C.prompt
+          : event.level === 'success' ? C.sys
+          : A.dim
+        this.lines.push({
+          text: `  ${prefix}[${event.source}]${A.reset} ${event.message}`,
+        })
+        // Only render if not streaming to avoid disrupting output
+        if (!this.isStreaming) {
+          this.renderMessages()
+        }
+      }),
+    )
+
+    // Telemetry alerts — show warnings for cost/token limits
+    this.eventUnsubscribers.push(
+      eventBus.on('telemetry:alert', (event: TelemetryAlertEvent) => {
+        if (event.alertType === 'cost_warning') {
+          this.lines.push({
+            text: `  ${C.prompt}⚠ ${event.message}${A.reset}`,
+          })
+        } else if (event.alertType === 'rate_limit') {
+          this.lines.push({
+            text: `  ${C.err}⚠ Rate limit: ${event.message}${A.reset}`,
+          })
+        } else {
+          this.lines.push({
+            text: `  ${A.dim}[telemetry] ${event.message}${A.reset}`,
+          })
+        }
+        if (!this.isStreaming) {
+          this.renderMessages()
+        }
+      }),
+    )
+
+    // Task completed — show completion messages for background tasks
+    this.eventUnsubscribers.push(
+      eventBus.on('task:completed', (event: TaskCompletedEvent) => {
+        // Only show notifications for certain task types
+        if (event.taskType === 'backup' && event.success) {
+          this.lines.push({
+            text: `  ${A.dim}[backup] ${event.message || 'Backup concluido'}${A.reset}`,
+          })
+        } else if (event.taskType === 'pomodoro') {
+          this.lines.push({
+            text: `  ${C.sys}[pomodoro] ${event.message}${A.reset}`,
+          })
+        } else if (!event.success && event.message) {
+          this.lines.push({
+            text: `  ${C.err}[${event.taskType}] ${event.message}${A.reset}`,
+          })
+        }
+        if (!this.isStreaming) {
+          this.renderMessages()
+        }
+      }),
+    )
+
+    // Session changed — update session name in header
+    this.eventUnsubscribers.push(
+      eventBus.on('session:changed', (event: SessionChangedEvent) => {
+        this.sessionName = event.currentSession
+        this.renderHeader()
+      }),
+    )
+  }
+
+  /**
+   * Clean up event listeners.
+   */
+  private cleanupEventListeners(): void {
+    for (const unsub of this.eventUnsubscribers) {
+      unsub()
+    }
+    this.eventUnsubscribers = []
+  }
+
   stop(): void {
     this.stopSpinner()
+    this.cleanupEventListeners()
     if (this.renderTimer) clearTimeout(this.renderTimer)
     process.stdin.setRawMode?.(false)
     process.stdin.pause()

@@ -17,6 +17,8 @@ import {
 } from 'node:fs'
 import { join, dirname, basename, relative } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
+import { eventBus } from './core/event-bus'
+import type { FileSavedEvent, TaskCompletedEvent } from './types'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -108,6 +110,7 @@ export function isVaultInitialized(): boolean {
  * Write content to a file atomically.
  * Writes to a temp file first, then renames (atomic on most filesystems).
  * Updates the checksum registry after successful write.
+ * Emits 'file:saved' event for reactive backup triggers.
  */
 export function atomicWriteFile(filePath: string, content: string): void {
   const dir = dirname(filePath)
@@ -118,12 +121,23 @@ export function atomicWriteFile(filePath: string, content: string): void {
   renameSync(tmp, filePath)
 
   // Update checksum for tracked files
+  let isTracked = false
   if (_initialized) {
     const rel = relativeToData(filePath)
     if (rel && TRACKED_FILES.includes(rel)) {
       updateChecksum(rel, content)
+      isTracked = true
     }
   }
+
+  // Emit file:saved event for backup triggers and other listeners
+  const event: FileSavedEvent = {
+    filePath,
+    size: Buffer.byteLength(content, 'utf-8'),
+    isTracked,
+    timestamp: Date.now(),
+  }
+  eventBus.emit('file:saved', event)
 }
 
 /**
@@ -354,9 +368,12 @@ export async function initShadowBackup(): Promise<string> {
 /**
  * Perform a shadow backup — copy tracked files to backup dir and commit.
  * Runs in background, non-blocking.
+ * Emits 'task:completed' event on completion.
  */
 export async function performBackup(message?: string): Promise<string> {
   if (!_backupEnabled) return 'Backup nao ativado. Use vault_init_backup primeiro.'
+
+  const startTime = Date.now()
 
   try {
     // Copy tracked files to backup dir
@@ -379,16 +396,62 @@ export async function performBackup(message?: string): Promise<string> {
     await gitCmd(['git', 'add', '-A'], _backupDir)
 
     const status = await gitCmd(['git', 'status', '--porcelain'], _backupDir)
-    if (!status.stdout.trim()) return 'Nenhuma mudanca para backup.'
+    if (!status.stdout.trim()) {
+      // Emit event for no-change scenario
+      const event: TaskCompletedEvent = {
+        taskId: `backup-${Date.now()}`,
+        taskType: 'backup',
+        success: true,
+        message: 'Nenhuma mudanca para backup',
+        duration: Date.now() - startTime,
+        timestamp: Date.now(),
+      }
+      eventBus.emit('task:completed', event)
+      return 'Nenhuma mudanca para backup.'
+    }
 
     const commitMsg = message || `backup ${new Date().toISOString().slice(0, 19)}`
     const commit = await gitCmd(['git', 'commit', '-m', commitMsg], _backupDir)
-    if (!commit.ok) return `Backup commit falhou: ${commit.stderr}`
+    if (!commit.ok) {
+      const errorEvent: TaskCompletedEvent = {
+        taskId: `backup-${Date.now()}`,
+        taskType: 'backup',
+        success: false,
+        message: `Commit falhou: ${commit.stderr}`,
+        duration: Date.now() - startTime,
+        timestamp: Date.now(),
+      }
+      eventBus.emit('task:completed', errorEvent)
+      return `Backup commit falhou: ${commit.stderr}`
+    }
 
     _lastBackup = new Date().toISOString()
+
+    // Emit success event
+    const successEvent: TaskCompletedEvent = {
+      taskId: `backup-${Date.now()}`,
+      taskType: 'backup',
+      success: true,
+      message: `Backup concluido: ${commitMsg}`,
+      duration: Date.now() - startTime,
+      timestamp: Date.now(),
+    }
+    eventBus.emit('task:completed', successEvent)
+
     return `Backup concluido: ${commitMsg}`
   } catch (err) {
-    return `Backup falhou: ${err instanceof Error ? err.message : String(err)}`
+    const errorMsg = err instanceof Error ? err.message : String(err)
+    // Emit failure event
+    const failEvent: TaskCompletedEvent = {
+      taskId: `backup-${Date.now()}`,
+      taskType: 'backup',
+      success: false,
+      message: `Backup falhou: ${errorMsg}`,
+      duration: Date.now() - startTime,
+      timestamp: Date.now(),
+    }
+    eventBus.emit('task:completed', failEvent)
+    return `Backup falhou: ${errorMsg}`
   }
 }
 
@@ -434,6 +497,69 @@ async function gitCmd(
   ])
   const code = await proc.exited
   return { stdout: stdout.trim(), stderr: stderr.trim(), ok: code === 0 }
+}
+
+// ─── Event-Driven Backup ─────────────────────────────────────
+
+let _eventBackupUnsubscribe: (() => void) | null = null
+let _pendingBackupTimeout: ReturnType<typeof setTimeout> | null = null
+let _pendingBackupFiles: string[] = []
+
+/**
+ * Start event-driven backup. Listens for file:saved events and triggers
+ * backup after a debounce period (default 5 seconds after last write).
+ * This provides reactive backup without polling.
+ */
+export function startEventDrivenBackup(debounceMs: number = 5000): () => void {
+  if (_eventBackupUnsubscribe) {
+    // Already running
+    return _eventBackupUnsubscribe
+  }
+
+  _eventBackupUnsubscribe = eventBus.on(
+    'file:saved',
+    (event: FileSavedEvent) => {
+      // Only trigger backup for tracked files
+      if (!event.isTracked) return
+
+      // Add to pending list
+      _pendingBackupFiles.push(event.filePath)
+
+      // Debounce: reset timer on each new write
+      if (_pendingBackupTimeout) {
+        clearTimeout(_pendingBackupTimeout)
+      }
+
+      _pendingBackupTimeout = setTimeout(() => {
+        // Fire and forget — errors handled via event emission
+        const filesCount = _pendingBackupFiles.length
+        _pendingBackupFiles = []
+        _pendingBackupTimeout = null
+
+        performBackup(`auto-save (${filesCount} file${filesCount > 1 ? 's' : ''})`).catch(() => {
+          // Silent failure — event already emitted in performBackup
+        })
+      }, debounceMs)
+    },
+    { async: true },
+  )
+
+  return _eventBackupUnsubscribe
+}
+
+/**
+ * Stop event-driven backup.
+ */
+export function stopEventDrivenBackup(): void {
+  if (_eventBackupUnsubscribe) {
+    _eventBackupUnsubscribe()
+    _eventBackupUnsubscribe = null
+  }
+  if (_pendingBackupTimeout) {
+    clearTimeout(_pendingBackupTimeout)
+    _pendingBackupTimeout = null
+  }
+  _pendingBackupFiles = []
 }
 
 // ─── Background Backup Timer ────────────────────────────────
