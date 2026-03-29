@@ -6,11 +6,13 @@
  *
  * Security model:
  *   - Blocked patterns: Defender disabling, System32 writes, registry tampering
- *   - All scripts run with -NoProfile -NonInteractive
+ *   - All scripts run via windows-executor with -NoProfile -NonInteractive -ExecutionPolicy Bypass
  *   - Temp .ps1 files are cleaned up after execution
  *   - ANSI escape sequences stripped from all output
  *   - The tool is classified as 'dangerous' in tool-safety, requiring
  *     explicit user approval when toolApproval != 'auto'
+ *
+ * REFACTORED: All PowerShell execution now goes through windows-executor.ts
  */
 
 import { writeFileSync, unlinkSync, existsSync } from 'node:fs'
@@ -20,15 +22,19 @@ import { randomUUID } from 'node:crypto'
 import { IS_WINDOWS } from './platform'
 import { eventBus } from './core/event-bus'
 import type { ContextChangedEvent } from './types'
+import {
+  executePowerShell,
+  executePowerShellSTA,
+  executePowerShellScript as executeScriptFile,
+  DEFAULT_TIMEOUT_MS,
+  type ExecutionResult,
+} from './utils/windows-executor'
 
 // ─── Constants ──────────────────────────────────────────────
 
 const PS_TIMEOUT_MS = 30_000
 const MAX_SCRIPT_LENGTH = 50_000
 const MAX_OUTPUT_LENGTH = 100_000
-
-// ANSI escape sequence regex for cleaning PowerShell output
-const ANSI_RE = /[\x1b\x9b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nq-uy=><~]/g
 
 // ─── Context Tracking State ──────────────────────────────────
 
@@ -136,42 +142,13 @@ export async function executePowerShellScript(script: string): Promise<ScriptRes
   try {
     writeFileSync(scriptPath, script, 'utf-8')
 
-    const start = performance.now()
-    const proc = Bun.spawn(
-      [
-        'powershell',
-        '-NoProfile',
-        '-NonInteractive',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', scriptPath,
-      ],
-      { stdout: 'pipe', stderr: 'pipe' },
-    )
-
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
-        proc.kill()
-        reject(new Error('Script timeout exceeded'))
-      }, PS_TIMEOUT_MS)
-    })
-
-    const execPromise = (async () => {
-      const [stdout, stderr] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ])
-      const exitCode = await proc.exited
-      return { stdout, stderr, exitCode }
-    })()
-
-    const { stdout, stderr, exitCode } = await Promise.race([execPromise, timeoutPromise])
-    const duration = Math.round(performance.now() - start)
+    const result = await executeScriptFile(scriptPath, { timeout: PS_TIMEOUT_MS })
 
     return {
-      stdout: cleanOutput(stdout),
-      stderr: cleanOutput(stderr),
-      exitCode,
-      duration,
+      stdout: result.stdout,
+      stderr: result.timedOut ? 'Script timeout exceeded' : result.stderr,
+      exitCode: result.exitCode,
+      duration: result.duration,
     }
   } finally {
     // Always clean up the temp script
@@ -216,26 +193,13 @@ async function readClipboardText(): Promise<ClipboardContent> {
   ].join('; ')
 
   try {
-    const proc = Bun.spawn(
-      ['powershell', '-NoProfile', '-NonInteractive', '-STA', '-Command', cmd],
-      { stdout: 'pipe', stderr: 'pipe' },
-    )
+    const result = await executePowerShellSTA(cmd, { timeout: 10_000 })
 
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => { proc.kill(); reject(new Error('clipboard timeout')) }, 10_000)
-    })
+    if (result.timedOut) {
+      return { type: 'error', text: 'Clipboard read timeout.' }
+    }
 
-    const execPromise = (async () => {
-      const [stdout] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ])
-      await proc.exited
-      return stdout
-    })()
-
-    const stdout = await Promise.race([execPromise, timeoutPromise])
-    const text = cleanOutput(stdout).trim()
+    const text = result.stdout.trim()
     if (text === '___EMPTY___' || !text) {
       return { type: 'empty', text: '' }
     }
@@ -304,26 +268,13 @@ try {
 `
 
   try {
-    const proc = Bun.spawn(
-      ['powershell', '-NoProfile', '-NonInteractive', '-STA', '-Command', script],
-      { stdout: 'pipe', stderr: 'pipe' },
-    )
+    const result = await executePowerShellSTA(script, { timeout: 20_000 })
 
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => { proc.kill(); reject(new Error('OCR timeout')) }, 20_000)
-    })
+    if (result.timedOut) {
+      return { type: 'error', text: 'OCR timeout.' }
+    }
 
-    const execPromise = (async () => {
-      const [stdout] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ])
-      await proc.exited
-      return stdout
-    })()
-
-    const stdout = await Promise.race([execPromise, timeoutPromise])
-    const text = cleanOutput(stdout).trim()
+    const text = result.stdout.trim()
 
     if (text === '___NO_IMAGE___') {
       return { type: 'empty', text: '' }
@@ -397,28 +348,15 @@ Get-Process | Where-Object { $_.MainWindowTitle -ne '' } |
 `
 
   try {
-    const proc = Bun.spawn(
-      ['powershell', '-NoProfile', '-NonInteractive', '-Command', script],
-      { stdout: 'pipe', stderr: 'pipe' },
-    )
+    const result = await executePowerShell(script, { timeout: 15_000 })
 
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => { proc.kill(); reject(new Error('screen context timeout')) }, 15_000)
-    })
+    if (result.timedOut) {
+      return 'Error: screen context analysis timeout'
+    }
 
-    const execPromise = (async () => {
-      const [stdout, stderr] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ])
-      await proc.exited
-      return { stdout, stderr }
-    })()
-
-    const { stdout, stderr } = await Promise.race([execPromise, timeoutPromise])
-    const output = cleanOutput(stdout).trim()
-    if (!output && stderr.trim()) {
-      return `Error: ${cleanOutput(stderr).trim()}`
+    const output = result.stdout.trim()
+    if (!output && result.stderr.trim()) {
+      return `Error: ${result.stderr.trim()}`
     }
     return output || 'Nenhuma janela visivel encontrada.'
   } catch (err) {
@@ -482,15 +420,4 @@ export function initContextTracking(currentDir: string): void {
  */
 export function getCurrentContext(): { dir: string; foregroundWindow?: string } | null {
   return _currentContext
-}
-
-// ─── Helpers ────────────────────────────────────────────────
-
-/** Strip ANSI escape sequences and trim output length */
-function cleanOutput(text: string): string {
-  const stripped = text.replace(ANSI_RE, '')
-  if (stripped.length > MAX_OUTPUT_LENGTH) {
-    return stripped.slice(0, MAX_OUTPUT_LENGTH) + `\n... (truncated, ${stripped.length} total chars)`
-  }
-  return stripped
 }

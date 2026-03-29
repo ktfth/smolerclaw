@@ -3,9 +3,20 @@
  * All operations are non-destructive (read-only or open-only).
  *
  * getDateTimeInfo() is cross-platform (pure JS, no Windows APIs).
+ *
+ * REFACTORED: All PowerShell execution now goes through windows-executor.ts
  */
 
 import { IS_WINDOWS } from './platform'
+import {
+  executePowerShell,
+  startProcess,
+  invokeItem,
+  getVisibleProcesses,
+  checkExecutable,
+  psSingleQuoteEscape,
+  DEFAULT_TIMEOUT_MS,
+} from './utils/windows-executor'
 
 // ─── Security: PowerShell input sanitization ────────────────
 
@@ -28,33 +39,6 @@ function validatePsInput(value: string, label: string): string | null {
     return `Error: ${label} contains invalid characters. Avoid: " ; \` $ | & < > { } ( ) and newlines.`
   }
   return null
-}
-
-// ─── Process helpers with timeout and deadlock prevention ───
-
-const SPAWN_TIMEOUT_MS = 15_000
-
-/**
- * Spawn a PowerShell command with timeout and concurrent pipe drainage.
- * Returns { stdout, stderr, exitCode }.
- */
-async function runPowerShell(cmd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const proc = Bun.spawn(
-    ['powershell', '-NoProfile', '-NonInteractive', '-Command', cmd],
-    { stdout: 'pipe', stderr: 'pipe' },
-  )
-
-  const timer = setTimeout(() => proc.kill(), SPAWN_TIMEOUT_MS)
-
-  // Drain both pipes concurrently to prevent deadlock
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  const exitCode = await proc.exited
-  clearTimeout(timer)
-
-  return { stdout, stderr, exitCode }
 }
 
 // ─── App Launcher ───────────────────────────────────────────
@@ -110,14 +94,21 @@ export async function openApp(name: string, args?: string): Promise<string> {
 
   if (!IS_WINDOWS) return 'Error: this command is only available on Windows.'
 
-  const cmd = args
-    ? `Start-Process '${exe}' -ArgumentList '${args}'`
-    : `Start-Process '${exe}'`
+  // Check if executable exists (skip for protocol URIs like ms-outlook:)
+  if (!exe.includes(':')) {
+    const check = await checkExecutable(exe)
+    if (!check.exists) {
+      return `Error: ${exe} not found. ${check.error || ''}`
+    }
+  }
 
   try {
-    const { exitCode, stderr } = await runPowerShell(cmd)
-    if (exitCode !== 0 && stderr.trim()) {
-      return `Error opening ${name}: ${stderr.trim()}`
+    const result = await startProcess(exe, args)
+    if (result.exitCode !== 0 && result.stderr.trim()) {
+      return `Error opening ${name}: ${result.stderr.trim()}`
+    }
+    if (result.timedOut) {
+      return `Error opening ${name}: timeout (application may have opened but response was delayed)`
     }
     return `Opened: ${name}`
   } catch (err) {
@@ -140,9 +131,12 @@ export async function openUrl(url: string): Promise<string> {
   if (!IS_WINDOWS) return 'Error: this command is only available on Windows.'
 
   try {
-    const { exitCode, stderr } = await runPowerShell(`Start-Process '${url}'`)
-    if (exitCode !== 0 && stderr.trim()) {
-      return `Error: ${stderr.trim()}`
+    const result = await startProcess(url)
+    if (result.exitCode !== 0 && result.stderr.trim()) {
+      return `Error: ${result.stderr.trim()}`
+    }
+    if (result.timedOut) {
+      return `Error: timeout opening URL (browser may have opened but response was delayed)`
     }
     return `Opened in browser: ${url}`
   } catch (err) {
@@ -161,9 +155,12 @@ export async function openFile(filePath: string): Promise<string> {
   if (!IS_WINDOWS) return 'Error: this command is only available on Windows.'
 
   try {
-    const { exitCode, stderr } = await runPowerShell(`Invoke-Item '${filePath}'`)
-    if (exitCode !== 0 && stderr.trim()) {
-      return `Error: ${stderr.trim()}`
+    const result = await invokeItem(filePath)
+    if (result.exitCode !== 0 && result.stderr.trim()) {
+      return `Error: ${result.stderr.trim()}`
+    }
+    if (result.timedOut) {
+      return `Error: timeout opening file (application may have opened but response was delayed)`
     }
     return `Opened: ${filePath}`
   } catch (err) {
@@ -181,12 +178,14 @@ export async function getRunningApps(): Promise<string> {
   if (!IS_WINDOWS) return 'Error: this command is only available on Windows.'
 
   try {
-    const cmd = `Get-Process | Where-Object {$_.MainWindowTitle -ne ''} | Sort-Object -Property WorkingSet64 -Descending | Select-Object -First 15 Name, @{N='Memory(MB)';E={[math]::Round($_.WorkingSet64/1MB,1)}}, MainWindowTitle | Format-Table -AutoSize | Out-String -Width 200`
-    const { stdout, stderr } = await runPowerShell(cmd)
-    if (stderr.trim()) {
-      return `Error: ${stderr.trim()}`
+    const result = await getVisibleProcesses(15)
+    if (result.stderr.trim()) {
+      return `Error: ${result.stderr.trim()}`
     }
-    return stdout.trim() || 'No windowed applications running.'
+    if (result.timedOut) {
+      return 'Error: timeout getting process list'
+    }
+    return result.stdout.trim() || 'No windowed applications running.'
   } catch (err) {
     return `Error: ${err instanceof Error ? err.message : String(err)}`
   }
@@ -207,11 +206,14 @@ export async function getSystemInfo(): Promise<string> {
   ]
 
   try {
-    const { stdout, stderr } = await runPowerShell(commands.join('; '))
-    if (!stdout.trim() && stderr.trim()) {
-      return `Error: ${stderr.trim()}`
+    const result = await executePowerShell(commands.join('; '))
+    if (!result.stdout.trim() && result.stderr.trim()) {
+      return `Error: ${result.stderr.trim()}`
     }
-    return stdout.trim() || 'System info unavailable.'
+    if (result.timedOut) {
+      return 'Error: timeout getting system info'
+    }
+    return result.stdout.trim() || 'System info unavailable.'
   } catch (err) {
     return `Error: ${err instanceof Error ? err.message : String(err)}`
   }
@@ -286,8 +288,12 @@ export async function getOutlookEvents(): Promise<string> {
   ].join('\n')
 
   try {
-    const { stdout } = await runPowerShell(cmd)
-    return stdout.trim() || 'Outlook nao disponivel.'
+    // Outlook COM operations can be slow
+    const result = await executePowerShell(cmd, { timeout: 30_000 })
+    if (result.timedOut) {
+      return 'Outlook timeout - pode estar em processo de inicializacao.'
+    }
+    return result.stdout.trim() || 'Outlook nao disponivel.'
   } catch {
     return 'Outlook nao disponivel.'
   }

@@ -4,8 +4,10 @@
  * Supports: open apps, open URLs, run commands, wait, notify (toast),
  * conditional steps (if_app_running), variables, and error handling.
  *
- * Security: run_command uses Bun.spawn with args array. open_url
- * validates HTTP(S) scheme. All step timeouts use Promise.race.
+ * Security: run_command uses windows-executor with mandatory flags.
+ * open_url validates HTTP(S) scheme. All step timeouts use Promise.race.
+ *
+ * REFACTORED: All PowerShell execution now goes through windows-executor.ts
  */
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
@@ -14,6 +16,12 @@ import { randomUUID } from 'node:crypto'
 import { atomicWriteFile } from './vault'
 import { openApp, openUrl, getKnownApps } from './windows'
 import { IS_WINDOWS } from './platform'
+import {
+  executePowerShell,
+  showToast,
+  isProcessRunning,
+  psSingleQuoteEscape,
+} from './utils/windows-executor'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -355,28 +363,16 @@ async function executeStep(
       const cmd = step.target
       if (!cmd.trim()) throw new Error('Comando vazio')
 
-      const proc = Bun.spawn(
-        ['powershell', '-NoProfile', '-NonInteractive', '-Command', cmd],
-        { stdout: 'pipe', stderr: 'pipe' },
-      )
+      const result = await executePowerShell(cmd, { timeout: 30_000 })
 
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => { proc.kill(); reject(new Error('Command timeout (30s)')) }, 30_000)
-      })
+      if (result.timedOut) {
+        throw new Error('Command timeout (30s)')
+      }
+      if (result.exitCode !== 0 && result.stderr.trim()) {
+        throw new Error(`exit ${result.exitCode}: ${result.stderr.trim().slice(0, 200)}`)
+      }
 
-      const execPromise = (async () => {
-        const [stdout, stderr] = await Promise.all([
-          new Response(proc.stdout).text(),
-          new Response(proc.stderr).text(),
-        ])
-        const exitCode = await proc.exited
-        if (exitCode !== 0 && stderr.trim()) {
-          throw new Error(`exit ${exitCode}: ${stderr.trim().slice(0, 200)}`)
-        }
-        return stdout.trim().slice(0, 200)
-      })()
-
-      const output = await Promise.race([execPromise, timeoutPromise])
+      const output = result.stdout.trim().slice(0, 200)
       return `Command: ${cmd.slice(0, 60)}${output ? ' -> ' + output : ''}`
     }
 
@@ -389,14 +385,8 @@ async function executeStep(
     case 'notify': {
       if (IS_WINDOWS) {
         try {
-          const msg = step.target.replace(/'/g, "''")
-          const proc = Bun.spawn(
-            ['powershell', '-NoProfile', '-NonInteractive', '-Command',
-              `[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; [System.Windows.Forms.MessageBox]::Show('${msg}', 'smolerclaw', 'OK', 'Information') | Out-Null`],
-            { stdout: 'pipe', stderr: 'pipe' },
-          )
-          setTimeout(() => proc.kill(), 10_000)
-          // Don't await — non-blocking notification
+          // Use toast notification for non-blocking notify
+          showToast('smolerclaw', step.target, { timeout: 10_000 }).catch(() => {})
         } catch { /* best effort */ }
       }
       return `Notify: ${step.target}`
@@ -406,32 +396,13 @@ async function executeStep(
       if (!IS_WINDOWS) return `skip: condition (not Windows)`
       const appName = step.target.toLowerCase()
 
-      const proc = Bun.spawn(
-        ['powershell', '-NoProfile', '-NonInteractive', '-Command',
-          `(Get-Process -Name '${appName}' -ErrorAction SilentlyContinue) -ne $null`],
-        { stdout: 'pipe', stderr: 'pipe' },
-      )
+      const running = await isProcessRunning(appName, { timeout: 5_000 })
 
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => { proc.kill(); reject(new Error('condition timeout')) }, 5_000)
-      })
-
-      const execPromise = (async () => {
-        const [stdout] = await Promise.all([
-          new Response(proc.stdout).text(),
-          new Response(proc.stderr).text(),
-        ])
-        await proc.exited
-        return stdout.trim().toLowerCase() === 'true'
-      })()
-
-      const isRunning = await Promise.race([execPromise, timeoutPromise])
-
-      if (isRunning && step.condition_steps && step.condition_steps.length > 0) {
+      if (running && step.condition_steps && step.condition_steps.length > 0) {
         const subResult = await executeSteps(`${step.target}-conditional`, step.condition_steps, onStep)
         return `Condition: ${appName} running=true, ran ${subResult.stepsRun} sub-steps`
       }
-      return `Condition: ${appName} running=${isRunning}${!isRunning ? ' (skipped sub-steps)' : ''}`
+      return `Condition: ${appName} running=${running}${!running ? ' (skipped sub-steps)' : ''}`
     }
 
     case 'log': {

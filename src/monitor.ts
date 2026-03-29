@@ -1,9 +1,12 @@
 /**
  * Process monitor — watch Windows processes and notify if they stop.
  * Non-destructive: only checks process existence, never kills anything.
+ *
+ * REFACTORED: All PowerShell execution now goes through windows-executor.ts
  */
 
 import { IS_WINDOWS } from './platform'
+import { showToast, isProcessRunning } from './utils/windows-executor'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -98,72 +101,19 @@ async function checkProcess(key: string): Promise<void> {
   const monitor = _monitors.get(key)
   if (!monitor) return
 
-  const isRunning = await isProcessRunning(monitor.name)
+  const running = await isProcessRunning(monitor.name, { timeout: 10_000 })
 
-  if (monitor.lastSeen && !isRunning) {
+  if (monitor.lastSeen && !running) {
     // Process just stopped
     const msg = `ALERTA: "${monitor.name}" parou de rodar!`
-    fireToast('Processo parou!', `"${monitor.name}" nao esta mais rodando.`)
+    showToast('Processo parou!', `"${monitor.name}" nao esta mais rodando.`, { timeout: 10_000 }).catch(() => {})
     _onNotify?.(msg)
-  } else if (!monitor.lastSeen && isRunning) {
+  } else if (!monitor.lastSeen && running) {
     // Process came back
     const msg = `"${monitor.name}" voltou a rodar.`
     _onNotify?.(msg)
   }
 
   // Update state immutably
-  _monitors.set(key, { ...monitor, lastSeen: isRunning })
-}
-
-async function isProcessRunning(name: string): Promise<boolean> {
-  if (!IS_WINDOWS) return false
-
-  try {
-    const cmd = `(Get-Process -Name '${name}' -ErrorAction SilentlyContinue) -ne $null`
-    const proc = Bun.spawn(
-      ['powershell', '-NoProfile', '-NonInteractive', '-Command', cmd],
-      { stdout: 'pipe', stderr: 'pipe' },
-    )
-    const timer = setTimeout(() => proc.kill(), 10_000)
-    const [stdout] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    clearTimeout(timer)
-    return stdout.trim().toLowerCase() === 'true'
-  } catch {
-    return false
-  }
-}
-
-async function fireToast(title: string, body: string): Promise<void> {
-  if (!IS_WINDOWS) return
-
-  const safeTitle = title.replace(/'/g, "''")
-  const safeBody = body.replace(/'/g, "''")
-
-  const cmd = [
-    '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null',
-    '[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null',
-    `$template = '<toast><visual><binding template="ToastText02"><text id="1">${safeTitle}</text><text id="2">${safeBody}</text></binding></visual><audio src="ms-winsoundevent:Notification.Default"/></toast>'`,
-    '$xml = New-Object Windows.Data.Xml.Dom.XmlDocument',
-    '$xml.LoadXml($template)',
-    '$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)',
-    '[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("smolerclaw").Show($toast)',
-  ].join('; ')
-
-  try {
-    const proc = Bun.spawn(
-      ['powershell', '-NoProfile', '-NonInteractive', '-Command', cmd],
-      { stdout: 'pipe', stderr: 'pipe' },
-    )
-    const timer = setTimeout(() => proc.kill(), 10_000)
-    await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    clearTimeout(timer)
-  } catch { /* best effort */ }
+  _monitors.set(key, { ...monitor, lastSeen: running })
 }

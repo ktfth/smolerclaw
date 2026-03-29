@@ -1,4 +1,11 @@
+/**
+ * Platform detection and cross-platform utilities.
+ *
+ * REFACTORED: commandExists now uses windows-executor for PowerShell calls.
+ */
+
 import { existsSync } from 'node:fs'
+import { checkExecutable, executeCommand } from './utils/windows-executor'
 
 export const IS_WINDOWS = process.platform === 'win32'
 export const IS_MAC = process.platform === 'darwin'
@@ -10,7 +17,7 @@ export const IS_LINUX = process.platform === 'linux'
  */
 export function getShell(): [string, ...string[]] {
   if (IS_WINDOWS) {
-    return ['powershell', '-NoProfile', '-NonInteractive', '-Command']
+    return ['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command']
   }
 
   // Prefer user's SHELL, then bash, then sh
@@ -36,14 +43,15 @@ export function getShellName(): string {
  * Check if a command is available on the system.
  */
 export async function commandExists(cmd: string): Promise<boolean> {
-  try {
-    const args = IS_WINDOWS
-      ? ['powershell', '-NoProfile', '-Command', `Get-Command ${cmd} -ErrorAction SilentlyContinue`]
-      : ['which', cmd]
+  if (IS_WINDOWS) {
+    const result = await checkExecutable(cmd)
+    return result.exists
+  }
 
-    const proc = Bun.spawn(args, { stdout: 'pipe', stderr: 'pipe' })
-    await proc.exited
-    return proc.exitCode === 0
+  // Unix: use 'which'
+  try {
+    const result = await executeCommand(['which', cmd], { timeout: 5_000 })
+    return result.exitCode === 0
   } catch {
     return false
   }

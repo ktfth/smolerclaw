@@ -3,6 +3,8 @@
  * Tasks are stored as JSON in the data directory.
  * A background timer checks every 30s for due tasks and fires
  * Windows toast notifications via PowerShell.
+ *
+ * REFACTORED: All PowerShell execution now goes through windows-executor.ts
  */
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
@@ -10,6 +12,11 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { IS_WINDOWS } from './platform'
 import { atomicWriteFile } from './vault'
+import {
+  showToast,
+  executeSchtasks,
+  psDoubleQuoteEscape,
+} from './utils/windows-executor'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -261,42 +268,15 @@ function xmlEncode(s: string): string {
     .replace(/'/g, '&apos;')
 }
 
-/** Sanitize a string for safe embedding in a PowerShell single-quoted string. */
-function psSingleQuoteEscape(s: string): string {
-  return s.replace(/'/g, "''")
-}
-
 /**
  * Fire a Windows toast notification for a task.
- * Uses PowerShell's BurntToast or built-in toast via .NET.
+ * Uses windows-executor's showToast for consistent handling.
  */
 async function fireNotification(task: Task): Promise<void> {
   if (!IS_WINDOWS) return
 
-  // XML-encode title to prevent injection via XML special chars
-  const title = xmlEncode(task.title)
-  const cmd = [
-    '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null',
-    '[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null',
-    `$template = '<toast><visual><binding template="ToastText02"><text id="1">smolerclaw - Lembrete</text><text id="2">${title}</text></binding></visual><audio src="ms-winsoundevent:Notification.Default"/></toast>'`,
-    '$xml = New-Object Windows.Data.Xml.Dom.XmlDocument',
-    '$xml.LoadXml($template)',
-    `$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)`,
-    `[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('smolerclaw').Show($toast)`,
-  ].join('; ')
-
   try {
-    const proc = Bun.spawn(
-      ['powershell', '-NoProfile', '-NonInteractive', '-Command', cmd],
-      { stdout: 'pipe', stderr: 'pipe' },
-    )
-    const timer = setTimeout(() => proc.kill(), 10_000)
-    await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ])
-    await proc.exited
-    clearTimeout(timer)
+    await showToast('smolerclaw - Lembrete', task.title, { timeout: 10_000 })
   } catch {
     // Best effort — notification failure should not crash
   }
@@ -331,7 +311,7 @@ async function scheduleWindowsTask(task: Task): Promise<void> {
 
   // PowerShell command that shows a toast notification
   // XML-encode title and escape for PowerShell double-quoted string
-  const title = xmlEncode(task.title).replace(/"/g, '""')
+  const title = psDoubleQuoteEscape(xmlEncode(task.title))
   const toastPs = [
     '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null;',
     '[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null;',
@@ -341,16 +321,13 @@ async function scheduleWindowsTask(task: Task): Promise<void> {
   ].join(' ')
 
   try {
-    const proc = Bun.spawn([
-      'schtasks', '/Create',
-      '/TN', taskName,
+    await executeSchtasks('Create', taskName, [
       '/SC', 'ONCE',
       '/SD', startDate,
       '/ST', startTime,
       '/TR', `powershell -NoProfile -WindowStyle Hidden -Command "${toastPs}"`,
       '/F',  // force overwrite if exists
-    ], { stdout: 'pipe', stderr: 'pipe' })
-    await proc.exited
+    ])
   } catch {
     // Best effort — scheduler failure should not block task creation
   }
@@ -362,10 +339,7 @@ async function scheduleWindowsTask(task: Task): Promise<void> {
 async function removeWindowsTask(taskId: string): Promise<void> {
   const taskName = `${TASK_PREFIX}${taskId}`
   try {
-    const proc = Bun.spawn([
-      'schtasks', '/Delete', '/TN', taskName, '/F',
-    ], { stdout: 'pipe', stderr: 'pipe' })
-    await proc.exited
+    await executeSchtasks('Delete', taskName, ['/F'])
   } catch {
     // Ignore — task may not exist
   }
@@ -386,11 +360,8 @@ async function syncScheduledTasks(): Promise<void> {
 
     // Check if the scheduled task exists
     try {
-      const proc = Bun.spawn([
-        'schtasks', '/Query', '/TN', `${TASK_PREFIX}${task.id}`,
-      ], { stdout: 'pipe', stderr: 'pipe' })
-      const code = await proc.exited
-      if (code !== 0) {
+      const result = await executeSchtasks('Query', `${TASK_PREFIX}${task.id}`)
+      if (result.exitCode !== 0) {
         // Task doesn't exist in scheduler — recreate it
         await scheduleWindowsTask(task)
       }
