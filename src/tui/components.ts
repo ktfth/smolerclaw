@@ -8,7 +8,7 @@
  *   - ProgressBar: Visual progress indicator
  */
 
-import { A, C, w, stripAnsi, visibleLength, wrapText } from '../ansi'
+import { A, C, w, stripAnsi, visibleLength, wrapText, clipText } from '../ansi'
 import type { Insight } from '../types'
 
 // ─── Types ────────────────────────────────────────────────────
@@ -427,12 +427,13 @@ export function renderBox(
     lines.push(`${borderColor}┌${'─'.repeat(width - 2)}┐${A.reset}`)
   }
 
-  // Content with padding
+  // Content with padding — clip lines that exceed innerWidth
   const paddingLine = ' '.repeat(padding)
   for (const line of content) {
-    const plainLen = visibleLength(line)
+    const clipped = visibleLength(line) > innerWidth ? clipText(line, innerWidth) : line
+    const plainLen = visibleLength(clipped)
     const fill = Math.max(0, innerWidth - plainLen)
-    lines.push(`${borderColor}│${A.reset}${paddingLine}${line}${' '.repeat(fill)}${paddingLine}${borderColor}│${A.reset}`)
+    lines.push(`${borderColor}│${A.reset}${paddingLine}${clipped}${' '.repeat(fill)}${paddingLine}${borderColor}│${A.reset}`)
   }
 
   // Bottom border

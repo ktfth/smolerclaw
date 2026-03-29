@@ -163,6 +163,27 @@ export function displayWidth(s: string, charCount: number): number {
 }
 
 /**
+ * Clip a string to a maximum visible width, adding ellipsis if truncated.
+ * Strips ANSI codes from the truncated portion for simplicity.
+ */
+export function clipText(s: string, maxWidth: number): string {
+  if (maxWidth < 1) return ''
+  if (visibleLength(s) <= maxWidth) return s
+
+  const plain = stripAnsi(s)
+  let width = 0
+  let i = 0
+  for (const ch of plain) {
+    const cw = charWidth(ch)
+    if (width + cw > maxWidth - 1) break
+    width += cw
+    i += ch.length
+  }
+
+  return plain.slice(0, i) + '…'
+}
+
+/**
  * Word-wrap text to maxWidth, preserving ANSI escape codes.
  * Lines are split on word boundaries. Continuation lines get 2-space indent.
  */
