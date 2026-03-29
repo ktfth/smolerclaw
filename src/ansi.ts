@@ -43,6 +43,64 @@ export const C = {
   quote:   A.fg(245),
 }
 
+// ─── Persona-Aware Theme Palettes ──────────────────────────────
+// Dynamic color schemes for Time & Load Balancer
+
+export type PersonaPalette = {
+  primary: string
+  secondary: string
+  accent: string
+  muted: string
+  header: string
+}
+
+/**
+ * Weekday productivity theme — intense, focused colors (Cyan/Blue)
+ */
+export const ProductivityPalette: PersonaPalette = {
+  primary: A.fg(75),    // Bright blue
+  secondary: A.fg(39),  // Cyan
+  accent: A.fg(220),    // Yellow for alerts
+  muted: A.fg(245),     // Gray
+  header: A.fg(81),     // Light cyan
+}
+
+/**
+ * Weekend spillover alert theme — warm warning tones
+ */
+export const SpilloverPalette: PersonaPalette = {
+  primary: A.fg(215),   // Orange
+  secondary: A.fg(220), // Yellow
+  accent: A.fg(196),    // Red for urgency
+  muted: A.fg(245),     // Gray
+  header: A.fg(214),    // Amber
+}
+
+/**
+ * Weekend relax theme — soft, calm colors (Magenta pastel/Light green)
+ */
+export const RelaxPalette: PersonaPalette = {
+  primary: A.fg(183),   // Pastel magenta
+  secondary: A.fg(157), // Light green
+  accent: A.fg(147),    // Soft purple
+  muted: A.fg(242),     // Dim gray
+  header: A.fg(183),    // Pastel magenta
+}
+
+/**
+ * Get the appropriate color palette for a persona mode.
+ */
+export function getPalette(persona: 'productivity' | 'spillover_alert' | 'sharpen_or_relax'): PersonaPalette {
+  switch (persona) {
+    case 'productivity':
+      return ProductivityPalette
+    case 'spillover_alert':
+      return SpilloverPalette
+    case 'sharpen_or_relax':
+      return RelaxPalette
+  }
+}
+
 // ─── Utilities ───────────────────────────────────────────────
 
 export function w(s: string): void {

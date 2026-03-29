@@ -1,4 +1,4 @@
-import { A, C, CSI, w, stripAnsi, wrapText, visibleLength, displayWidth } from './ansi'
+import { A, C, CSI, w, stripAnsi, wrapText, visibleLength, displayWidth, getPalette, type PersonaPalette } from './ansi'
 import { renderMarkdown } from './markdown'
 import { InputHistory } from './history'
 import { join } from 'node:path'
@@ -32,6 +32,7 @@ import type {
   InsightAcceptedEvent,
   InsightAvailableEvent,
 } from './types'
+import type { PersonaMode, TimeContext } from './briefing'
 
 // ─── TUI ─────────────────────────────────────────────────────
 
@@ -68,6 +69,11 @@ export class TUI {
   private activeProject = ''
   private vaultStatus: 'ok' | 'warn' | 'error' = 'ok'
   private stickyStatusRow = 0
+
+  // Time & Load Balancer state
+  private personaMode: PersonaMode = 'productivity'
+  private palette: PersonaPalette = getPalette('productivity')
+  private timeContext: TimeContext | null = null
   private commands = [
     // English
     '/help', '/clear', '/commit', '/persona', '/copy', '/fork',
@@ -1064,7 +1070,7 @@ export class TUI {
     this.render()
   }
 
-  // ── Insight Management ──────────────────────────────────────
+// ── Insight Management ──────────────────────────────────────
 
   /**
    * Display a proactive insight snippet.
@@ -1188,6 +1194,57 @@ export class TUI {
     }
   }
 
+  // ── Time & Load Balancer API ───────────────────────────────
+
+  /**
+   * Update the persona mode and refresh the color palette.
+   * Call this when the time context changes (e.g., at startup or day transition).
+   */
+  setPersonaMode(mode: PersonaMode): void {
+    this.personaMode = mode
+    this.palette = getPalette(mode)
+    this.renderHeader()
+    if (this.statusBarEnabled) {
+      this.renderStickyStatusBar()
+    }
+  }
+
+  /**
+   * Set the full time context for advanced UI features.
+   */
+  setTimeContext(context: TimeContext): void {
+    this.timeContext = context
+    this.setPersonaMode(context.persona)
+  }
+
+  /**
+   * Get the current persona mode.
+   */
+  getPersonaMode(): PersonaMode {
+    return this.personaMode
+  }
+
+  /**
+   * Get the current color palette based on persona.
+   */
+  getPalette(): PersonaPalette {
+    return this.palette
+  }
+
+  /**
+   * Get a persona-aware label for the status bar.
+   */
+  private getPersonaLabel(): string {
+    switch (this.personaMode) {
+      case 'productivity':
+        return 'PROD'
+      case 'spillover_alert':
+        return 'SPILL'
+      case 'sharpen_or_relax':
+        return 'RELAX'
+    }
+  }
+
   /**
    * Add a meta-learning entry or update frequency if exists.
    */
@@ -1267,11 +1324,17 @@ export class TUI {
     width: number,
     height: number,
   ): void {
+    // Use persona-aware colors for panel styling
+    const borderColor = this.personaMode === 'sharpen_or_relax'
+      ? this.palette.muted
+      : A.dim
+    const titleColor = this.palette.primary
+
     // Draw panel border
     const boxLines = renderBox(
       panel.content.slice(0, height - 2),
       width,
-      { title: panel.title, borderColor: A.dim, titleColor: C.heading },
+      { title: panel.title, borderColor, titleColor },
     )
 
     for (let i = 0; i < boxLines.length && i < height; i++) {
@@ -1286,16 +1349,62 @@ export class TUI {
     const statusRow = this.height - 2
     this.stickyStatusRow = statusRow
 
+    // Build custom items with persona indicator
+    const customItems: Array<{ label: string; value: string; color?: string }> = []
+
+    // Add persona mode indicator with dynamic color
+    if (this.personaMode !== 'productivity') {
+      const personaColor = this.personaMode === 'spillover_alert'
+        ? this.palette.accent
+        : this.palette.primary
+      customItems.push({
+        label: 'MODE',
+        value: this.getPersonaLabel(),
+        color: personaColor,
+      })
+    }
+
+    // Add spillover count if in spillover mode
+    if (this.timeContext && this.personaMode === 'spillover_alert') {
+      const spilloverCount = this.timeContext.urgentTasks.length +
+        this.timeContext.overdueTasks.length +
+        this.timeContext.pendingCommits.length
+      if (spilloverCount > 0) {
+        customItems.push({
+          label: 'PEND',
+          value: String(spilloverCount),
+          color: this.palette.accent,
+        })
+      }
+    }
+
     const config: StatusBarConfig = {
       model: this.model,
       project: this.activeProject || undefined,
       tokens: { input: this.inputTokens, output: this.outputTokens },
       sessionCost: this.sessionCost || undefined,
       vaultStatus: this.vaultStatus,
+      customItems: customItems.length > 0 ? customItems : undefined,
     }
 
     w(A.to(statusRow, 1))
-    w(renderStatusBar(config, this.width))
+    w(this.renderPersonaAwareStatusBar(config))
+  }
+
+  /**
+   * Render status bar with persona-aware styling.
+   */
+  private renderPersonaAwareStatusBar(config: StatusBarConfig): string {
+    // Use renderStatusBar but apply persona colors
+    const baseBar = renderStatusBar(config, this.width)
+
+    // For weekend modes, apply a subtle tint to the status bar
+    if (this.personaMode === 'sharpen_or_relax') {
+      // Return with muted styling
+      return `${this.palette.muted}${stripAnsi(baseBar)}${A.reset}`
+    }
+
+    return baseBar
   }
 
   // ── Rendering ───────────────────────────────────────────
@@ -1338,18 +1447,46 @@ export class TUI {
 
   private renderHeader(): void {
     w(A.to(1, 1))
+
+    // Use persona-aware colors for header
+    const headerColor = this.palette.header
+    const bgColor = this.getHeaderBgColor()
+
+    w(bgColor)
     w(A.inv)
-    const left = ' smolerclaw'
+
+    // Add persona indicator for weekend modes
+    const personaIndicator = this.personaMode !== 'productivity'
+      ? ` [${this.getPersonaLabel()}]`
+      : ''
+    const left = ` smolerclaw${personaIndicator}`
+
     const parts = [this.model, this.sessionName]
     if (this.sessionCost) parts.push(this.sessionCost)
     if (this.authInfo) parts.push(this.authInfo)
     const right = parts.join(' | ') + ' '
-    const pad = Math.max(1, this.width - left.length - right.length)
+    const pad = Math.max(1, this.width - visibleLength(left) - right.length)
     w(left + ' '.repeat(pad) + right)
     w(A.reset)
 
+    // Persona-aware divider color
     w(A.to(2, 1))
-    w(`${A.dim}${'─'.repeat(this.width)}${A.reset}`)
+    const dividerColor = this.personaMode === 'sharpen_or_relax' ? this.palette.muted : A.dim
+    w(`${dividerColor}${'─'.repeat(this.width)}${A.reset}`)
+  }
+
+  /**
+   * Get background color hint for header based on persona.
+   */
+  private getHeaderBgColor(): string {
+    switch (this.personaMode) {
+      case 'productivity':
+        return '' // Default inverse
+      case 'spillover_alert':
+        return A.bg(52) // Dark red hint
+      case 'sharpen_or_relax':
+        return A.bg(53) // Dark magenta hint
+    }
   }
 
   private renderMessages(): void {

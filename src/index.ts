@@ -21,7 +21,7 @@ import { formatApprovalPrompt, formatEditDiff } from './approval'
 import { extractImages } from './images'
 import { openApp, openFile, openUrl, getRunningApps, getSystemInfo, getDateTimeInfo, getOutlookEvents, getKnownApps } from './windows'
 import { fetchNews, fetchNewsItems, getNewsCategories, initNews, addNewsFeed, removeNewsFeed, disableNewsFeed, enableNewsFeed, listNewsFeeds, type NewsCategory, type NewsItem } from './news'
-import { generateBriefing } from './briefing'
+import { generateBriefing, getTimeContext, type TimeContext, type PersonaMode } from './briefing'
 import { initTasks, stopTasks, addTask, completeTask, removeTask, listTasks, formatTaskList, parseTime, type Task } from './tasks'
 import { initPeople, addPerson, findPerson, listPeople, logInteraction, delegateTask, getDelegations, getPendingFollowUps, markFollowUpDone, formatPeopleList, formatPersonDetail, formatDelegationList, formatFollowUps, generatePeopleDashboard, type PersonGroup, type InteractionType } from './people'
 import { initMemos, saveMemo, searchMemos, listMemos, deleteMemo, formatMemoList, formatMemoDetail, formatMemoTags } from './memos'
@@ -229,6 +229,16 @@ async function runInteractive(
   initTasks(config.dataDir, (task: Task) => {
     tui.showSystem(`\n*** LEMBRETE: ${task.title} ***\n`)
   })
+
+  // Initialize Time & Load Balancer — detect persona based on day/workload
+  let timeContext: TimeContext | null = null
+  try {
+    timeContext = await getTimeContext(config.dataDir)
+    tui.setTimeContext(timeContext)
+  } catch {
+    // Fall back to default productivity mode
+    tui.setPersonaMode('productivity')
+  }
 
   // Wire tool approval callback
   if (config.toolApproval !== 'auto' && claude.setApprovalCallback) {
@@ -1005,8 +1015,14 @@ async function runInteractive(
         tui.showSystem('Carregando briefing...')
         tui.disableInput()
         try {
-          const briefing = await generateBriefing()
+          // Pass dataDir for Time & Load Balancer context
+          const briefing = await generateBriefing(config.dataDir)
           tui.showSystem(briefing)
+
+          // Refresh time context and persona after briefing
+          const newContext = await getTimeContext(config.dataDir)
+          tui.setTimeContext(newContext)
+          timeContext = newContext
         } catch (err) {
           tui.showError(`Briefing falhou: ${err instanceof Error ? err.message : String(err)}`)
         }
