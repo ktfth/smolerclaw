@@ -1,11 +1,14 @@
-import { A, C } from './ansi'
+import { A, C, wrapText, visibleLength } from './ansi'
 
 /**
  * Render markdown text to ANSI-formatted terminal lines.
  * Handles: headers, bold, italic, inline code, code blocks,
  * bullet/numbered lists, blockquotes, and links.
+ *
+ * @param width - Terminal width for wrapping. Defaults to stdout columns.
  */
-export function renderMarkdown(text: string): string[] {
+export function renderMarkdown(text: string, width?: number): string[] {
+  const termWidth = width ?? (process.stdout.columns || 80)
   const lines = text.split('\n')
   const output: string[] = []
   let inCodeBlock = false
@@ -54,7 +57,7 @@ export function renderMarkdown(text: string): string[] {
     // ── Blockquote ──
     if (line.trimStart().startsWith('>')) {
       const content = line.replace(/^\s*>\s?/, '')
-      output.push(`  ${C.quote}│ ${renderInline(content)}${A.reset}`)
+      pushWrapped(output, `  ${C.quote}│ ${renderInline(content)}${A.reset}`, termWidth)
       continue
     }
 
@@ -64,7 +67,7 @@ export function renderMarkdown(text: string): string[] {
       const indent = Math.floor(bulletMatch[1].length / 2)
       const content = bulletMatch[3]
       const pad = '  '.repeat(indent)
-      output.push(`  ${pad}${A.dim}•${A.reset} ${renderInline(content)}`)
+      pushWrapped(output, `  ${pad}${A.dim}•${A.reset} ${renderInline(content)}`, termWidth)
       continue
     }
 
@@ -75,7 +78,7 @@ export function renderMarkdown(text: string): string[] {
       const num = numMatch[2]
       const content = numMatch[3]
       const pad = '  '.repeat(indent)
-      output.push(`  ${pad}${A.dim}${num}.${A.reset} ${renderInline(content)}`)
+      pushWrapped(output, `  ${pad}${A.dim}${num}.${A.reset} ${renderInline(content)}`, termWidth)
       continue
     }
 
@@ -86,7 +89,14 @@ export function renderMarkdown(text: string): string[] {
     }
 
     // ── Regular paragraph line ──
-    output.push(`  ${renderInline(line)}`)
+    const rendered = `  ${renderInline(line)}`
+    if (visibleLength(rendered) > termWidth) {
+      for (const wl of wrapText(rendered, termWidth)) {
+        output.push(wl)
+      }
+    } else {
+      output.push(rendered)
+    }
   }
 
   // Close unclosed code block
@@ -95,6 +105,19 @@ export function renderMarkdown(text: string): string[] {
   }
 
   return output
+}
+
+/**
+ * Push a line to output, wrapping if it exceeds terminal width.
+ */
+function pushWrapped(output: string[], line: string, maxWidth: number): void {
+  if (visibleLength(line) > maxWidth) {
+    for (const wl of wrapText(line, maxWidth)) {
+      output.push(wl)
+    }
+  } else {
+    output.push(line)
+  }
 }
 
 /**

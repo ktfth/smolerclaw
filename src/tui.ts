@@ -356,7 +356,7 @@ export class TUI {
     if (!this.renderTimer) {
       this.renderTimer = setTimeout(() => {
         this.renderTimer = null
-        this.streamLines = renderMarkdown(this.streamBuf).map((t) => ({ text: t }))
+        this.streamLines = renderMarkdown(this.streamBuf, this.width).map((t) => ({ text: t }))
         this.renderMessages()
         this.renderInput()
       }, 50)
@@ -382,7 +382,7 @@ export class TUI {
     if (this.renderTimer) {
       clearTimeout(this.renderTimer)
       this.renderTimer = null
-      this.streamLines = renderMarkdown(this.streamBuf).map((t) => ({ text: t }))
+      this.streamLines = renderMarkdown(this.streamBuf, this.width).map((t) => ({ text: t }))
     }
     this.lines.push(...this.streamLines)
     this.lines.push({ text: '' })
@@ -1507,14 +1507,7 @@ export class TUI {
       w(A.to(headerH + i + 1, 1))
       w(A.clearLine)
       if (i < visible.length) {
-        const plain = stripAnsi(visible[i].text)
-        if (plain.length > this.width) {
-          // Truncate but try to preserve ANSI reset at end
-          w(visible[i].text.slice(0, this.width + (visible[i].text.length - plain.length)))
-          w(A.reset)
-        } else {
-          w(visible[i].text)
-        }
+        w(visible[i].text)
       }
     }
   }
@@ -1896,7 +1889,7 @@ export class TUI {
   }
 
   private addMarkdown(text: string): void {
-    const rendered = renderMarkdown(text)
+    const rendered = renderMarkdown(text, this.width)
     for (const line of rendered) {
       this.lines.push({ text: line })
     }

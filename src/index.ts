@@ -18,7 +18,7 @@ import { copyToClipboard } from './clipboard'
 import { undoStack, registerPlugins, registerWindowsTools, registerSessionManager, TOOLS } from './tools'
 import { loadPlugins, pluginsToTools, formatPluginList, getPluginDir } from './plugins'
 import { formatApprovalPrompt, formatEditDiff } from './approval'
-import { extractImages } from './images'
+import { extractImages, extractFiles } from './images'
 import { openApp, openFile, openUrl, getRunningApps, getSystemInfo, getDateTimeInfo, getOutlookEvents, getKnownApps } from './windows'
 import { fetchNews, fetchNewsItems, getNewsCategories, initNews, addNewsFeed, removeNewsFeed, disableNewsFeed, enableNewsFeed, listNewsFeeds, type NewsCategory, type NewsItem } from './news'
 import { generateBriefing, getTimeContext, type TimeContext, type PersonaMode } from './briefing'
@@ -286,16 +286,34 @@ async function runInteractive(
       }
     }
 
-    // Extract image attachments from input
-    const { text: cleanedInput, images } = extractImages(input)
+    // Extract image and file attachments from input
+    const { text: textAfterImages, images } = extractImages(input)
+    const { text: cleanedInput, files } = extractFiles(textAfterImages)
+
+    // Build content with file contexts prepended
+    let messageContent = cleanedInput
+    if (files.length > 0) {
+      const fileContexts = files.map((f) =>
+        `<file name="${f.name}" path="${f.path}" size="${f.size}">\n${f.content}\n</file>`
+      ).join('\n\n')
+      messageContent = `${fileContexts}\n\n${cleanedInput}`
+    }
+
     const userMsg: Message = {
       role: 'user',
-      content: cleanedInput,
+      content: messageContent,
       images: images.length > 0 ? images.map((i) => ({ mediaType: i.mediaType, base64: i.base64 })) : undefined,
+      files: files.length > 0 ? files : undefined,
       timestamp: Date.now(),
     }
     sessions.addMessage(userMsg)
-    tui.addUserMessage(images.length > 0 ? `${cleanedInput} (${images.length} image${images.length > 1 ? 's' : ''})` : cleanedInput)
+
+    // Build display label
+    const attachLabels: string[] = []
+    if (images.length > 0) attachLabels.push(`${images.length} image${images.length > 1 ? 's' : ''}`)
+    if (files.length > 0) attachLabels.push(`${files.length} file${files.length > 1 ? 's' : ''}`)
+    const displayText = attachLabels.length > 0 ? `${cleanedInput} (${attachLabels.join(', ')})` : cleanedInput
+    tui.addUserMessage(displayText)
     tui.disableInput()
 
     tui.startStream()

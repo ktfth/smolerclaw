@@ -3,10 +3,18 @@ export interface MessageImage {
   base64: string
 }
 
+export interface MessageFile {
+  path: string
+  name: string
+  content: string
+  size: number
+}
+
 export interface Message {
   role: 'user' | 'assistant'
   content: string
   images?: MessageImage[]
+  files?: MessageFile[]
   toolCalls?: ToolCall[]
   usage?: { inputTokens: number; outputTokens: number; costCents: number }
   timestamp: number
