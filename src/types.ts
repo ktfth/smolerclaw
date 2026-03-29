@@ -131,6 +131,46 @@ export interface SessionChangedEvent {
   timestamp: number
 }
 
+// ─── Insight Types ───────────────────────────────────────────
+
+/**
+ * Proactive insight from the Docs Engine.
+ * Represents a pattern detected that could help the user.
+ */
+export interface Insight {
+  id: string
+  title: string
+  explanation: string
+  category: 'efficiency' | 'pattern' | 'shortcut' | 'warning' | 'learning'
+  /** Suggested action to execute if accepted */
+  suggestedAction?: {
+    label: string
+    command: string
+  }
+  /** Priority for ordering (higher = more important) */
+  priority: number
+  /** Source of the insight (e.g., 'docs-engine', 'usage-analytics') */
+  source: string
+  timestamp: number
+}
+
+/**
+ * Event emitted when user accepts an insight suggestion.
+ */
+export interface InsightAcceptedEvent {
+  insightId: string
+  insight: Insight
+  timestamp: number
+}
+
+/**
+ * Event emitted when a new insight is available for display.
+ */
+export interface InsightAvailableEvent {
+  insight: Insight
+  timestamp: number
+}
+
 /**
  * Map of event names to their payload types.
  * This enables strict typing for the event bus.
@@ -142,4 +182,6 @@ export interface EventBusEvents {
   'task:completed': TaskCompletedEvent
   'status:update': StatusUpdateEvent
   'session:changed': SessionChangedEvent
+  'insight:accepted': InsightAcceptedEvent
+  'insight:available': InsightAvailableEvent
 }

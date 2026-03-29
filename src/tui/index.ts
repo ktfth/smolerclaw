@@ -18,6 +18,12 @@ export {
   renderBox,
   drawPanel,
   renderDivider,
+  // Insight components
+  renderInsightSnippet,
+  getInsightSnippetHeight,
+  clearInsightSnippet,
+  renderMetaLearningPanel,
+  createMetaLearningDashboardPanel,
   type StatusBarConfig,
   type StatusBarItem,
   type SparklineOptions,
@@ -26,6 +32,8 @@ export {
   type BoxOptions,
   type StickyStatusState,
   type TelemetryData,
+  type InsightSnippetOptions,
+  type MetaLearningEntry,
 } from './components'
 
 // Tables

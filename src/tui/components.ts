@@ -8,7 +8,8 @@
  *   - ProgressBar: Visual progress indicator
  */
 
-import { A, C, w, stripAnsi, visibleLength } from '../ansi'
+import { A, C, w, stripAnsi, visibleLength, wrapText } from '../ansi'
+import type { Insight } from '../types'
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -475,4 +476,192 @@ export function renderDivider(
   const leftPad = 2
   const rightPad = Math.max(1, width - labelLen - leftPad - 2)
   return `${color}${'─'.repeat(leftPad)}${A.reset} ${label} ${color}${'─'.repeat(rightPad)}${A.reset}`
+}
+
+// ─── Insight Snippet ──────────────────────────────────────────
+
+/** ANSI codes for subtle insight styling */
+const INSIGHT_STYLE = {
+  /** Dim yellow for subtle highlight */
+  dimYellow: '\x1b[2;33m',
+  /** Italic text */
+  italic: '\x1b[3m',
+  /** Bold italic */
+  boldItalic: '\x1b[1;3m',
+  /** Dim cyan for action hints */
+  dimCyan: '\x1b[2;36m',
+}
+
+/** Category icons for insights */
+const INSIGHT_ICONS: Record<string, string> = {
+  efficiency: '💡',
+  pattern: '🔄',
+  shortcut: '⚡',
+  warning: '⚠️',
+  learning: '📚',
+}
+
+export interface InsightSnippetOptions {
+  /** Maximum width for the snippet */
+  width?: number
+  /** Show action hints (Y/N) */
+  showActions?: boolean
+  /** Compact mode (single line) */
+  compact?: boolean
+}
+
+/**
+ * Render a proactive insight snippet with elegant, non-intrusive styling.
+ *
+ * Uses dim yellow + italic for a subtle visual distinction that
+ * doesn't compete with the main chat content.
+ *
+ * @example
+ * ```
+ * 💡 Dica de Eficiencia
+ *    Detectado padrao repetitivo: /commit -m "fix"
+ *    Considere usar aliases para comandos frequentes.
+ *    [Y] Aceitar  [N] Ignorar
+ * ```
+ */
+export function renderInsightSnippet(
+  insight: Insight,
+  options: InsightSnippetOptions = {},
+): string[] {
+  const { width = 60, showActions = true, compact = false } = options
+  const lines: string[] = []
+
+  const icon = INSIGHT_ICONS[insight.category] || '💡'
+  const style = INSIGHT_STYLE.dimYellow + INSIGHT_STYLE.italic
+
+  if (compact) {
+    // Single-line compact mode
+    const title = insight.title.length > width - 10
+      ? insight.title.slice(0, width - 13) + '...'
+      : insight.title
+    lines.push(`  ${style}${icon} ${title}${A.reset}`)
+    return lines
+  }
+
+  // Full snippet mode
+  // Title line
+  lines.push(`  ${style}${icon} ${insight.title}${A.reset}`)
+
+  // Explanation (wrapped)
+  const explanationWidth = width - 6
+  const wrappedExplanation = wrapText(insight.explanation, explanationWidth)
+  for (const line of wrappedExplanation) {
+    lines.push(`  ${style}   ${stripAnsi(line)}${A.reset}`)
+  }
+
+  // Suggested action
+  if (insight.suggestedAction) {
+    lines.push(`  ${INSIGHT_STYLE.dimCyan}   → ${insight.suggestedAction.label}${A.reset}`)
+  }
+
+  // Action hints
+  if (showActions) {
+    lines.push(`  ${A.dim}   [Y] Aceitar  [N] Ignorar${A.reset}`)
+  }
+
+  return lines
+}
+
+/**
+ * Calculate the number of lines an insight snippet will occupy.
+ */
+export function getInsightSnippetHeight(
+  insight: Insight,
+  options: InsightSnippetOptions = {},
+): number {
+  return renderInsightSnippet(insight, options).length
+}
+
+/**
+ * Create ANSI escape sequences to clear insight snippet from terminal.
+ * Uses cursor up and clear line commands.
+ */
+export function clearInsightSnippet(lineCount: number): string {
+  const moves: string[] = []
+  for (let i = 0; i < lineCount; i++) {
+    // Move up one line and clear it
+    moves.push('\x1b[1A\x1b[2K')
+  }
+  return moves.join('')
+}
+
+// ─── Meta-Learning Panel ──────────────────────────────────────
+
+export interface MetaLearningEntry {
+  title: string
+  description: string
+  frequency: number // times detected
+  lastSeen: number  // timestamp
+}
+
+/**
+ * Render the Meta-Aprendizado (Meta-Learning) panel for the dashboard.
+ * Shows top efficiency tips based on usage patterns.
+ */
+export function renderMetaLearningPanel(
+  entries: MetaLearningEntry[],
+  width: number = 40,
+): string[] {
+  const lines: string[] = []
+
+  // Sort by frequency (most common first), take top 3
+  const topEntries = [...entries]
+    .sort((a, b) => b.frequency - a.frequency)
+    .slice(0, 3)
+
+  if (topEntries.length === 0) {
+    lines.push(`${A.dim}  Nenhuma dica disponivel ainda.${A.reset}`)
+    lines.push(`${A.dim}  Continue usando para gerar insights.${A.reset}`)
+    return lines
+  }
+
+  for (let i = 0; i < topEntries.length; i++) {
+    const entry = topEntries[i]
+    const num = i + 1
+    const icon = num === 1 ? '🥇' : num === 2 ? '🥈' : '🥉'
+
+    // Title line
+    const titleMaxLen = width - 8
+    const title = entry.title.length > titleMaxLen
+      ? entry.title.slice(0, titleMaxLen - 3) + '...'
+      : entry.title
+    lines.push(`${icon} ${INSIGHT_STYLE.dimYellow}${title}${A.reset}`)
+
+    // Description (truncated)
+    const descMaxLen = width - 4
+    const desc = entry.description.length > descMaxLen
+      ? entry.description.slice(0, descMaxLen - 3) + '...'
+      : entry.description
+    lines.push(`   ${A.dim}${desc}${A.reset}`)
+
+    // Frequency indicator
+    const freqLabel = entry.frequency === 1 ? 'vez' : 'vezes'
+    lines.push(`   ${A.dim}Detectado ${entry.frequency}x${A.reset}`)
+
+    // Add spacing between entries (except last)
+    if (i < topEntries.length - 1) {
+      lines.push('')
+    }
+  }
+
+  return lines
+}
+
+/**
+ * Create a DashboardPanel configuration for Meta-Learning section.
+ */
+export function createMetaLearningDashboardPanel(
+  entries: MetaLearningEntry[],
+  width: number = 40,
+): { id: string; title: string; content: string[] } {
+  return {
+    id: 'meta-learning',
+    title: 'Meta-Aprendizado',
+    content: renderMetaLearningPanel(entries, width),
+  }
 }

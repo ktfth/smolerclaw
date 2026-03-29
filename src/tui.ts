@@ -10,10 +10,16 @@ import {
   renderTable,
   setScrollRegion,
   resetScrollRegion,
+  renderInsightSnippet,
+  getInsightSnippetHeight,
+  clearInsightSnippet,
+  renderMetaLearningPanel,
+  createMetaLearningDashboardPanel,
   type ViewMode,
   type DashboardLayout,
   type DashboardPanel,
   type StatusBarConfig,
+  type MetaLearningEntry,
 } from './tui/index'
 import { eventBus } from './core/event-bus'
 import type {
@@ -22,6 +28,9 @@ import type {
   TaskCompletedEvent,
   StatusUpdateEvent,
   SessionChangedEvent,
+  Insight,
+  InsightAcceptedEvent,
+  InsightAvailableEvent,
 } from './types'
 
 // ─── TUI ─────────────────────────────────────────────────────
@@ -30,7 +39,7 @@ interface Line {
   text: string
 }
 
-export type { ViewMode, DashboardLayout, DashboardPanel }
+export type { ViewMode, DashboardLayout, DashboardPanel, MetaLearningEntry }
 
 export class TUI {
   private width = 80
@@ -153,6 +162,12 @@ export class TUI {
   private eventUnsubscribers: Array<() => void> = []
   private statusBarContext = '' // Context info for status bar
 
+  // Insight state
+  private activeInsight: Insight | null = null
+  private insightSnippetLines = 0
+  private insightDisplayed = false
+  private metaLearningEntries: MetaLearningEntry[] = []
+
   constructor(
     private model: string,
     private sessionName: string,
@@ -271,6 +286,16 @@ export class TUI {
       eventBus.on('session:changed', (event: SessionChangedEvent) => {
         this.sessionName = event.currentSession
         this.renderHeader()
+      }),
+    )
+
+    // Insight available — display proactive insight snippet
+    this.eventUnsubscribers.push(
+      eventBus.on('insight:available', (event: InsightAvailableEvent) => {
+        // Don't interrupt streaming or active pickers
+        if (this.isStreaming || this.pickerActive) return
+
+        this.showInsight(event.insight)
       }),
     )
   }
@@ -973,11 +998,27 @@ export class TUI {
 
   /**
    * Switch to dashboard mode with custom panels.
+   * Automatically includes Meta-Aprendizado panel if entries exist.
    */
   enterDashboardMode(layout: DashboardLayout): void {
     this.viewMode = 'dashboard'
-    this.dashboardContent = layout.panels
-    this.viewManager.enterDashboardMode(layout)
+
+    // Create a copy of panels to avoid mutation
+    let panels = [...layout.panels]
+
+    // Add Meta-Aprendizado panel if we have entries and it's not already present
+    const hasMetaPanel = panels.some((p) => p.id === 'meta-learning')
+    if (!hasMetaPanel && this.metaLearningEntries.length > 0) {
+      const panelWidth = Math.floor(this.width / 2) - 4
+      const metaPanel = createMetaLearningDashboardPanel(
+        this.metaLearningEntries,
+        panelWidth,
+      )
+      panels = [...panels, metaPanel]
+    }
+
+    this.dashboardContent = panels
+    this.viewManager.enterDashboardMode({ ...layout, panels })
 
     // Set scroll region to protect header and footer
     setScrollRegion(3, this.height - 2)
@@ -1021,6 +1062,158 @@ export class TUI {
   setStatusBarEnabled(enabled: boolean): void {
     this.statusBarEnabled = enabled
     this.render()
+  }
+
+  // ── Insight Management ──────────────────────────────────────
+
+  /**
+   * Display a proactive insight snippet.
+   * The snippet appears above the input line and awaits Y/N response.
+   */
+  showInsight(insight: Insight): void {
+    // Clear any existing insight first
+    if (this.activeInsight) {
+      this.dismissInsight()
+    }
+
+    this.activeInsight = insight
+    const snippetLines = renderInsightSnippet(insight, {
+      width: this.width - 4,
+      showActions: true,
+    })
+    this.insightSnippetLines = snippetLines.length
+
+    // Render the insight above the input area
+    this.renderInsightDisplay(snippetLines)
+    this.insightDisplayed = true
+  }
+
+  /**
+   * Render the insight snippet above the input line.
+   */
+  private renderInsightDisplay(snippetLines: string[]): void {
+    // Position: above the separator line (height - 1 - lineCount)
+    const startRow = this.height - 1 - this.insightSnippetLines - 1
+    w(A.hide)
+
+    for (let i = 0; i < snippetLines.length; i++) {
+      w(A.to(startRow + i, 1))
+      w(A.clearLine)
+      w(snippetLines[i])
+    }
+
+    w(A.show)
+  }
+
+  /**
+   * Dismiss the current insight without accepting it.
+   * Clears the snippet from the terminal using ANSI escape sequences.
+   */
+  dismissInsight(): void {
+    if (!this.activeInsight || !this.insightDisplayed) return
+
+    // Clear the insight lines from screen
+    const startRow = this.height - 1 - this.insightSnippetLines - 1
+    w(A.hide)
+
+    for (let i = 0; i < this.insightSnippetLines; i++) {
+      w(A.to(startRow + i, 1))
+      w(A.clearLine)
+    }
+
+    w(A.show)
+
+    // Reset state
+    this.activeInsight = null
+    this.insightSnippetLines = 0
+    this.insightDisplayed = false
+
+    // Re-render messages to fill the cleared space
+    this.renderMessages()
+  }
+
+  /**
+   * Accept the current insight and emit the acceptance event.
+   */
+  private acceptInsight(): void {
+    if (!this.activeInsight) return
+
+    const insight = this.activeInsight
+    const acceptedEvent: InsightAcceptedEvent = {
+      insightId: insight.id,
+      insight,
+      timestamp: Date.now(),
+    }
+
+    // Emit acceptance event
+    eventBus.emit('insight:accepted', acceptedEvent)
+
+    // Show confirmation
+    this.lines.push({
+      text: `  ${C.sys}✓ Dica aceita: ${insight.title}${A.reset}`,
+    })
+
+    // Execute suggested action if present
+    if (insight.suggestedAction) {
+      this.lines.push({
+        text: `  ${A.dim}Executando: ${insight.suggestedAction.command}${A.reset}`,
+      })
+      // The actual execution should be handled by the event subscriber
+    }
+
+    // Clear the display
+    this.dismissInsight()
+  }
+
+  /**
+   * Check if there's an active insight awaiting response.
+   */
+  hasActiveInsight(): boolean {
+    return this.activeInsight !== null && this.insightDisplayed
+  }
+
+  /**
+   * Update meta-learning entries for dashboard display.
+   */
+  updateMetaLearningEntries(entries: MetaLearningEntry[]): void {
+    this.metaLearningEntries = entries
+
+    // If in dashboard mode, update the panel
+    if (this.viewMode === 'dashboard') {
+      const metaPanel = createMetaLearningDashboardPanel(
+        entries,
+        Math.floor(this.width / 2) - 4,
+      )
+      this.updateDashboardPanel('meta-learning', metaPanel.content)
+    }
+  }
+
+  /**
+   * Add a meta-learning entry or update frequency if exists.
+   */
+  addMetaLearningEntry(entry: Omit<MetaLearningEntry, 'frequency' | 'lastSeen'>): void {
+    const existing = this.metaLearningEntries.find(
+      (e) => e.title === entry.title,
+    )
+
+    if (existing) {
+      // Update frequency and timestamp (immutable update)
+      this.metaLearningEntries = this.metaLearningEntries.map((e) =>
+        e.title === entry.title
+          ? { ...e, frequency: e.frequency + 1, lastSeen: Date.now() }
+          : e,
+      )
+    } else {
+      // Add new entry (immutable)
+      this.metaLearningEntries = [
+        ...this.metaLearningEntries,
+        {
+          ...entry,
+          frequency: 1,
+          lastSeen: Date.now(),
+        },
+      ]
+    }
   }
 
   // ── Dashboard Rendering ───────────────────────────────────
@@ -1288,6 +1481,29 @@ export class TUI {
     if (this.pickerActive) return
 
     const key = data.toString('utf-8')
+
+    // ── Insight Quick Action Interception ──────────────────
+    // When an insight is displayed, intercept Y/N before normal input
+    if (this.hasActiveInsight()) {
+      const lowerKey = key.toLowerCase()
+
+      if (lowerKey === 'y') {
+        // Accept the insight
+        this.acceptInsight()
+        return
+      }
+
+      if (lowerKey === 'n' || key === '\x1b') {
+        // Explicitly reject the insight
+        this.dismissInsight()
+        return
+      }
+
+      // Any other key (including printable chars) dismisses and proceeds
+      // This allows the user to start typing without being blocked
+      this.dismissInsight()
+      // Fall through to process the key normally
+    }
 
     // Ctrl+C — clear input first, double-tap to exit
     if (key === '\x03') {
