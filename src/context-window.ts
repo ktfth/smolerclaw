@@ -188,3 +188,90 @@ export function compressToolResults(messages: Message[], maxResultLen: number = 
     return { ...msg, toolCalls: compressedCalls }
   })
 }
+
+/**
+ * Check if history should be trimmed (at 80% capacity).
+ */
+export function shouldTrimHistory(
+  messages: Message[],
+  contextLimit: number = DEFAULT_LIMIT,
+): boolean {
+  const totalTokens = estimateMessageTokens(messages)
+  const effectiveLimit = contextLimit - RESERVED_TOKENS
+  return totalTokens > effectiveLimit * 0.8
+}
+
+/**
+ * Trim message history to fit within context window.
+ * Keeps recent messages and drops older ones.
+ */
+export function trimMessageHistory(
+  messages: Message[],
+  contextLimit: number = DEFAULT_LIMIT,
+): Message[] {
+  const effectiveLimit = contextLimit - RESERVED_TOKENS
+  const totalTokens = estimateMessageTokens(messages)
+
+  if (totalTokens <= effectiveLimit) {
+    return messages
+  }
+
+  // Keep most recent messages until we fit budget
+  const result: Message[] = []
+  let budget = effectiveLimit
+  const reversed = [...messages].reverse()
+
+  for (const msg of reversed) {
+    const msgTokens = estimateTokens(msg.content) +
+      (msg.toolCalls?.reduce((sum, tc) =>
+        sum + estimateTokens(JSON.stringify(tc.input)) + estimateTokens(tc.result), 0) ?? 0) +
+      10
+
+    if (budget - msgTokens < 0) break
+    budget -= msgTokens
+    result.unshift(msg)
+  }
+
+  // Add notice if messages were dropped
+  const dropped = messages.length - result.length
+  if (dropped > 0 && result.length > 0) {
+    result[0] = {
+      ...result[0],
+      content: `[Previous messages trimmed. Conversation continues below.]\n\n${result[0].content}`,
+    }
+  }
+
+  return result
+}
+
+/**
+ * Generate a summary of the conversation context.
+ * Used when history is trimmed to preserve key information.
+ */
+export function summarizeContext(messages: Message[]): string {
+  if (messages.length === 0) {
+    return 'summary: New conversation started.'
+  }
+
+  const userCount = messages.filter((m) => m.role === 'user').length
+  const assistantCount = messages.filter((m) => m.role === 'assistant').length
+
+  // Extract key topics from recent messages
+  const recentMsgs = messages.slice(-5)
+  const topics: string[] = []
+
+  for (const msg of recentMsgs) {
+    const content = msg.content
+    if (msg.role === 'user') {
+      // Extract first 20 words as topic indicator
+      const words = content.split(/\s+/).slice(0, 20).join(' ')
+      if (words.length > 10) topics.push(words)
+    }
+  }
+
+  const topicStr = topics.length > 0
+    ? `Topics: ${topics.join(' | ')}`
+    : 'Topics: various'
+
+  return `summary: Conversation with ${userCount} user messages and ${assistantCount} assistant responses. ${topicStr}`
+}
