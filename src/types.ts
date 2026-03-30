@@ -179,6 +179,75 @@ export interface InsightAvailableEvent {
   timestamp: number
 }
 
+// ─── Agency/Planning Types ───────────────────────────────────
+
+/**
+ * Event emitted when a new plan is started.
+ */
+export interface PlanningStartedEvent {
+  planId: string
+  objective: string
+  timestamp: number
+}
+
+/**
+ * Event emitted when a step is added to a plan.
+ */
+export interface PlanningStepAddedEvent {
+  planId: string
+  stepId: string
+  action: string
+  timestamp: number
+}
+
+/**
+ * Event emitted when a plan is approved.
+ */
+export interface PlanningApprovedEvent {
+  planId: string
+  feedback?: string
+  timestamp: number
+}
+
+/**
+ * Event emitted when a plan is rejected.
+ */
+export interface PlanningRejectedEvent {
+  planId: string
+  feedback?: string
+  timestamp: number
+}
+
+/**
+ * Event emitted when a plan step is completed.
+ */
+export interface PlanningStepCompletedEvent {
+  planId: string
+  stepId: string
+  result?: string
+  timestamp: number
+}
+
+/**
+ * Event emitted when a plan is blocked by an obstacle.
+ */
+export interface PlanningBlockedEvent {
+  planId: string
+  stepId: string
+  reason: string
+  proposedAlternative?: string
+  timestamp: number
+}
+
+/**
+ * Event emitted when a plan is fully completed.
+ */
+export interface PlanningCompletedEvent {
+  planId: string
+  stepsCompleted: number
+  timestamp: number
+}
+
 /**
  * Map of event names to their payload types.
  * This enables strict typing for the event bus.
@@ -192,4 +261,12 @@ export interface EventBusEvents {
   'session:changed': SessionChangedEvent
   'insight:accepted': InsightAcceptedEvent
   'insight:available': InsightAvailableEvent
+  // Agency/Planning events
+  'planning:started': PlanningStartedEvent
+  'planning:step_added': PlanningStepAddedEvent
+  'planning:approved': PlanningApprovedEvent
+  'planning:rejected': PlanningRejectedEvent
+  'planning:step_completed': PlanningStepCompletedEvent
+  'planning:blocked': PlanningBlockedEvent
+  'planning:completed': PlanningCompletedEvent
 }

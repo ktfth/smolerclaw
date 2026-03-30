@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gatherContext } from './context'
+import { getAgencySystemPromptSection, isAgencyEngineInitialized } from './services/agency-engine'
 
 export interface Skill {
   name: string
@@ -85,6 +86,11 @@ export function buildSystemPrompt(
     }
     const langName = langNames[language] || language
     parts.push(`## Language Override\nALWAYS respond in ${langName}. This is a hard requirement.`)
+  }
+
+  // High Agency Protocol directive (injected before meta-learning)
+  if (isAgencyEngineInitialized()) {
+    parts.push('---\n' + getAgencySystemPromptSection())
   }
 
   // Meta-Learning directive
