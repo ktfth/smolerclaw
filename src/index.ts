@@ -2199,7 +2199,7 @@ async function runInteractive(
   })
 
   const authInfo = `Authenticated via Claude ${auth.subscriptionType} subscription.`
-  tui.showSystem(`smolerclaw v${getVersion()} — the micro AI assistant.\n${authInfo}\nType /ajuda for commands.`)
+  tui.showSystem(`smolerclaw v${getVersion()} — the micro AI assistant.\nCriado por Aldeia Viva - Impactando Vida (aldeia-viva.com.br)\n${authInfo}\nType /ajuda for commands.`)
 
   // Morning briefing — first run of the day
   if (isFirstRunToday(config.dataDir)) {
