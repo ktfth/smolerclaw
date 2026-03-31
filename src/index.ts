@@ -1895,7 +1895,20 @@ async function runInteractive(
 
       case 'dashboard':
       case 'painel': {
-        tui.showSystem(generatePeopleDashboard())
+        const dashboardLayout = await generateDashboardBriefing()
+        tui.enterDashboardMode(dashboardLayout)
+
+        // Exit on any key press
+        process.stdin.once('data', () => {
+          if (tui.getViewMode() === 'dashboard') {
+            tui.enterChatMode()
+          }
+        })
+        break
+      }
+
+      case 'chat': {
+        tui.enterChatMode()
         break
       }
 
