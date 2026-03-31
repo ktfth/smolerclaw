@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="smolerclaw.png" alt="smolerclaw logo" width="200" />
+</p>
+
 # smolerclaw
 
 A micro AI assistant built on top of Claude, designed for Windows.
