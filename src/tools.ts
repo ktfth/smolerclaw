@@ -23,6 +23,11 @@ import { addTask, completeTask, listTasks, formatTaskList, parseTime } from './t
 import { saveMemo, searchMemos, listMemos, deleteMemo, formatMemoList, formatMemoDetail } from './memos'
 import { openEmailDraft, formatDraftPreview, type EmailDraft } from './email'
 import { startPomodoro, stopPomodoro, pomodoroStatus } from './pomodoro'
+import {
+  scheduleJob, removeJob, enableJob, disableJob, listJobs, runJobNow,
+  formatJobList, parseScheduleTime, parseScheduleDate, parseWeekDay,
+  type ScheduleType,
+} from './scheduler'
 import { addTransaction, getMonthSummary, getRecentTransactions } from './finance'
 import { logDecision, searchDecisions, listDecisions, formatDecisionList, formatDecisionDetail } from './decisions'
 import {
@@ -381,6 +386,91 @@ export const TASK_TOOLS: Anthropic.Tool[] = [
         show_done: { type: 'boolean', description: 'Include completed tasks. Default false.' },
       },
       required: [],
+    },
+  },
+]
+
+// ─── Scheduler Tools (Windows Task Scheduler) ──────────────
+
+export const SCHEDULER_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'schedule_job',
+    description:
+      'Create a persistent scheduled job using Windows Task Scheduler. ' +
+      'Jobs fire even when smolerclaw is not running. ' +
+      'Supports one-time, daily, and weekly schedules.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string', description: 'Human-readable name for the job' },
+        time: { type: 'string', description: 'Time in HH:MM format (e.g., "14:00", "09:30")' },
+        message: { type: 'string', description: 'Message to display in the notification' },
+        schedule_type: {
+          type: 'string',
+          enum: ['once', 'daily', 'weekly'],
+          description: 'Schedule type: once (single execution), daily, or weekly. Default: once',
+        },
+        date_or_day: {
+          type: 'string',
+          description: 'For "once": date in DD/MM/YYYY format or "hoje"/"amanha". For "weekly": day name (e.g., "segunda", "friday"). Optional.',
+        },
+      },
+      required: ['name', 'time', 'message'],
+    },
+  },
+  {
+    name: 'remove_scheduled_job',
+    description: 'Remove a scheduled job by its ID or name.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        reference: { type: 'string', description: 'Job ID or partial name to match' },
+      },
+      required: ['reference'],
+    },
+  },
+  {
+    name: 'list_scheduled_jobs',
+    description: 'List all scheduled jobs. Shows name, schedule, and status.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        include_disabled: { type: 'boolean', description: 'Include disabled jobs. Default false.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'enable_scheduled_job',
+    description: 'Enable a previously disabled scheduled job.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        reference: { type: 'string', description: 'Job ID or partial name to match' },
+      },
+      required: ['reference'],
+    },
+  },
+  {
+    name: 'disable_scheduled_job',
+    description: 'Disable a scheduled job without removing it.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        reference: { type: 'string', description: 'Job ID or partial name to match' },
+      },
+      required: ['reference'],
+    },
+  },
+  {
+    name: 'run_scheduled_job_now',
+    description: 'Execute a scheduled job immediately (for testing).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        reference: { type: 'string', description: 'Job ID or partial name to match' },
+      },
+      required: ['reference'],
     },
   },
 ]
@@ -1664,6 +1754,7 @@ export function registerWindowsTools(): void {
 
   // Task, people, memo, and email tools are cross-platform
   TOOLS.push(...TASK_TOOLS)
+  TOOLS.push(...SCHEDULER_TOOLS)
   TOOLS.push(...PEOPLE_TOOLS)
   TOOLS.push(...MEMO_TOOLS)
   TOOLS.push(EMAIL_TOOL)
@@ -1785,6 +1876,76 @@ async function executeToolInternal(
         const showDone = (input.show_done as boolean) || false
         const tasks = listTasks(showDone)
         return formatTaskList(tasks)
+      }
+      // Scheduler tools
+      case 'schedule_job': {
+        const name = input.name as string
+        const timeStr = input.time as string
+        const message = input.message as string
+        if (!name?.trim() || !timeStr?.trim() || !message?.trim()) {
+          return 'Error: name, time, and message are required.'
+        }
+        const parsedTime = parseScheduleTime(timeStr)
+        if (!parsedTime) return `Error: invalid time format "${timeStr}". Use HH:MM.`
+
+        const schedType = (input.schedule_type as ScheduleType) || 'once'
+        let dateOrDay: string | undefined
+
+        if (input.date_or_day) {
+          const raw = input.date_or_day as string
+          if (schedType === 'weekly') {
+            dateOrDay = parseWeekDay(raw) ?? undefined
+          } else {
+            dateOrDay = parseScheduleDate(raw) ?? undefined
+          }
+        }
+
+        // Default date for 'once' if not specified
+        if (schedType === 'once' && !dateOrDay) {
+          const now = new Date()
+          const [h, m] = parsedTime.split(':').map(Number)
+          const scheduleTime = new Date(now)
+          scheduleTime.setHours(h, m, 0, 0)
+          if (scheduleTime <= now) {
+            scheduleTime.setDate(scheduleTime.getDate() + 1)
+          }
+          dateOrDay = [
+            String(scheduleTime.getMonth() + 1).padStart(2, '0'),
+            String(scheduleTime.getDate()).padStart(2, '0'),
+            String(scheduleTime.getFullYear()),
+          ].join('/')
+        }
+
+        const job = await scheduleJob(name, schedType, parsedTime, 'toast', message, dateOrDay)
+        return `Agendamento criado: "${job.name}" [${job.id}] — ${job.scheduleType} às ${job.time}`
+      }
+      case 'remove_scheduled_job': {
+        const ref = input.reference as string
+        if (!ref?.trim()) return 'Error: reference is required.'
+        const removed = await removeJob(ref)
+        return removed ? 'Agendamento removido.' : `Agendamento nao encontrado: "${ref}"`
+      }
+      case 'list_scheduled_jobs': {
+        const includeDisabled = (input.include_disabled as boolean) || false
+        const jobs = listJobs(includeDisabled)
+        return formatJobList(jobs)
+      }
+      case 'enable_scheduled_job': {
+        const ref = input.reference as string
+        if (!ref?.trim()) return 'Error: reference is required.'
+        const job = await enableJob(ref)
+        return job ? `Agendamento "${job.name}" ativado.` : `Agendamento nao encontrado: "${ref}"`
+      }
+      case 'disable_scheduled_job': {
+        const ref = input.reference as string
+        if (!ref?.trim()) return 'Error: reference is required.'
+        const job = await disableJob(ref)
+        return job ? `Agendamento "${job.name}" desativado.` : `Agendamento nao encontrado: "${ref}"`
+      }
+      case 'run_scheduled_job_now': {
+        const ref = input.reference as string
+        if (!ref?.trim()) return 'Error: reference is required.'
+        return await runJobNow(ref)
       }
       // People management tools
       case 'add_person': {

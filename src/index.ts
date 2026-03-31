@@ -29,6 +29,13 @@ import { initMaterials, saveMaterial, searchMaterials, listMaterials, deleteMate
 import { isFirstRunToday, markMorningDone, generateMorningBriefing } from './morning'
 import { openEmailDraft, formatDraftPreview } from './email'
 import { initPomodoro, startPomodoro, stopPomodoro, pomodoroStatus, stopPomodoroTimer } from './pomodoro'
+import {
+  initScheduler, stopScheduler, scheduleJob, removeJob, enableJob, disableJob,
+  listJobs, getJob, runJobNow, clearAllJobs,
+  formatJobList, formatJobDetail,
+  parseScheduleTime, parseScheduleDate, parseWeekDay,
+  type ScheduleType, type JobAction,
+} from './scheduler'
 import { initFinance, addTransaction, getMonthSummary, getRecentTransactions, removeTransaction } from './finance'
 import { initDecisions, logDecision, searchDecisions, listDecisions, formatDecisionList, formatDecisionDetail } from './decisions'
 import { initWorkflows, runWorkflow, listWorkflows, getWorkflow, createWorkflow, deleteWorkflow, updateWorkflow, formatWorkflowList, formatWorkflowDetail, type WorkflowStep } from './workflows'
@@ -226,6 +233,7 @@ async function runInteractive(
     tui.showSystem(`\n*** Meta-Insight: ${insight.title} ***\n${insight.recommendation}\n`)
   })
   initMonitor((msg) => tui.showSystem(`\n*** ${msg} ***\n`))
+  initScheduler(config.dataDir, (msg) => tui.showSystem(`\n*** ${msg} ***\n`))
   initTasks(config.dataDir, (task: Task) => {
     tui.showSystem(`\n*** LEMBRETE: ${task.title} ***\n`)
   })
@@ -1337,6 +1345,156 @@ async function runInteractive(
         break
       }
 
+      // ── Scheduler commands ──────────────────────────────────
+
+      case 'agendar':
+      case 'schedule': {
+        // /agendar "mensagem" "14:00" [data] [tipo]
+        // /agendar "comando" "14:00" daily command
+        const sub = args[0]?.toLowerCase()
+
+        if (!sub || sub === 'list' || sub === 'listar') {
+          const jobs = listJobs(args[1] === 'all' || args[1] === 'todos')
+          tui.showSystem(formatJobList(jobs))
+          break
+        }
+
+        if (sub === 'remove' || sub === 'remover' || sub === 'delete') {
+          if (!args[1]) {
+            tui.showSystem('Uso: /agendar remove <id ou nome>')
+            break
+          }
+          const removed = await removeJob(args[1])
+          tui.showSystem(removed ? 'Agendamento removido.' : 'Agendamento nao encontrado.')
+          break
+        }
+
+        if (sub === 'enable' || sub === 'ativar') {
+          if (!args[1]) {
+            tui.showSystem('Uso: /agendar ativar <id ou nome>')
+            break
+          }
+          const job = await enableJob(args[1])
+          tui.showSystem(job ? `Agendamento "${job.name}" ativado.` : 'Agendamento nao encontrado.')
+          break
+        }
+
+        if (sub === 'disable' || sub === 'desativar') {
+          if (!args[1]) {
+            tui.showSystem('Uso: /agendar desativar <id ou nome>')
+            break
+          }
+          const job = await disableJob(args[1])
+          tui.showSystem(job ? `Agendamento "${job.name}" desativado.` : 'Agendamento nao encontrado.')
+          break
+        }
+
+        if (sub === 'run' || sub === 'executar') {
+          if (!args[1]) {
+            tui.showSystem('Uso: /agendar executar <id ou nome>')
+            break
+          }
+          tui.showSystem(await runJobNow(args[1]))
+          break
+        }
+
+        if (sub === 'clear' || sub === 'limpar') {
+          tui.showSystem(await clearAllJobs())
+          break
+        }
+
+        if (sub === 'detail' || sub === 'detalhe' || sub === 'info') {
+          if (!args[1]) {
+            tui.showSystem('Uso: /agendar info <id ou nome>')
+            break
+          }
+          const job = getJob(args[1])
+          tui.showSystem(job ? formatJobDetail(job) : 'Agendamento nao encontrado.')
+          break
+        }
+
+        // Create new schedule: /agendar "mensagem" "14:00" [once|daily|weekly] [data/dia]
+        // Parse quoted strings
+        const fullText = args.join(' ')
+        const quotedParts = fullText.match(/"([^"]+)"/g)
+
+        if (!quotedParts || quotedParts.length < 2) {
+          tui.showSystem(
+            'Uso: /agendar "<mensagem>" "<horario>" [once|daily|weekly] [data/dia]\n' +
+            'Exemplos:\n' +
+            '  /agendar "Reuniao" "14:00"\n' +
+            '  /agendar "Standup" "09:00" daily\n' +
+            '  /agendar "Review" "15:00" weekly sexta\n' +
+            '  /agendar "Dentista" "10:00" once 15/04/2026',
+          )
+          break
+        }
+
+        const message = quotedParts[0].slice(1, -1) // Remove quotes
+        const timeStr = quotedParts[1].slice(1, -1)
+        const parsedTime = parseScheduleTime(timeStr)
+
+        if (!parsedTime) {
+          tui.showSystem(`Horario invalido: "${timeStr}". Use formato HH:MM ou HHh.`)
+          break
+        }
+
+        // Parse remaining args after quoted strings
+        const afterQuotes = fullText.replace(/"[^"]+"/g, '').trim().split(/\s+/).filter(Boolean)
+        let scheduleType: ScheduleType = 'once'
+        let dateOrDay: string | undefined
+
+        for (const arg of afterQuotes) {
+          const lower = arg.toLowerCase()
+          if (lower === 'daily' || lower === 'diario') {
+            scheduleType = 'daily'
+          } else if (lower === 'weekly' || lower === 'semanal') {
+            scheduleType = 'weekly'
+          } else if (lower === 'once' || lower === 'uma-vez') {
+            scheduleType = 'once'
+          } else if (scheduleType === 'weekly') {
+            const day = parseWeekDay(arg)
+            if (day) dateOrDay = day
+          } else if (scheduleType === 'once') {
+            const date = parseScheduleDate(arg)
+            if (date) dateOrDay = date
+          }
+        }
+
+        // Default date for 'once' if not specified
+        if (scheduleType === 'once' && !dateOrDay) {
+          const now = new Date()
+          const [h, m] = parsedTime.split(':').map(Number)
+          const scheduleTime = new Date(now)
+          scheduleTime.setHours(h, m, 0, 0)
+
+          // If time already passed today, schedule for tomorrow
+          if (scheduleTime <= now) {
+            scheduleTime.setDate(scheduleTime.getDate() + 1)
+          }
+          dateOrDay = [
+            String(scheduleTime.getMonth() + 1).padStart(2, '0'),
+            String(scheduleTime.getDate()).padStart(2, '0'),
+            String(scheduleTime.getFullYear()),
+          ].join('/')
+        }
+
+        try {
+          const job = await scheduleJob(message, scheduleType, parsedTime, 'toast', message, dateOrDay)
+          tui.showSystem(`Tarefa "${job.name}" agendada para ${formatJobDetail(job).split('\n').slice(2, 5).join(', ').replace(/\n/g, '')}`)
+        } catch (err) {
+          tui.showError(`Erro ao agendar: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        break
+      }
+
+      case 'agendamentos':
+      case 'schedules': {
+        const jobs = listJobs(args[0] === 'all' || args[0] === 'todos')
+        tui.showSystem(formatJobList(jobs))
+        break
+      }
+
       // ── Finance commands ────────────────────────────────────
 
       case 'entrada':
@@ -1997,6 +2155,7 @@ async function runInteractive(
     stopTasks()
     stopPomodoroTimer()
     stopAllMonitors()
+    stopScheduler()
     stopAutoBackup()
 
     // Run self-reflection asynchronously before exit (non-blocking)
