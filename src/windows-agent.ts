@@ -421,3 +421,68 @@ export function initContextTracking(currentDir: string): void {
 export function getCurrentContext(): { dir: string; foregroundWindow?: string } | null {
   return _currentContext
 }
+
+// ─── Windows Toast Notifications ─────────────────────────────
+
+export interface NotificationResult {
+  success: boolean
+  error?: string
+}
+
+/**
+ * Send a Windows toast notification.
+ * Uses the Windows Runtime ToastNotificationManager API.
+ */
+export async function sendNotification(
+  title: string,
+  message: string,
+): Promise<NotificationResult> {
+  if (!IS_WINDOWS) {
+    return { success: false, error: 'Notifications only available on Windows.' }
+  }
+
+  if (!title?.trim()) {
+    return { success: false, error: 'Title is required.' }
+  }
+
+  if (!message?.trim()) {
+    return { success: false, error: 'Message is required.' }
+  }
+
+  // Escape single quotes for PowerShell
+  const safeTitle = title.replace(/'/g, "''")
+  const safeMessage = message.replace(/'/g, "''")
+
+  const script = `
+$notificationTitle = '${safeTitle}'
+$notificationText = '${safeMessage}'
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null
+$template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+$toastXml = [xml]$template.GetXml()
+$toastXml.GetElementsByTagName('text').Item(0).AppendChild($toastXml.CreateTextNode($notificationTitle)) > $null
+$toastXml.GetElementsByTagName('text').Item(1).AppendChild($toastXml.CreateTextNode($notificationText)) > $null
+$xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+$xml.LoadXml($toastXml.OuterXml)
+$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Smolerclaw').Show($toast)
+Write-Output 'OK'
+`
+
+  try {
+    const result = await executePowerShellScript(script)
+
+    if (result.exitCode === 0 && result.stdout.includes('OK')) {
+      return { success: true }
+    }
+
+    return {
+      success: false,
+      error: result.stderr || 'Unknown error sending notification.',
+    }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    }
+  }
+}

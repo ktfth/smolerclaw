@@ -58,7 +58,7 @@ import {
 } from './memory'
 import {
   executePowerShellScript, analyzeScriptSafety, analyzeScreenContext,
-  readClipboardContent, type ScriptResult,
+  readClipboardContent, sendNotification, type ScriptResult,
 } from './windows-agent'
 import {
   setActiveProject, getActiveProject, clearActiveProject,
@@ -1272,6 +1272,32 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+// ─── Notification Tools (Windows-only) ───────────────────
+
+export const NOTIFICATION_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'send_notification',
+    description:
+      'Send a Windows toast notification to the user. Displays a system notification with title and message. ' +
+      'Use when you need to alert the user about: task completions, reminders, important events, ' +
+      'or when the user asks "me avisa quando terminar", "notifica quando...", etc.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Notification title (short, max ~50 chars).',
+        },
+        message: {
+          type: 'string',
+          description: 'Notification message/body.',
+        },
+      },
+      required: ['title', 'message'],
+    },
+  },
+]
+
 // ─── News Feed Management Tools (cross-platform) ────────
 
 export const NEWSFEED_TOOLS: Anthropic.Tool[] = [
@@ -1630,6 +1656,7 @@ export function registerWindowsTools(): void {
   if (IS_WINDOWS) {
     TOOLS.push(...WINDOWS_TOOLS)
     TOOLS.push(...AGENT_TOOLS)
+    TOOLS.push(...NOTIFICATION_TOOLS)
   } else {
     // Add get_news on all platforms (it's network-only)
     TOOLS.push(NEWS_TOOL)
@@ -2007,6 +2034,16 @@ async function executeToolInternal(
           case 'error':
             return `Erro ao ler clipboard: ${clip.text}`
         }
+      }
+      // Notifications
+      case 'send_notification': {
+        const title = input.title as string
+        const message = input.message as string
+        const result = await sendNotification(title, message)
+        if (result.success) {
+          return `Notificação enviada: "${title}"`
+        }
+        return `Erro ao enviar notificação: ${result.error}`
       }
       // News feed management
       case 'manage_news_feeds': {
