@@ -20,7 +20,7 @@ import { loadPlugins, pluginsToTools, formatPluginList, getPluginDir } from './p
 import { formatApprovalPrompt, formatEditDiff } from './approval'
 import { extractImages, extractFiles } from './images'
 import { openApp, openFile, openUrl, getRunningApps, getSystemInfo, getDateTimeInfo, getOutlookEvents, getKnownApps } from './windows'
-import { fetchNews, fetchNewsItems, getNewsCategories, initNews, addNewsFeed, removeNewsFeed, disableNewsFeed, enableNewsFeed, listNewsFeeds, type NewsCategory, type NewsItem } from './news'
+import { fetchNews, fetchNewsItems, fetchNewsContent, getNewsCategories, initNews, addNewsFeed, removeNewsFeed, disableNewsFeed, enableNewsFeed, listNewsFeeds, type NewsCategory, type NewsItem } from './news'
 import { generateBriefing, getTimeContext, type TimeContext, type PersonaMode } from './briefing'
 import { initTasks, stopTasks, addTask, completeTask, removeTask, listTasks, formatTaskList, parseTime, type Task } from './tasks'
 import { initPeople, addPerson, findPerson, listPeople, logInteraction, delegateTask, getDelegations, getPendingFollowUps, markFollowUpDone, formatPeopleList, formatPersonDetail, formatDelegationList, formatFollowUps, generatePeopleDashboard, type PersonGroup, type InteractionType } from './people'
@@ -1087,11 +1087,28 @@ async function runInteractive(
               : '',
           }))
 
-          const selectedLink = await tui.promptNewsPicker(pickerEntries)
-          if (selectedLink) {
-            const { openUrl } = await import('./windows')
-            openUrl(selectedLink)
-            tui.showSystem(`Abrindo: ${selectedLink}`)
+          const result = await tui.promptNewsPicker(pickerEntries)
+          if (result) {
+            if (result.action === 'open') {
+              // Open in browser
+              const { openUrl } = await import('./windows')
+              openUrl(result.link)
+              tui.showSystem(`Abrindo: ${result.link}`)
+            } else if (result.action === 'read') {
+              // Fetch and display content
+              tui.showSystem(`Buscando conteudo...`)
+              const content = await fetchNewsContent(result.link)
+              if (typeof content === 'string') {
+                tui.showError(content)
+              } else {
+                // Send content to assistant for summarization
+                const newsContext = `Noticia: ${content.title}\nFonte: ${result.link}\n\n${content.content}`
+                const prompt = `Por favor, resuma esta noticia de forma objetiva e destaque os pontos principais:\n\n${newsContext}`
+                tui.enableInput()
+                handleSubmit(prompt)
+                return
+              }
+            }
           }
         } catch (err) {
           tui.showError(`Falha ao buscar noticias: ${err instanceof Error ? err.message : String(err)}`)

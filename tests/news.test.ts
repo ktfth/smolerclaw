@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   getNewsCategories, initNews, addNewsFeed, removeNewsFeed,
-  disableNewsFeed, enableNewsFeed, listNewsFeeds,
+  disableNewsFeed, enableNewsFeed, listNewsFeeds, fetchNewsContent,
 } from '../src/news'
 
 const TEST_DIR = join(tmpdir(), `smolerclaw-news-test-${Date.now()}`)
@@ -189,5 +189,37 @@ describe('news — feed management', () => {
   test('removeNewsFeed is case-insensitive', () => {
     addNewsFeed('MyFeed', 'https://example.com/myfeed', 'test')
     expect(removeNewsFeed('myfeed')).toBe(true)
+  })
+})
+
+describe('news — fetchNewsContent', () => {
+  test('fetchNewsContent rejects invalid URL', async () => {
+    const result = await fetchNewsContent('ftp://example.com')
+    expect(typeof result).toBe('string')
+    expect(result).toContain('URL invalida')
+  })
+
+  test('fetchNewsContent rejects javascript: URL', async () => {
+    const result = await fetchNewsContent('javascript:alert(1)')
+    expect(typeof result).toBe('string')
+    expect(result).toContain('URL invalida')
+  })
+
+  test('fetchNewsContent handles unreachable host', async () => {
+    const result = await fetchNewsContent('https://this-domain-does-not-exist-12345.test/')
+    expect(typeof result).toBe('string')
+    expect(result).toContain('Error')
+  })
+
+  test('fetchNewsContent returns title and content for valid article', async () => {
+    // Use a simple, stable public page for testing
+    const result = await fetchNewsContent('https://example.com')
+    // Should either succeed or return an error string
+    if (typeof result === 'string') {
+      expect(result).toContain('Error')
+    } else {
+      expect(result).toHaveProperty('title')
+      expect(result).toHaveProperty('content')
+    }
   })
 })

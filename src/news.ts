@@ -584,3 +584,206 @@ export function getNewsCategories(): string {
   const categories = [...new Set(active.map((f) => f.category))].sort()
   return `Categorias: ${categories.join(', ')}\nUso: /news [categoria]`
 }
+
+// ─── News Content Fetcher ───────────────────────────────────
+
+const CONTENT_FETCH_TIMEOUT_MS = 15_000
+const MAX_CONTENT_BYTES = 5 * 1024 * 1024 // 5 MB
+
+/**
+ * Fetch and extract the main content from a news article URL.
+ * Returns a cleaned, readable text version of the article.
+ */
+export async function fetchNewsContent(url: string): Promise<{ title: string; content: string } | string> {
+  // Validate URL
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    return 'Error: URL invalida'
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), CONTENT_FETCH_TIMEOUT_MS)
+
+  try {
+    const resp = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+      },
+    })
+    clearTimeout(timeout)
+
+    if (!resp.ok) {
+      return `Error: HTTP ${resp.status}`
+    }
+
+    // Check content-length
+    const contentLength = resp.headers.get('content-length')
+    if (contentLength && Number(contentLength) > MAX_CONTENT_BYTES) {
+      return 'Error: pagina muito grande'
+    }
+
+    // Read body with size cap
+    const reader = resp.body?.getReader()
+    if (!reader) {
+      return 'Error: sem corpo de resposta'
+    }
+
+    const chunks: Uint8Array[] = []
+    let totalBytes = 0
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      totalBytes += value.byteLength
+      if (totalBytes > MAX_CONTENT_BYTES) {
+        reader.cancel()
+        return 'Error: pagina muito grande'
+      }
+      chunks.push(value)
+    }
+
+    const raw = Buffer.concat(chunks)
+    const contentType = resp.headers.get('content-type')
+    const html = decodeHtml(raw, contentType)
+
+    // Extract article content
+    const extracted = extractArticleContent(html)
+    return extracted
+
+  } catch (err) {
+    clearTimeout(timeout)
+    if (err instanceof Error) {
+      if (err.name === 'AbortError') {
+        return 'Error: timeout ao buscar pagina'
+      }
+      return `Error: ${err.message.slice(0, 100)}`
+    }
+    return 'Error: falha ao buscar pagina'
+  }
+}
+
+/**
+ * Decode HTML bytes using the correct charset.
+ */
+function decodeHtml(raw: Buffer, contentType: string | null): string {
+  const encoding = detectHtmlEncoding(raw, contentType)
+  try {
+    return new TextDecoder(encoding).decode(raw)
+  } catch {
+    try {
+      return new TextDecoder('latin1').decode(raw)
+    } catch {
+      return new TextDecoder('utf-8', { fatal: false }).decode(raw)
+    }
+  }
+}
+
+/**
+ * Detect encoding from Content-Type header or meta charset.
+ */
+function detectHtmlEncoding(raw: Buffer, contentType: string | null): string {
+  // 1) HTTP Content-Type header
+  if (contentType) {
+    const match = contentType.match(/charset\s*=\s*["']?([^\s;"']+)/i)
+    if (match) return normalizeEncoding(match[1])
+  }
+
+  // 2) Meta charset in HTML (first 2KB)
+  const head = raw.subarray(0, 2048).toString('ascii')
+  const metaMatch = head.match(/<meta[^>]+charset\s*=\s*["']?([^"'\s>]+)/i)
+  if (metaMatch) return normalizeEncoding(metaMatch[1])
+
+  // 3) XML-style declaration
+  const xmlMatch = head.match(/<\?xml[^?]+encoding\s*=\s*["']([^"']+)["']/i)
+  if (xmlMatch) return normalizeEncoding(xmlMatch[1])
+
+  return 'utf-8'
+}
+
+/**
+ * Extract readable article content from HTML.
+ * Uses heuristics to find the main article body.
+ */
+function extractArticleContent(html: string): { title: string; content: string } {
+  // Extract title
+  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i)
+    || html.match(/<h1[^>]*>([^<]+)<\/h1>/i)
+    || html.match(/<meta[^>]+property="og:title"[^>]+content="([^"]+)"/i)
+  const title = titleMatch ? cleanHtml(titleMatch[1]) : 'Sem titulo'
+
+  // Try to find article content using common patterns
+  let articleHtml = ''
+
+  // Strategy 1: Look for <article> tag
+  const articleMatch = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i)
+  if (articleMatch) {
+    articleHtml = articleMatch[1]
+  }
+
+  // Strategy 2: Look for common content containers
+  if (!articleHtml) {
+    const patterns = [
+      /<div[^>]+class="[^"]*(?:article-body|post-content|entry-content|story-body|content-body|article-content|news-content|materia-corpo)[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+      /<div[^>]+itemprop="articleBody"[^>]*>([\s\S]*?)<\/div>/i,
+      /<main[^>]*>([\s\S]*?)<\/main>/i,
+    ]
+    for (const pattern of patterns) {
+      const match = html.match(pattern)
+      if (match) {
+        articleHtml = match[1]
+        break
+      }
+    }
+  }
+
+  // Strategy 3: Extract all paragraphs as fallback
+  if (!articleHtml) {
+    const paragraphs: string[] = []
+    const pRegex = /<p[^>]*>([\s\S]*?)<\/p>/gi
+    let pMatch: RegExpExecArray | null
+    while ((pMatch = pRegex.exec(html)) !== null) {
+      const text = cleanHtml(pMatch[1]).trim()
+      // Filter out short paragraphs (likely navigation, ads)
+      if (text.length > 50) {
+        paragraphs.push(text)
+      }
+    }
+    articleHtml = paragraphs.join('\n\n')
+  } else {
+    // Clean extracted article HTML
+    articleHtml = extractParagraphs(articleHtml)
+  }
+
+  // Clean and format content
+  const content = articleHtml.trim() || 'Nao foi possivel extrair o conteudo do artigo.'
+
+  return { title, content }
+}
+
+/**
+ * Extract paragraphs from HTML content block.
+ */
+function extractParagraphs(html: string): string {
+  const paragraphs: string[] = []
+  const pRegex = /<p[^>]*>([\s\S]*?)<\/p>/gi
+  let match: RegExpExecArray | null
+
+  while ((match = pRegex.exec(html)) !== null) {
+    const text = cleanHtml(match[1]).trim()
+    if (text.length > 20) { // Skip very short paragraphs
+      paragraphs.push(text)
+    }
+  }
+
+  // If no paragraphs found, try to extract text directly
+  if (paragraphs.length === 0) {
+    const cleanedText = cleanHtml(html).trim()
+    if (cleanedText.length > 50) {
+      return cleanedText
+    }
+  }
+
+  return paragraphs.join('\n\n')
+}

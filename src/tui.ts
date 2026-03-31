@@ -716,18 +716,20 @@ export class TUI {
   // ── News Picker ────────────────────────────────────────────
 
   /**
-   * Interactive news picker. Navigate with W/S or arrows, Enter to open in browser.
-   * Returns the selected item's link or null if cancelled.
+   * Interactive news picker. Navigate with W/S or arrows.
+   * - Enter: open in browser
+   * - Ctrl+Enter: fetch and read content in assistant
+   * Returns NewsPickerResult or null if cancelled.
    */
   promptNewsPicker(
     items: NewsPickerEntry[],
-  ): Promise<string | null> {
+  ): Promise<NewsPickerResult | null> {
     if (items.length === 0) {
       this.showSystem('Nenhuma noticia encontrada.')
       return Promise.resolve(null)
     }
 
-    return new Promise<string | null>((resolve) => {
+    return new Promise<NewsPickerResult | null>((resolve) => {
       this.pickerActive = true
       let cursor = 0
       let filter = ''
@@ -832,10 +834,10 @@ export class TUI {
         const hintRow = this.height - footerH
         w(A.to(hintRow, 1))
         w(A.clearLine)
-        w(`  ${A.dim}W/S or \u2191\u2193 navigate  Enter open  Esc cancel  / filter  Tab category${A.reset}`)
+        w(`  ${A.dim}↑↓ navegar  Enter abrir  Ctrl+Enter ler aqui  Esc cancelar  / filtrar  Tab categoria${A.reset}`)
       }
 
-      const cleanup = (result: string | null): void => {
+      const cleanup = (result: NewsPickerResult | null): void => {
         this.pickerActive = false
         process.stdin.removeListener('data', handler)
         this.renderAll()
@@ -846,7 +848,7 @@ export class TUI {
         const key = data.toString('utf-8')
         const list = filtered()
 
-        // Esc
+        // Esc (bare escape, not part of sequence)
         if (key === '\x1b' && data.length === 1) {
           if (filterMode) {
             filterMode = false
@@ -864,10 +866,19 @@ export class TUI {
           return
         }
 
-        // Enter — open link
+        // Ctrl+Enter (Ctrl+J = \x0a or some terminals send \x1b\r or similar)
+        // Common Ctrl+Enter sequences: \x0a (Ctrl+J), \x1b\r, \x1bOM
+        if (key === '\x0a' || key === '\x1b\r' || key === '\x1bOM') {
+          if (list.length > 0 && cursor < list.length) {
+            cleanup({ action: 'read', link: list[cursor].link })
+          }
+          return
+        }
+
+        // Regular Enter — open in browser
         if (key === '\r' || key === '\n') {
           if (list.length > 0 && cursor < list.length) {
-            cleanup(list[cursor].link)
+            cleanup({ action: 'open', link: list[cursor].link })
           }
           return
         }
@@ -1960,6 +1971,10 @@ export interface NewsPickerEntry {
   category: string
   time: string    // formatted time string e.g. "21:30"
 }
+
+export type NewsPickerResult =
+  | { action: 'open'; link: string }    // Enter: open in browser
+  | { action: 'read'; link: string }    // Ctrl+Enter: fetch and read content
 
 function formatPickerAge(timestamp: number): string {
   const diff = Date.now() - timestamp
