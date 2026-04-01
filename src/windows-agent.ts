@@ -117,10 +117,7 @@ export interface ScriptResult {
  * (scoped to this process only), and cleans up after.
  */
 export async function executePowerShellScript(script: string): Promise<ScriptResult> {
-  if (!IS_WINDOWS) {
-    return { stdout: '', stderr: 'Error: PowerShell scripts only available on Windows.', exitCode: 1, duration: 0 }
-  }
-
+  // Input validation and safety guards run on all platforms
   if (!script.trim()) {
     return { stdout: '', stderr: 'Error: script is empty.', exitCode: 1, duration: 0 }
   }
@@ -133,6 +130,10 @@ export async function executePowerShellScript(script: string): Promise<ScriptRes
   const safety = analyzeScriptSafety(script)
   if (safety.blocked) {
     return { stdout: '', stderr: `BLOCKED: ${safety.reason}`, exitCode: 1, duration: 0 }
+  }
+
+  if (!IS_WINDOWS) {
+    return { stdout: '', stderr: 'Error: PowerShell scripts only available on Windows.', exitCode: 1, duration: 0 }
   }
 
   // Write temp .ps1 file
@@ -437,16 +438,17 @@ export async function sendNotification(
   title: string,
   message: string,
 ): Promise<NotificationResult> {
-  if (!IS_WINDOWS) {
-    return { success: false, error: 'Notifications only available on Windows.' }
-  }
-
+  // Input validation runs on all platforms
   if (!title?.trim()) {
     return { success: false, error: 'Title is required.' }
   }
 
   if (!message?.trim()) {
     return { success: false, error: 'Message is required.' }
+  }
+
+  if (!IS_WINDOWS) {
+    return { success: false, error: 'Notifications only available on Windows.' }
   }
 
   // Escape single quotes for PowerShell
