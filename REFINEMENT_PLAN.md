@@ -187,7 +187,7 @@ interface UsageMetrics {
 1. **Deteccao de Secrets em Comandos**:
 ```typescript
 const SECRET_PATTERNS = [
-  /ANTHROPIC_API_KEY=/i,
+  /OPENAI_API_KEY=/i,
   /AWS_SECRET_ACCESS_KEY=/i,
   /password\s*=\s*["'][^"']+["']/i,
 ]

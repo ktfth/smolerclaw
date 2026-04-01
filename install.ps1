@@ -114,6 +114,6 @@ Write-Host "    smolerclaw 'explain this'     # with prompt"
 Write-Host "    smolerclaw -p '2+2'           # print mode"
 Write-Host ""
 Write-Host "  First run:" -ForegroundColor White
-Write-Host "    set ANTHROPIC_API_KEY=sk-ant-..."
+Write-Host "    Requires Claude Code with Pro/Max subscription."
 Write-Host "    smolerclaw"
 Write-Host ""

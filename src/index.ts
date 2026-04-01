@@ -97,7 +97,7 @@ async function main(): Promise<void> {
       const freshAuth = refreshAuth()
       if (freshAuth && freshAuth.token !== auth.token) {
         auth = freshAuth
-        claudeProvider.updateApiKey(freshAuth.token)
+        claudeProvider.updateToken(freshAuth.token)
         return true
       }
       return false
@@ -647,8 +647,8 @@ async function runInteractive(
           const freshAuth = refreshAuth()
           if (freshAuth) {
             auth = freshAuth
-            if ('updateApiKey' in claude) {
-              (claude as any).updateApiKey(freshAuth.token)
+            if ('updateToken' in claude) {
+              (claude as any).updateToken(freshAuth.token)
             }
             tui.showSystem(`Sessao renovada. Expira: ${new Date(freshAuth.expiresAt).toLocaleString()}`)
           } else {

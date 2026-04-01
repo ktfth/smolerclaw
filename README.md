@@ -12,8 +12,8 @@ One binary, zero config, full TUI.
 ## Quick Start
 
 ```bash
-# 1. Set your key (or use Claude Code subscription — auto-detected)
-set ANTHROPIC_API_KEY=sk-ant-...
+# 1. Have Claude Code installed with a Pro/Max subscription
+#    (credentials auto-detected from ~/.claude/.credentials.json)
 
 # 2. Run
 bun run start
@@ -102,8 +102,8 @@ Um binario, zero configuracao, TUI completa.
 ## Inicio Rapido
 
 ```bash
-# 1. Configure sua chave (ou use assinatura Claude Code — detectada automaticamente)
-set ANTHROPIC_API_KEY=sk-ant-...
+# 1. Tenha o Claude Code instalado com assinatura Pro/Max
+#    (credenciais detectadas automaticamente de ~/.claude/.credentials.json)
 
 # 2. Rode
 bun run start

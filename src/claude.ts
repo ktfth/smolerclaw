@@ -15,18 +15,18 @@ export class ClaudeProvider {
   private onAuthExpired: (() => boolean) | null = null
 
   constructor(
-    apiKey: string,
+    token: string,
     private model: string,
     private maxTokens: number,
     approvalMode: ToolApprovalMode = 'auto',
   ) {
-    this.client = new Anthropic({ apiKey })
+    this.client = new Anthropic({ apiKey: token })
     this.approvalMode = approvalMode
   }
 
-  /** Replace the API key and recreate the client (used after auth refresh) */
-  updateApiKey(newKey: string): void {
-    this.client = new Anthropic({ apiKey: newKey })
+  /** Replace the subscription token and recreate the client (used after auth refresh) */
+  updateToken(newToken: string): void {
+    this.client = new Anthropic({ apiKey: newToken })
   }
 
   /** Register a callback that fires on 401 to attempt credential refresh */
