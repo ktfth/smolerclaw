@@ -191,12 +191,13 @@ export async function executeAgencyTool(
       }>
       if (!rawSteps?.length) return 'Error: at least one step is required.'
 
-      const steps = rawSteps.map(s => ({
+      const steps = rawSteps.map((s, i) => ({
         action: s.action,
         target: s.target,
         description: s.description,
         estimatedImpact: (s.estimatedImpact || 'low') as 'none' | 'low' | 'medium' | 'high' | 'critical',
         dependencies: s.dependencies || [],
+        order: i + 1,
       }))
 
       const plan = createPlan(objective, steps, {

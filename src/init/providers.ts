@@ -2,6 +2,7 @@ import { ClaudeProvider } from '../claude'
 import { OpenAICompatProvider } from '../openai-provider'
 import { parseModelString } from '../providers'
 import { refreshAuth, type AuthResult } from '../auth'
+import type { ToolApprovalMode } from '../types'
 
 // Common provider interface for both Claude and OpenAI-compatible
 export type AnyProvider = {
@@ -23,7 +24,7 @@ export function initProvider(
   authHolder: AuthHolder,
   model: string,
   maxTokens: number,
-  toolApproval: string,
+  toolApproval: ToolApprovalMode,
 ): AnyProvider {
   const { provider: providerType, model: providerModel } = parseModelString(model)
 

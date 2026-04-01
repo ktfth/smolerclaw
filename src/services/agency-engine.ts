@@ -290,7 +290,7 @@ export function createPlan(
   }
 
   _currentPlan = plan
-  getEventBus().emit('planning:started', { planId: plan.id, objective })
+  getEventBus().emit('planning:started', { planId: plan.id, objective, timestamp: Date.now() })
 
   return plan
 }
@@ -322,6 +322,7 @@ export function addPlanStep(
     planId: _currentPlan.id,
     stepId: newStep.id,
     action: newStep.action,
+    timestamp: Date.now(),
   })
 
   return newStep
@@ -401,6 +402,7 @@ export function approvePlan(feedback?: string): {
   getEventBus().emit('planning:approved', {
     planId: _currentPlan.id,
     feedback,
+    timestamp: Date.now(),
   })
 
   return {
@@ -432,6 +434,7 @@ export function rejectPlan(feedback?: string): {
   getEventBus().emit('planning:rejected', {
     planId: _currentPlan.id,
     feedback,
+    timestamp: Date.now(),
   })
 
   // Archive rejected plan
@@ -525,6 +528,7 @@ export function completeStep(stepId: string, result?: string): {
     planId: _currentPlan.id,
     stepId,
     result,
+    timestamp: Date.now(),
   })
 
   // Find next pending step
@@ -586,6 +590,7 @@ export function reportBlockedStep(
     stepId,
     reason,
     proposedAlternative,
+    timestamp: Date.now(),
   })
 
   return {
@@ -612,6 +617,7 @@ function completePlan(): void {
   getEventBus().emit('planning:completed', {
     planId: _currentPlan.id,
     stepsCompleted: _currentPlan.strategy.filter(s => s.status === 'completed').length,
+    timestamp: Date.now(),
   })
 
   archivePlan(_currentPlan)
