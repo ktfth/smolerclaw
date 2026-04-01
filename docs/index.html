@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>smolerclaw - Micro AI Assistant</title>
+  <meta name="description" content="Um micro assistente de IA para Windows. Um binário, zero config, TUI completa.">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg: #0a0a0a;
+      --text: #e0e0e0;
+      --accent: #7c3aed;
+      --muted: #888;
+      --code-bg: #1a1a1a;
+    }
+
+    body {
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem;
+      line-height: 1.6;
+    }
+
+    main {
+      max-width: 600px;
+      width: 100%;
+      text-align: center;
+    }
+
+    .logo {
+      width: 180px;
+      height: auto;
+      margin-bottom: 2rem;
+      filter: drop-shadow(0 0 20px rgba(124, 58, 237, 0.3));
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      font-weight: 400;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.02em;
+    }
+
+    .tagline {
+      color: var(--muted);
+      font-size: 1rem;
+      margin-bottom: 3rem;
+    }
+
+    .features {
+      text-align: left;
+      margin-bottom: 3rem;
+    }
+
+    .features p {
+      margin-bottom: 1rem;
+      color: var(--muted);
+    }
+
+    .features ul {
+      list-style: none;
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    .features li::before {
+      content: ">";
+      color: var(--accent);
+      margin-right: 0.5rem;
+    }
+
+    .install {
+      background: var(--code-bg);
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 3rem;
+      text-align: left;
+    }
+
+    .install-label {
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .install-cmd {
+      font-size: 1.1rem;
+      color: var(--accent);
+      user-select: all;
+    }
+
+    .install-cmd::before {
+      content: "$ ";
+      color: var(--muted);
+    }
+
+    footer {
+      margin-top: auto;
+      padding-top: 3rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      text-decoration: underline;
+    }
+
+    @media (max-width: 480px) {
+      body {
+        padding: 1.5rem;
+      }
+
+      h1 {
+        font-size: 2rem;
+      }
+
+      .logo {
+        width: 140px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="smolerclaw.png" alt="smolerclaw logo" class="logo">
+
+    <h1>smolerclaw</h1>
+    <p class="tagline">Micro AI assistant para Windows. Um binário, zero config.</p>
+
+    <div class="features">
+      <p>Assistente de IA no terminal que vive na sua máquina:</p>
+      <ul>
+        <li>Ler, escrever e editar arquivos</li>
+        <li>Executar comandos e scripts PowerShell</li>
+        <li>Gerenciar tarefas e lembretes</li>
+        <li>Memória RAG local com busca semântica</li>
+        <li>Resumo matinal, calendário e notícias</li>
+        <li>Gestão de projetos e timer Pomodoro</li>
+      </ul>
+    </div>
+
+    <div class="install">
+      <p class="install-label">Execute com npx:</p>
+      <code class="install-cmd">npx smolerclaw</code>
+    </div>
+  </main>
+
+  <footer>
+    Um projeto <a href="https://aldeia-viva.com.br" target="_blank" rel="noopener">aldeia-viva.com.br</a>
+  </footer>
+</body>
+</html>
