@@ -1,0 +1,57 @@
+import { initVault, initShadowBackup, startAutoBackup } from '../vault'
+import { initPeople } from '../people'
+import { initMemos } from '../memos'
+import { initMaterials } from '../materials'
+import { initNews } from '../news'
+import { initFinance } from '../finance'
+import { initDecisions } from '../decisions'
+import { initPomodoro } from '../pomodoro'
+import { initWorkflows } from '../workflows'
+import { initInvestigations } from '../investigate'
+import { initMemory } from '../memory'
+import { initProjects } from '../projects'
+import { initPitwall } from '../pitwall'
+import { initDecisionEngine } from '../services/decision-engine'
+import { initDocsEngine } from '../services/docs-engine'
+import { initMonitor } from '../monitor'
+import { initScheduler } from '../scheduler'
+import { initTasks, type Task } from '../tasks'
+import { registerSessionManager } from '../tools'
+import { getConfigPath } from '../config'
+import type { SessionManager } from '../session'
+import type { TUI } from '../tui'
+
+/**
+ * Initialize all feature modules that depend on dataDir and TUI.
+ * Vault must init first — other modules use atomicWriteFile.
+ */
+export function initAllModules(
+  dataDir: string,
+  tui: TUI,
+  sessions: SessionManager,
+): void {
+  initVault(dataDir, getConfigPath().replace(/[/\\]config\.json$/, ''))
+  initPeople(dataDir)
+  initMemos(dataDir)
+  initMaterials(dataDir)
+  initNews(dataDir)
+  registerSessionManager(sessions)
+  initFinance(dataDir)
+  initDecisions(dataDir)
+  initPomodoro((msg) => tui.showSystem(`\n*** ${msg} ***\n`))
+  initWorkflows(dataDir)
+  initInvestigations(dataDir)
+  initMemory(dataDir)
+  initProjects(dataDir)
+  initPitwall(dataDir)
+  initDecisionEngine(dataDir)
+  initDocsEngine(dataDir, (insight) => {
+    // Non-blocking notification when an immediate insight is generated
+    tui.showSystem(`\n*** Meta-Insight: ${insight.title} ***\n${insight.recommendation}\n`)
+  })
+  initMonitor((msg) => tui.showSystem(`\n*** ${msg} ***\n`))
+  initScheduler(dataDir, (msg) => tui.showSystem(`\n*** ${msg} ***\n`))
+  initTasks(dataDir, (task: Task) => {
+    tui.showSystem(`\n*** LEMBRETE: ${task.title} ***\n`)
+  })
+}

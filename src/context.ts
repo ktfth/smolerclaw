@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { getShellName, IS_WINDOWS } from './platform'
+import { logger } from './core/logger'
 
 /**
  * Gather context about the current working environment.
@@ -61,7 +62,9 @@ function detectProject(cwd: string): string | null {
       const data = JSON.parse(readFileSync(pkg, 'utf-8'))
       if (data.name) name = data.name
     }
-  } catch { /* ignore */ }
+  } catch (err) {
+    logger.debug('Failed to parse package.json for project name', { error: err })
+  }
 
   return `Project: ${name} (${detected.join(', ')})`
 }
@@ -93,7 +96,9 @@ function detectGit(cwd: string): string | null {
       const lastCommit = new TextDecoder().decode(proc.stdout).trim()
       if (lastCommit) lines.push(`Last commit: ${lastCommit}`)
     }
-  } catch { /* ignore */ }
+  } catch (err) {
+    logger.debug('git log failed', { error: err })
+  }
 
   // Changed files summary (git diff --stat, limited)
   try {
@@ -107,7 +112,9 @@ function detectGit(cwd: string): string | null {
         lines.push('Uncommitted changes:\n' + shown.join('\n'))
       }
     }
-  } catch { /* ignore */ }
+  } catch (err) {
+    logger.debug('git diff --stat failed', { error: err })
+  }
 
   // Staged files
   try {
@@ -119,7 +126,9 @@ function detectGit(cwd: string): string | null {
         lines.push('Staged:\n' + stagedLines.join('\n'))
       }
     }
-  } catch { /* ignore */ }
+  } catch (err) {
+    logger.debug('git diff --cached failed', { error: err })
+  }
 
   return lines.length > 0 ? lines.join('\n') : null
 }

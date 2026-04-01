@@ -7,3 +7,4 @@ dist/
 *.tmp
 .smolerclaw/
 .claude/*.local.md
+.test-context*

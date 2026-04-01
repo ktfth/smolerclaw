@@ -2,6 +2,7 @@
  * Daily briefing — morning summary combining calendar, system, and news.
  * Includes Time & Load Balancer for persona-aware context routing.
  */
+import { logger } from './core/logger'
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -118,8 +119,8 @@ export async function checkSpilloverWork(dataDir: string): Promise<{
           }
         }
       }
-    } catch {
-      // Skip on parse error
+    } catch (err) {
+      logger.debug('Failed to parse task for spillover check', { error: err })
     }
   }
 
@@ -173,8 +174,8 @@ async function checkProjectGitStatus(project: Project): Promise<PendingCommit | 
         unpushedCommits,
       }
     }
-  } catch {
-    // Ignore git errors
+  } catch (err) {
+    logger.debug('Git status check failed for project', { error: err })
   }
 
   return null
@@ -357,8 +358,8 @@ export async function generateBriefing(dataDir?: string): Promise<string> {
     try {
       const sys = await getSystemInfo()
       sections.push(`\n--- Sistema ---\n${sys}`)
-    } catch {
-      // Skip system info on error
+    } catch (err) {
+      logger.debug('System info unavailable for briefing', { error: err })
     }
   }
 
