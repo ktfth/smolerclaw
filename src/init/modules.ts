@@ -22,15 +22,20 @@ import { getConfigPath } from '../config'
 import type { SessionManager } from '../session'
 import type { TUI } from '../tui'
 
+let _coreInitialized = false
+
 /**
- * Initialize all feature modules that depend on dataDir and TUI.
- * Vault must init first — other modules use atomicWriteFile.
+ * Initialize core data modules that do NOT depend on TUI.
+ * Safe to call from any mode (TUI, web, desktop).
+ * Idempotent — only runs once.
  */
-export function initAllModules(
+export function initCoreModules(
   dataDir: string,
-  tui: TUI,
   sessions: SessionManager,
 ): void {
+  if (_coreInitialized) return
+  _coreInitialized = true
+
   initVault(dataDir, getConfigPath().replace(/[/\\]config\.json$/, ''))
   initPeople(dataDir)
   initMemos(dataDir)
@@ -40,13 +45,30 @@ export function initAllModules(
   initFinance(dataDir)
   initFinanceGuard()
   initDecisions(dataDir)
-  initPomodoro((msg) => tui.showSystem(`\n*** ${msg} ***\n`))
   initWorkflows(dataDir)
   initInvestigations(dataDir)
   initMemory(dataDir)
   initProjects(dataDir)
   initPitwall(dataDir)
   initDecisionEngine(dataDir)
+  initTasks(dataDir, () => {}) // no-op notifier for headless modes; TUI overrides later
+}
+
+/**
+ * Initialize ALL feature modules including those that depend on TUI.
+ * Only call from interactive TUI mode.
+ * Vault must init first — other modules use atomicWriteFile.
+ */
+export function initAllModules(
+  dataDir: string,
+  tui: TUI,
+  sessions: SessionManager,
+): void {
+  // Core modules (idempotent — safe to call again)
+  initCoreModules(dataDir, sessions)
+
+  // TUI-dependent modules
+  initPomodoro((msg) => tui.showSystem(`\n*** ${msg} ***\n`))
   initDocsEngine(dataDir, (insight) => {
     // Non-blocking notification when an immediate insight is generated
     tui.showSystem(`\n*** Meta-Insight: ${insight.title} ***\n${insight.recommendation}\n`)

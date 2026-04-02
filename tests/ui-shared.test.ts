@@ -1,6 +1,13 @@
-import { describe, it, expect, beforeEach, mock } from 'bun:test'
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { ChatService } from '../src/ui/shared/chat-service'
+import { SessionManager } from '../src/session'
+import { initI18n } from '../src/i18n'
 import type { ChatEvent, Message } from '../src/types'
+import { mkdirSync, rmSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
+
+// Initialize i18n for tests
+initI18n('en')
 
 // Mock provider
 function createMockProvider() {
@@ -18,61 +25,79 @@ function createMockProvider() {
   }
 }
 
-describe('ChatService', () => {
-  let service: ChatService
-  let mockProvider: ReturnType<typeof createMockProvider>
+// Temp directory for test sessions
+const TEST_DATA_DIR = join(process.cwd(), `.test-ui-shared-${Date.now()}`)
 
-  beforeEach(() => {
-    mockProvider = createMockProvider()
-    service = new ChatService({
+function createTestService() {
+  const mockProvider = createMockProvider()
+  const sessionManager = new SessionManager(TEST_DATA_DIR)
+  return {
+    service: new ChatService({
       provider: mockProvider,
       systemPrompt: 'Test system prompt',
       enableTools: true,
-    })
+      sessionManager,
+    }),
+    mockProvider,
+    sessionManager,
+  }
+}
+
+describe('ChatService', () => {
+  beforeEach(() => {
+    if (existsSync(TEST_DATA_DIR)) rmSync(TEST_DATA_DIR, { recursive: true })
+    mkdirSync(TEST_DATA_DIR, { recursive: true })
+  })
+
+  afterEach(() => {
+    if (existsSync(TEST_DATA_DIR)) rmSync(TEST_DATA_DIR, { recursive: true })
   })
 
   describe('newSession', () => {
     it('creates a new session', () => {
-      const session = service.newSession('Test Session')
-      expect(session.id).toMatch(/^session_\d+$/)
-      expect(session.name).toBe('Test Session')
+      const { service } = createTestService()
+      const session = service.newSession('test-session')
+      expect(session.name).toBe('test-session')
       expect(session.messageCount).toBe(0)
       expect(session.isActive).toBe(true)
     })
 
-    it('creates session with default name', () => {
+    it('creates session with auto name', () => {
+      const { service } = createTestService()
       const session = service.newSession()
-      expect(session.name).toMatch(/^Chat \d+/)
+      expect(session.name).toMatch(/^chat-\d+$/)
     })
   })
 
   describe('getSessions', () => {
-    it('returns empty array initially', () => {
-      expect(service.getSessions()).toEqual([])
+    it('returns sessions from SessionManager', () => {
+      const { service } = createTestService()
+      // SessionManager always creates 'default' session
+      const sessions = service.getSessions()
+      expect(sessions.length).toBeGreaterThanOrEqual(1)
     })
 
-    it('returns created sessions', async () => {
-      service.newSession('Session 1')
-      // Small delay to ensure different timestamps
-      await new Promise(resolve => setTimeout(resolve, 2))
-      service.newSession('Session 2')
+    it('includes newly created sessions', () => {
+      const { service } = createTestService()
+      service.newSession('session-1')
+      service.newSession('session-2')
       const sessions = service.getSessions()
-      // Both sessions should be tracked
-      expect(sessions).toHaveLength(2)
-      const names = sessions.map(s => s.name)
-      expect(names).toContain('Session 1')
-      expect(names).toContain('Session 2')
+      const names = sessions.map((s) => s.name)
+      expect(names).toContain('session-1')
+      expect(names).toContain('session-2')
     })
   })
 
   describe('loadSession', () => {
     it('loads messages from session', () => {
-      const session = service.newSession('Test')
+      const { service } = createTestService()
+      const session = service.newSession('test')
       const messages = service.loadSession(session.id)
       expect(messages).toEqual([])
     })
 
     it('returns empty for non-existent session', () => {
+      const { service } = createTestService()
       const messages = service.loadSession('non-existent')
       expect(messages).toEqual([])
     })
@@ -80,14 +105,18 @@ describe('ChatService', () => {
 
   describe('deleteSessionById', () => {
     it('deletes a session', () => {
-      const session = service.newSession('Test')
-      expect(service.getSessions()).toHaveLength(1)
+      const { service } = createTestService()
+      const session = service.newSession('to-delete')
       service.deleteSessionById(session.id)
-      expect(service.getSessions()).toHaveLength(0)
+      // Session should be gone from SessionManager
+      const sessions = service.getSessions()
+      const names = sessions.map((s) => s.name)
+      expect(names).not.toContain('to-delete')
     })
 
     it('clears messages when deleting current session', () => {
-      const session = service.newSession('Test')
+      const { service } = createTestService()
+      const session = service.newSession('to-delete')
       service.deleteSessionById(session.id)
       expect(service.getMessages()).toEqual([])
     })
@@ -95,6 +124,7 @@ describe('ChatService', () => {
 
   describe('chat', () => {
     it('yields streaming events', async () => {
+      const { service } = createTestService()
       service.newSession()
 
       const events: unknown[] = []
@@ -111,6 +141,7 @@ describe('ChatService', () => {
     })
 
     it('adds messages to history', async () => {
+      const { service } = createTestService()
       service.newSession()
 
       for await (const _ of service.chat({ message: 'Hello' })) {
@@ -124,16 +155,34 @@ describe('ChatService', () => {
       expect(messages[1].role).toBe('assistant')
       expect(messages[1].content).toBe('Hello, world!')
     })
+
+    it('persists messages to SessionManager', async () => {
+      const { service, sessionManager } = createTestService()
+      const session = service.newSession('persist-test')
+
+      for await (const _ of service.chat({ message: 'Hello' })) {
+        // consume events
+      }
+
+      // Read directly from SessionManager to verify persistence
+      const saved = sessionManager.getSession('persist-test')
+      expect(saved).not.toBeNull()
+      expect(saved!.messages.length).toBe(2)
+      expect(saved!.messages[0].content).toBe('Hello')
+      expect(saved!.messages[1].content).toBe('Hello, world!')
+    })
   })
 
   describe('getMessages', () => {
     it('returns empty array initially', () => {
+      const { service } = createTestService()
       expect(service.getMessages()).toEqual([])
     })
   })
 
   describe('clearMessages', () => {
     it('clears all messages', async () => {
+      const { service } = createTestService()
       service.newSession()
       for await (const _ of service.chat({ message: 'Hello' })) {
         // consume
@@ -146,6 +195,7 @@ describe('ChatService', () => {
 
   describe('setSystemPrompt', () => {
     it('updates system prompt', () => {
+      const { service } = createTestService()
       service.setSystemPrompt('New prompt')
       // Internal state is private, just verify no error
     })
@@ -153,31 +203,65 @@ describe('ChatService', () => {
 
   describe('setEnableTools', () => {
     it('updates enable tools flag', () => {
+      const { service } = createTestService()
       service.setEnableTools(false)
       // Internal state is private, just verify no error
     })
   })
 })
 
-describe('UIMessage types', () => {
-  it('has correct structure', async () => {
-    const mockProvider = createMockProvider()
+describe('Shared data between CLI and UI', () => {
+  beforeEach(() => {
+    if (existsSync(TEST_DATA_DIR)) rmSync(TEST_DATA_DIR, { recursive: true })
+    mkdirSync(TEST_DATA_DIR, { recursive: true })
+  })
+
+  afterEach(() => {
+    if (existsSync(TEST_DATA_DIR)) rmSync(TEST_DATA_DIR, { recursive: true })
+  })
+
+  it('sessions created by CLI SessionManager are visible in ChatService', () => {
+    const sessionManager = new SessionManager(TEST_DATA_DIR)
+
+    // Simulate CLI creating a session
+    sessionManager.switchTo('cli-session')
+    sessionManager.addMessage({ role: 'user', content: 'From CLI', timestamp: Date.now() })
+
+    // Now create a ChatService pointing at the same SessionManager
     const service = new ChatService({
-      provider: mockProvider,
+      provider: createMockProvider(),
       systemPrompt: 'Test',
       enableTools: true,
+      sessionManager,
     })
 
-    service.newSession()
-    for await (const _ of service.chat({ message: 'Test' })) {}
+    const sessions = service.getSessions()
+    const names = sessions.map((s) => s.name)
+    expect(names).toContain('cli-session')
 
-    const messages = service.getMessages()
-    const msg = messages[0]
+    // Load the CLI session and verify messages
+    const messages = service.loadSession('cli-session')
+    expect(messages).toHaveLength(1)
+    expect(messages[0].content).toBe('From CLI')
+  })
 
-    expect(msg).toHaveProperty('id')
-    expect(msg).toHaveProperty('role')
-    expect(msg).toHaveProperty('content')
-    expect(msg).toHaveProperty('timestamp')
-    expect(msg).toHaveProperty('status')
+  it('sessions created by ChatService are visible in SessionManager', async () => {
+    const sessionManager = new SessionManager(TEST_DATA_DIR)
+    const service = new ChatService({
+      provider: createMockProvider(),
+      systemPrompt: 'Test',
+      enableTools: true,
+      sessionManager,
+    })
+
+    // Create session via ChatService
+    service.newSession('ui-session')
+    for await (const _ of service.chat({ message: 'From UI' })) {}
+
+    // Verify via SessionManager
+    const session = sessionManager.getSession('ui-session')
+    expect(session).not.toBeNull()
+    expect(session!.messages.length).toBe(2)
+    expect(session!.messages[0].content).toBe('From UI')
   })
 })

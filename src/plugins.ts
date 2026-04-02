@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path'
 import type Anthropic from '@anthropic-ai/sdk'
 import { getShell } from './platform'
 import { getConfigDir } from './config'
+import { t } from './i18n'
 
 export interface Plugin {
   name: string
@@ -112,8 +113,8 @@ export async function executePlugin(
  * Format plugin list for display.
  */
 export function formatPluginList(plugins: Plugin[]): string {
-  if (plugins.length === 0) return `No plugins loaded. Add .json files to ${join(getConfigDir(), 'plugins')}`
-  return 'Plugins:\n' + plugins.map((p) => `  ${p.name} — ${p.description}`).join('\n')
+  if (plugins.length === 0) return t('plugin.none_loaded', { dir: join(getConfigDir(), 'plugins') })
+  return t('plugin.list_title') + '\n' + plugins.map((p) => `  ${p.name} — ${p.description}`).join('\n')
 }
 
 /**

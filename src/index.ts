@@ -8,6 +8,8 @@ import { initSession } from './init/session'
 import { runPrintMode } from './modes/print-mode'
 import { runInteractive } from './modes/interactive'
 import { runWebUI, runDesktopUI } from './modes/ui-mode'
+import { initI18n } from './i18n'
+import { initCoreModules } from './init/modules'
 
 async function main(): Promise<void> {
   const cliArgs = parseArgs(process.argv.slice(2))
@@ -22,8 +24,9 @@ async function main(): Promise<void> {
     process.exit(0)
   }
 
-  // ── Load config and auth ─────────────────────────────────
+  // ── Load config, init i18n, resolve auth ─────────────────
   const config = loadConfig()
+  initI18n(config.language)
   if (cliArgs.model) config.model = resolveModel(cliArgs.model)
   if (cliArgs.maxTokens) config.maxTokens = cliArgs.maxTokens
 
@@ -51,12 +54,18 @@ async function main(): Promise<void> {
     plugins,
   } = await initSession(config, cliArgs.session, cliArgs.noTools)
 
+  // Initialize core data modules (vault, tasks, memory, etc.)
+  // This makes all tools functional in every mode (TUI, web, desktop, print).
+  // TUI-specific modules (pomodoro notifications, etc.) init later in interactive mode.
+  initCoreModules(config.dataDir, sessions)
+
   // ── Web UI mode ─────────────────────────────────────────
   if (cliArgs.uiMode === 'web') {
     await runWebUI({
       provider: claude,
       systemPrompt,
       enableTools,
+      sessionManager: sessions,
       port: cliArgs.port,
     })
     return
@@ -68,6 +77,7 @@ async function main(): Promise<void> {
       provider: claude,
       systemPrompt,
       enableTools,
+      sessionManager: sessions,
       port: cliArgs.port,
     })
     return

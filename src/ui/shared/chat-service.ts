@@ -1,10 +1,12 @@
 /**
  * Shared Chat Service
- * Wraps the Claude provider for use in both desktop and web UIs
+ * Wraps the Claude provider for use in both desktop and web UIs.
+ * Delegates session persistence to SessionManager (shared with CLI).
  */
 
-import type { Message, ChatEvent, Session } from '../../types'
+import type { Message, ChatEvent } from '../../types'
 import type { UIMessage, UIToolCall, UISession, ChatRequest } from './types'
+import type { SessionManager } from '../../session'
 import { eventBus } from '../../core/event-bus'
 
 /**
@@ -19,6 +21,7 @@ export interface ChatServiceConfig {
   provider: ChatProvider
   systemPrompt: string
   enableTools: boolean
+  sessionManager: SessionManager
   onApprovalRequired?: (name: string, input: Record<string, unknown>, riskLevel: string) => Promise<boolean>
 }
 
@@ -26,14 +29,15 @@ export class ChatService {
   private provider: ChatProvider
   private systemPrompt: string
   private enableTools: boolean
+  private sessionManager: SessionManager
+  private currentSessionName: string | null = null
   private messages: Message[] = []
-  private sessions: Map<string, Session> = new Map()
-  private currentSessionId: string | null = null
 
   constructor(config: ChatServiceConfig) {
     this.provider = config.provider
     this.systemPrompt = config.systemPrompt
     this.enableTools = config.enableTools
+    this.sessionManager = config.sessionManager
 
     if (config.onApprovalRequired && this.provider.setApprovalCallback) {
       this.provider.setApprovalCallback(config.onApprovalRequired)
@@ -41,50 +45,44 @@ export class ChatService {
   }
 
   getSessions(): UISession[] {
-    return Array.from(this.sessions.values()).map(s => ({
-      id: s.id,
+    return this.sessionManager.listAll().map((s) => ({
+      id: s.name,
       name: s.name,
-      messageCount: s.messages.length,
+      messageCount: s.messageCount,
       created: s.created,
       updated: s.updated,
-      isActive: s.id === this.currentSessionId,
+      isActive: s.name === this.currentSessionName,
     }))
   }
 
   loadSession(sessionId: string): UIMessage[] {
-    const session = this.sessions.get(sessionId)
+    const session = this.sessionManager.getSession(sessionId)
     if (!session) return []
 
-    this.currentSessionId = sessionId
+    this.currentSessionName = sessionId
     this.messages = [...session.messages]
 
-    return this.messages.map(m => this.toUIMessage(m))
+    return this.messages.map((m) => this.toUIMessage(m))
   }
 
   newSession(name?: string): UISession {
-    const id = `session_${Date.now()}`
-    const session: Session = {
-      id,
-      name: name || `Chat ${new Date().toLocaleDateString()}`,
-      messages: [],
-      created: Date.now(),
-      updated: Date.now(),
-    }
-
-    this.sessions.set(id, session)
-    this.currentSessionId = id
+    const sessionName = name || `chat-${Date.now()}`
+    const previous = this.currentSessionName
+    this.currentSessionName = sessionName
     this.messages = []
 
+    const session = this.sessionManager.createSession(sessionName)
+
     eventBus.emit('session:changed', {
-      previousSession: this.currentSessionId,
-      currentSession: id,
+      previousSession: previous || undefined,
+      currentSession: sessionName,
       timestamp: Date.now(),
     })
 
     return {
-      id: session.id,
+      id: session.name,
       name: session.name,
-      messageCount: 0,
+      messageCount: session.messages.length,
       created: session.created,
       updated: session.updated,
       isActive: true,
@@ -92,9 +90,9 @@ export class ChatService {
   }
 
   deleteSessionById(sessionId: string): void {
-    this.sessions.delete(sessionId)
-    if (this.currentSessionId === sessionId) {
-      this.currentSessionId = null
+    this.sessionManager.delete(sessionId)
+    if (this.currentSessionName === sessionId) {
+      this.currentSessionName = null
       this.messages = []
     }
   }
@@ -114,6 +112,11 @@ export class ChatService {
       timestamp: Date.now(),
     }
     this.messages.push(userMessage)
+
+    // Persist user message
+    if (this.currentSessionName) {
+      this.sessionManager.addMessageTo(this.currentSessionName, userMessage)
+    }
 
     // Yield message start
     yield { type: 'message_start', messageId }
@@ -142,7 +145,7 @@ export class ChatService {
             break
 
           case 'tool_result':
-            const tc = toolCalls.find(t => t.id === event.id)
+            const tc = toolCalls.find((t) => t.id === event.id)
             if (tc) {
               tc.result = event.result
               tc.status = 'complete'
@@ -151,7 +154,7 @@ export class ChatService {
             break
 
           case 'tool_blocked':
-            const blocked = toolCalls.find(t => t.id === event.id)
+            const blocked = toolCalls.find((t) => t.id === event.id)
             if (blocked) {
               blocked.status = 'rejected'
             }
@@ -164,12 +167,12 @@ export class ChatService {
             yield { type: 'usage', messageId, data: { inputTokens, outputTokens } }
             break
 
-          case 'done':
+          case 'done': {
             // Save assistant message
             const assistantMessage: Message = {
               role: 'assistant',
               content: assistantContent,
-              toolCalls: toolCalls.map(t => ({
+              toolCalls: toolCalls.map((t) => ({
                 id: t.id,
                 name: t.name,
                 input: t.input,
@@ -179,9 +182,14 @@ export class ChatService {
               timestamp: Date.now(),
             }
             this.messages.push(assistantMessage)
-            this.saveCurrentSession()
+
+            // Persist assistant message
+            if (this.currentSessionName) {
+              this.sessionManager.addMessageTo(this.currentSessionName, assistantMessage)
+            }
             yield { type: 'done', messageId }
             break
+          }
 
           case 'error':
             yield { type: 'error', messageId, data: event.error }
@@ -200,18 +208,6 @@ export class ChatService {
     return Math.round((inputCost + outputCost) * 100) / 100
   }
 
-  private saveCurrentSession(): void {
-    if (!this.currentSessionId) {
-      this.newSession()
-    }
-
-    const session = this.sessions.get(this.currentSessionId!)
-    if (session) {
-      session.messages = [...this.messages]
-      session.updated = Date.now()
-    }
-  }
-
   private toUIMessage(msg: Message): UIMessage {
     return {
       id: `msg_${msg.timestamp}`,
@@ -219,7 +215,7 @@ export class ChatService {
       content: msg.content,
       timestamp: msg.timestamp,
       status: 'complete',
-      toolCalls: msg.toolCalls?.map(tc => ({
+      toolCalls: msg.toolCalls?.map((tc) => ({
         id: tc.id,
         name: tc.name,
         input: tc.input,
@@ -231,7 +227,7 @@ export class ChatService {
   }
 
   getMessages(): UIMessage[] {
-    return this.messages.map(m => this.toUIMessage(m))
+    return this.messages.map((m) => this.toUIMessage(m))
   }
 
   clearMessages(): void {

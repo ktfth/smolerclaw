@@ -5,6 +5,8 @@
 
 import { createWebServer } from '../web/server'
 import type { Message, ChatEvent } from '../../types'
+import type { SessionManager } from '../../session'
+import { t } from '../../i18n'
 
 /**
  * Generic provider interface matching both ClaudeProvider and OpenAICompatProvider
@@ -18,6 +20,7 @@ interface DesktopAppConfig {
   provider: ChatProvider
   systemPrompt: string
   enableTools: boolean
+  sessionManager: SessionManager
   devMode?: boolean
 }
 
@@ -37,6 +40,7 @@ export async function launchDesktopApp(config: DesktopAppConfig) {
     provider: config.provider,
     systemPrompt: config.systemPrompt,
     enableTools: config.enableTools,
+    sessionManager: config.sessionManager,
   })
 
   server.start()
@@ -48,8 +52,8 @@ export async function launchDesktopApp(config: DesktopAppConfig) {
     await launchElectrobunWindow(url, config.devMode)
   } else {
     // Fall back to system browser or provide instructions
-    console.log('\n  Electrobun not available.')
-    console.log(`  Opening in default browser: ${url}\n`)
+    console.log(`\n  ${t('desktop.not_available')}`)
+    console.log(`  ${t('desktop.opening_browser', { url })}\n`)
     await openInBrowser(url)
   }
 
@@ -101,64 +105,64 @@ function setupIPC(Electrobun: ElectrobunAPI) {
     Electrobun.ipc.send('app:toggle-theme')
   })
 
-  // Setup native menu
+  // Setup native menu with i18n
   Electrobun.setApplicationMenu([
     {
       label: 'smolerclaw',
       submenu: [
-        { label: 'About smolerclaw', role: 'about' },
+        { label: t('desktop.about'), role: 'about' },
         { type: 'separator' },
-        { label: 'Settings...', accelerator: 'CmdOrCtrl+,', click: () => Electrobun.ipc.send('menu:settings') },
+        { label: t('desktop.settings'), accelerator: 'CmdOrCtrl+,', click: () => Electrobun.ipc.send('menu:settings') },
         { type: 'separator' },
-        { label: 'Quit', accelerator: 'CmdOrCtrl+Q', role: 'quit' },
+        { label: t('desktop.quit'), accelerator: 'CmdOrCtrl+Q', role: 'quit' },
       ],
     },
     {
-      label: 'Chat',
+      label: t('desktop.chat'),
       submenu: [
-        { label: 'New Chat', accelerator: 'CmdOrCtrl+N', click: () => Electrobun.ipc.send('menu:new-chat') },
+        { label: t('desktop.new_chat'), accelerator: 'CmdOrCtrl+N', click: () => Electrobun.ipc.send('menu:new-chat') },
         { type: 'separator' },
-        { label: 'Clear Chat', accelerator: 'CmdOrCtrl+K', click: () => Electrobun.ipc.send('menu:clear-chat') },
+        { label: t('desktop.clear_chat'), accelerator: 'CmdOrCtrl+K', click: () => Electrobun.ipc.send('menu:clear-chat') },
       ],
     },
     {
-      label: 'Edit',
+      label: t('desktop.edit'),
       submenu: [
-        { label: 'Undo', accelerator: 'CmdOrCtrl+Z', role: 'undo' },
-        { label: 'Redo', accelerator: 'Shift+CmdOrCtrl+Z', role: 'redo' },
+        { label: t('desktop.undo'), accelerator: 'CmdOrCtrl+Z', role: 'undo' },
+        { label: t('desktop.redo'), accelerator: 'Shift+CmdOrCtrl+Z', role: 'redo' },
         { type: 'separator' },
-        { label: 'Cut', accelerator: 'CmdOrCtrl+X', role: 'cut' },
-        { label: 'Copy', accelerator: 'CmdOrCtrl+C', role: 'copy' },
-        { label: 'Paste', accelerator: 'CmdOrCtrl+V', role: 'paste' },
-        { label: 'Select All', accelerator: 'CmdOrCtrl+A', role: 'selectAll' },
+        { label: t('desktop.cut'), accelerator: 'CmdOrCtrl+X', role: 'cut' },
+        { label: t('desktop.copy'), accelerator: 'CmdOrCtrl+C', role: 'copy' },
+        { label: t('desktop.paste'), accelerator: 'CmdOrCtrl+V', role: 'paste' },
+        { label: t('desktop.select_all'), accelerator: 'CmdOrCtrl+A', role: 'selectAll' },
       ],
     },
     {
-      label: 'View',
+      label: t('desktop.view'),
       submenu: [
-        { label: 'Toggle Theme', accelerator: 'CmdOrCtrl+Shift+T', click: () => Electrobun.ipc.send('menu:toggle-theme') },
+        { label: t('desktop.toggle_theme'), accelerator: 'CmdOrCtrl+Shift+T', click: () => Electrobun.ipc.send('menu:toggle-theme') },
         { type: 'separator' },
-        { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', role: 'resetZoom' },
-        { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', role: 'zoomIn' },
-        { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', role: 'zoomOut' },
+        { label: t('desktop.actual_size'), accelerator: 'CmdOrCtrl+0', role: 'resetZoom' },
+        { label: t('desktop.zoom_in'), accelerator: 'CmdOrCtrl+=', role: 'zoomIn' },
+        { label: t('desktop.zoom_out'), accelerator: 'CmdOrCtrl+-', role: 'zoomOut' },
         { type: 'separator' },
-        { label: 'Toggle Developer Tools', accelerator: 'Alt+CmdOrCtrl+I', role: 'toggleDevTools' },
+        { label: t('desktop.dev_tools'), accelerator: 'Alt+CmdOrCtrl+I', role: 'toggleDevTools' },
       ],
     },
     {
-      label: 'Window',
+      label: t('desktop.window'),
       submenu: [
-        { label: 'Minimize', accelerator: 'CmdOrCtrl+M', role: 'minimize' },
-        { label: 'Zoom', role: 'zoom' },
+        { label: t('desktop.minimize'), accelerator: 'CmdOrCtrl+M', role: 'minimize' },
+        { label: t('desktop.zoom'), role: 'zoom' },
         { type: 'separator' },
-        { label: 'Close', accelerator: 'CmdOrCtrl+W', role: 'close' },
+        { label: t('desktop.close'), accelerator: 'CmdOrCtrl+W', role: 'close' },
       ],
     },
     {
-      label: 'Help',
+      label: t('desktop.help'),
       submenu: [
-        { label: 'Documentation', click: () => openInBrowser('https://github.com/ktfth/smolerclaw') },
-        { label: 'Report Issue', click: () => openInBrowser('https://github.com/ktfth/smolerclaw/issues') },
+        { label: t('desktop.documentation'), click: () => openInBrowser('https://github.com/ktfth/smolerclaw') },
+        { label: t('desktop.report_issue'), click: () => openInBrowser('https://github.com/ktfth/smolerclaw/issues') },
       ],
     },
   ])

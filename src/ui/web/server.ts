@@ -8,8 +8,10 @@ import { serveStatic } from 'hono/bun'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import type { Message, ChatEvent } from '../../types'
+import type { SessionManager } from '../../session'
 import { ChatService } from '../shared/chat-service'
 import type { WSClientMessage, WSServerMessage, UIState, UISettings } from '../shared/types'
+import { t, getTranslations } from '../../i18n'
 
 /**
  * Generic provider interface matching both ClaudeProvider and OpenAICompatProvider
@@ -24,6 +26,7 @@ interface WebServerConfig {
   provider: ChatProvider
   systemPrompt: string
   enableTools: boolean
+  sessionManager: SessionManager
 }
 
 interface ClientConnection {
@@ -51,9 +54,9 @@ export function createWebServer(config: WebServerConfig) {
   // Static files
   app.use('/static/*', serveStatic({ root: './src/ui/web' }))
 
-  // Main page
+  // Main page — inject current locale translations
   app.get('/', (c) => {
-    return c.html(getIndexHtml())
+    return c.html(getIndexHtml(getTranslations()))
   })
 
   // API routes
@@ -65,6 +68,7 @@ export function createWebServer(config: WebServerConfig) {
       provider: config.provider,
       systemPrompt: config.systemPrompt,
       enableTools: config.enableTools,
+      sessionManager: config.sessionManager,
       onApprovalRequired: async (name, input, riskLevel) => {
         send(ws, {
           type: 'tool_approval_required',
@@ -186,7 +190,7 @@ export function createWebServer(config: WebServerConfig) {
   return {
     app,
     start: () => {
-      console.log(`\n  smolerclaw UI running at http://localhost:${config.port}\n`)
+      console.log(`\n  ${t('ui.running_at', { url: `http://localhost:${config.port}` })}\n`)
 
       const wsClients = new Map<WebSocket, { clientId: string; client: ClientConnection }>()
 
@@ -232,7 +236,8 @@ export function createWebServer(config: WebServerConfig) {
   }
 }
 
-function getIndexHtml(): string {
+function getIndexHtml(translations: Record<string, string>): string {
+  const T = (key: string) => translations[key] || key
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -247,12 +252,12 @@ function getIndexHtml(): string {
       --border-color: #30363d;
       --text-primary: #e6edf3;
       --text-secondary: #8b949e;
-      --accent: #58a6ff;
-      --accent-hover: #79c0ff;
+      --accent: #e5484d;
+      --accent-hover: #ff6b6b;
       --success: #3fb950;
       --warning: #d29922;
       --error: #f85149;
-      --user-bg: #1f6feb;
+      --user-bg: #c93c37;
       --assistant-bg: #21262d;
       --code-bg: #161b22;
       --scrollbar-track: #21262d;
@@ -271,7 +276,7 @@ function getIndexHtml(): string {
       --border-color: #d0d7de;
       --text-primary: #1f2328;
       --text-secondary: #656d76;
-      --user-bg: #0969da;
+      --user-bg: #cf2e2e;
       --assistant-bg: #f6f8fa;
       --code-bg: #f6f8fa;
       --scrollbar-track: #f6f8fa;
@@ -323,7 +328,7 @@ function getIndexHtml(): string {
     .logo-icon {
       width: 32px;
       height: 32px;
-      background: linear-gradient(135deg, var(--accent), #a855f7);
+      background: linear-gradient(135deg, var(--accent), #f97316);
       border-radius: var(--radius-sm);
       display: flex;
       align-items: center;
@@ -525,7 +530,7 @@ function getIndexHtml(): string {
     }
 
     .avatar.assistant {
-      background: linear-gradient(135deg, var(--accent), #a855f7);
+      background: linear-gradient(135deg, var(--accent), #f97316);
       color: white;
     }
 
@@ -680,7 +685,7 @@ function getIndexHtml(): string {
 
     .input-box:focus-within {
       border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.2);
+      box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.2);
     }
 
     .input-box textarea {
@@ -841,17 +846,17 @@ function getIndexHtml(): string {
           <span>smolerclaw</span>
         </div>
         <button class="new-chat-btn" onclick="newSession()">
-          + New Chat
+          ${T('web.new_chat')}
         </button>
       </div>
 
       <div class="sessions-list" id="sessions-list">
-        <div class="empty-sessions">No sessions yet</div>
+        <div class="empty-sessions">${T('web.no_sessions')}</div>
       </div>
 
       <div class="sidebar-footer">
         <div class="cost-display">
-          <span>Total cost:</span>
+          <span>${T('web.total_cost')}</span>
           <span class="cost-value" id="total-cost">$0.00</span>
         </div>
       </div>
@@ -865,13 +870,13 @@ function getIndexHtml(): string {
           <span id="model-name">claude-sonnet-4</span>
         </div>
         <div class="header-actions">
-          <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme">
+          <button class="icon-btn" onclick="toggleTheme()" title="${T('web.toggle_theme')}">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="5"/>
               <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
             </svg>
           </button>
-          <button class="icon-btn" onclick="clearChat()" title="Clear chat">
+          <button class="icon-btn" onclick="clearChat()" title="${T('web.clear_chat')}">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
             </svg>
@@ -882,24 +887,24 @@ function getIndexHtml(): string {
       <div class="messages-container" id="messages-container">
         <div class="welcome">
           <div class="welcome-icon">S</div>
-          <h1>Welcome to smolerclaw</h1>
-          <p>Your micro AI assistant for Windows. Ask me anything, and I'll help you with code, files, system tasks, and more.</p>
+          <h1>${T('web.welcome_title')}</h1>
+          <p>${T('web.welcome_desc')}</p>
           <div class="suggestions">
-            <div class="suggestion" onclick="sendSuggestion('What can you help me with?')">
-              <div class="suggestion-title">Get started</div>
-              <div class="suggestion-desc">Learn what I can do</div>
+            <div class="suggestion" onclick="sendSuggestion(window.__i18n['web.suggestion_start_prompt'])">
+              <div class="suggestion-title">${T('web.suggestion_start_title')}</div>
+              <div class="suggestion-desc">${T('web.suggestion_start_desc')}</div>
             </div>
-            <div class="suggestion" onclick="sendSuggestion('Show me my recent tasks')">
-              <div class="suggestion-title">View tasks</div>
-              <div class="suggestion-desc">See your task list</div>
+            <div class="suggestion" onclick="sendSuggestion(window.__i18n['web.suggestion_tasks_prompt'])">
+              <div class="suggestion-title">${T('web.suggestion_tasks_title')}</div>
+              <div class="suggestion-desc">${T('web.suggestion_tasks_desc')}</div>
             </div>
-            <div class="suggestion" onclick="sendSuggestion('Check system status')">
-              <div class="suggestion-title">System info</div>
-              <div class="suggestion-desc">Get Windows status</div>
+            <div class="suggestion" onclick="sendSuggestion(window.__i18n['web.suggestion_system_prompt'])">
+              <div class="suggestion-title">${T('web.suggestion_system_title')}</div>
+              <div class="suggestion-desc">${T('web.suggestion_system_desc')}</div>
             </div>
-            <div class="suggestion" onclick="sendSuggestion('Give me a daily briefing')">
-              <div class="suggestion-title">Daily briefing</div>
-              <div class="suggestion-desc">Start your day</div>
+            <div class="suggestion" onclick="sendSuggestion(window.__i18n['web.suggestion_briefing_prompt'])">
+              <div class="suggestion-title">${T('web.suggestion_briefing_title')}</div>
+              <div class="suggestion-desc">${T('web.suggestion_briefing_desc')}</div>
             </div>
           </div>
         </div>
@@ -910,7 +915,7 @@ function getIndexHtml(): string {
           <div class="input-box">
             <textarea
               id="input"
-              placeholder="Message smolerclaw..."
+              placeholder="${T('web.placeholder')}"
               rows="1"
               onkeydown="handleKeyDown(event)"
               oninput="autoResize(this)"
@@ -921,13 +926,19 @@ function getIndexHtml(): string {
               </svg>
             </button>
           </div>
-          <div class="input-hint">Press Enter to send, Shift+Enter for new line</div>
+          <div class="input-hint">${T('web.input_hint')}</div>
         </div>
       </div>
     </main>
   </div>
 
   <script>
+    // i18n translations injected from server
+    window.__i18n = ${JSON.stringify(Object.fromEntries(
+      Object.entries(translations).filter(([k]) => k.startsWith('web.'))
+    ))};
+    const __t = (key) => window.__i18n[key] || key;
+
     // State
     let ws = null;
     let state = {
@@ -963,7 +974,7 @@ function getIndexHtml(): string {
       ws = new WebSocket(protocol + '//' + location.host + '/ws');
 
       ws.onopen = () => {
-        console.log('Connected to smolerclaw');
+        console.log(__t('web.connected'));
       };
 
       ws.onmessage = (event) => {
@@ -972,7 +983,7 @@ function getIndexHtml(): string {
       };
 
       ws.onclose = () => {
-        console.log('Disconnected, reconnecting...');
+        console.log(__t('web.disconnected'));
         setTimeout(connect, 1000);
       };
 
@@ -1044,14 +1055,14 @@ function getIndexHtml(): string {
     function renderSessions() {
       const container = document.getElementById('sessions-list');
       if (state.sessions.length === 0) {
-        container.innerHTML = '<div class="empty-sessions">No sessions yet</div>';
+        container.innerHTML = '<div class="empty-sessions">' + __t('web.no_sessions') + '</div>';
         return;
       }
 
       container.innerHTML = state.sessions.map(s => \`
         <div class="session-item \${s.isActive ? 'active' : ''}" onclick="loadSession('\${s.id}')">
           <div class="session-name">\${escapeHtml(s.name)}</div>
-          <div class="session-meta">\${s.messageCount} messages</div>
+          <div class="session-meta">\${s.messageCount} \${__t('web.messages_count').replace('{{count}}', '')}</div>
         </div>
       \`).join('');
     }
@@ -1071,7 +1082,7 @@ function getIndexHtml(): string {
     function renderMessage(msg) {
       const isUser = msg.role === 'user';
       const avatar = isUser ? '👤' : 'S';
-      const author = isUser ? 'You' : 'smolerclaw';
+      const author = isUser ? __t('web.you') : __t('web.assistant');
       const time = new Date(msg.timestamp).toLocaleTimeString();
 
       let toolCallsHtml = '';
@@ -1124,7 +1135,7 @@ function getIndexHtml(): string {
         <div class="message" id="streaming-message">
           <div class="message-header">
             <div class="avatar assistant">S</div>
-            <span class="message-author">smolerclaw</span>
+            <span class="message-author">\${__t('web.assistant')}</span>
             <div class="streaming-indicator">
               <span></span><span></span><span></span>
             </div>
@@ -1154,7 +1165,7 @@ function getIndexHtml(): string {
           <div class="tool-call" id="tool-\${tc.id}">
             <div class="tool-header">
               <span class="tool-name">\${escapeHtml(tc.name)}</span>
-              <span class="tool-status running">running</span>
+              <span class="tool-status running">\${__t('web.running')}</span>
             </div>
           </div>
         \`);
@@ -1166,7 +1177,7 @@ function getIndexHtml(): string {
       const tool = document.getElementById('tool-' + payload.toolCallId);
       if (tool) {
         tool.querySelector('.tool-status').className = 'tool-status complete';
-        tool.querySelector('.tool-status').textContent = 'complete';
+        tool.querySelector('.tool-status').textContent = __t('web.complete');
         tool.insertAdjacentHTML('beforeend', \`
           <div class="tool-content">\${escapeHtml(payload.result.substring(0, 500))}\${payload.result.length > 500 ? '...' : ''}</div>
         \`);
@@ -1271,7 +1282,7 @@ function getIndexHtml(): string {
     }
 
     function clearChat() {
-      if (confirm('Start a new chat?')) {
+      if (confirm(__t('web.confirm_new_chat'))) {
         newSession();
       }
     }
@@ -1311,24 +1322,24 @@ function getIndexHtml(): string {
       return \`
         <div class="welcome">
           <div class="welcome-icon">S</div>
-          <h1>Welcome to smolerclaw</h1>
-          <p>Your micro AI assistant for Windows. Ask me anything, and I'll help you with code, files, system tasks, and more.</p>
+          <h1>${T('web.welcome_title')}</h1>
+          <p>${T('web.welcome_desc')}</p>
           <div class="suggestions">
-            <div class="suggestion" onclick="sendSuggestion('What can you help me with?')">
-              <div class="suggestion-title">Get started</div>
-              <div class="suggestion-desc">Learn what I can do</div>
+            <div class="suggestion" onclick="sendSuggestion(window.__i18n['web.suggestion_start_prompt'])">
+              <div class="suggestion-title">${T('web.suggestion_start_title')}</div>
+              <div class="suggestion-desc">${T('web.suggestion_start_desc')}</div>
             </div>
-            <div class="suggestion" onclick="sendSuggestion('Show me my recent tasks')">
-              <div class="suggestion-title">View tasks</div>
-              <div class="suggestion-desc">See your task list</div>
+            <div class="suggestion" onclick="sendSuggestion(window.__i18n['web.suggestion_tasks_prompt'])">
+              <div class="suggestion-title">${T('web.suggestion_tasks_title')}</div>
+              <div class="suggestion-desc">${T('web.suggestion_tasks_desc')}</div>
             </div>
-            <div class="suggestion" onclick="sendSuggestion('Check system status')">
-              <div class="suggestion-title">System info</div>
-              <div class="suggestion-desc">Get Windows status</div>
+            <div class="suggestion" onclick="sendSuggestion(window.__i18n['web.suggestion_system_prompt'])">
+              <div class="suggestion-title">${T('web.suggestion_system_title')}</div>
+              <div class="suggestion-desc">${T('web.suggestion_system_desc')}</div>
             </div>
-            <div class="suggestion" onclick="sendSuggestion('Give me a daily briefing')">
-              <div class="suggestion-title">Daily briefing</div>
-              <div class="suggestion-desc">Start your day</div>
+            <div class="suggestion" onclick="sendSuggestion(window.__i18n['web.suggestion_briefing_prompt'])">
+              <div class="suggestion-title">${T('web.suggestion_briefing_title')}</div>
+              <div class="suggestion-desc">${T('web.suggestion_briefing_desc')}</div>
             </div>
           </div>
         </div>

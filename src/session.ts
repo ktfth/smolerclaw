@@ -226,6 +226,88 @@ export class SessionManager {
     }
   }
 
+  // ─── Shared Access (for Web/Desktop UI) ────────────────
+
+  /**
+   * Read a session by name without changing the current session.
+   * Returns null if the session doesn't exist.
+   */
+  getSession(name: string): Session | null {
+    const path = join(this.sessionsDir, `${name}.json`)
+    if (!existsSync(path)) return null
+    try {
+      return JSON.parse(readFileSync(path, 'utf-8'))
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Add a message to a specific session without changing the current session.
+   * Creates the session if it doesn't exist.
+   */
+  addMessageTo(name: string, message: Message): void {
+    const session = this.getSession(name) || {
+      id: crypto.randomUUID(),
+      name,
+      messages: [],
+      created: Date.now(),
+      updated: Date.now(),
+    }
+    session.messages.push(message)
+    session.updated = Date.now()
+    const path = join(this.sessionsDir, `${name}.json`)
+    atomicWriteFile(path, JSON.stringify(session, null, 2))
+
+    // Keep in-memory current in sync if it's the same session
+    if (this.current.name === name) {
+      this.current = session
+    }
+  }
+
+  /**
+   * List all sessions with metadata (avoids loading full message arrays).
+   */
+  listAll(): Array<{ name: string; messageCount: number; created: number; updated: number }> {
+    return this.list().map((name) => {
+      const info = this.getInfo(name)
+      const session = this.getSession(name)
+      return {
+        name,
+        messageCount: info?.messageCount || 0,
+        created: session?.created || 0,
+        updated: info?.updated || 0,
+      }
+    })
+  }
+
+  /**
+   * Get the name of the currently active session.
+   */
+  getCurrentName(): string {
+    return this.current.name
+  }
+
+  /**
+   * Create an empty session file without switching the current session.
+   * Returns the created session, or the existing one if it already exists.
+   */
+  createSession(name: string): Session {
+    const existing = this.getSession(name)
+    if (existing) return existing
+
+    const session: Session = {
+      id: crypto.randomUUID(),
+      name,
+      messages: [],
+      created: Date.now(),
+      updated: Date.now(),
+    }
+    const path = join(this.sessionsDir, `${name}.json`)
+    atomicWriteFile(path, JSON.stringify(session, null, 2))
+    return session
+  }
+
   private save(): void {
     const path = join(this.sessionsDir, `${this.current.name}.json`)
     atomicWriteFile(path, JSON.stringify(this.current, null, 2))
