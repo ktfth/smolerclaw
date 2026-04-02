@@ -24,7 +24,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/ktfth/smolerclaw"
+    "url": "git+https://github.com/ktfth/smolerclaw.git"
   },
   "keywords": [
     "ai",
