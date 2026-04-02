@@ -89,7 +89,9 @@ export function createWebServer(config: WebServerConfig) {
     }
     clients.set(clientId, client)
 
-    const session = chatService.newSession()
+    // Resume the last active session instead of always creating a new one
+    const currentName = config.sessionManager.getCurrentName()
+    const session = chatService.resumeSession(currentName) || chatService.newSession()
     send(ws, { type: 'connected', payload: { sessionId: session.id } })
     sendState(ws, chatService, client.settings)
 
@@ -1060,7 +1062,7 @@ function getIndexHtml(translations: Record<string, string>): string {
       }
 
       container.innerHTML = state.sessions.map(s => \`
-        <div class="session-item \${s.isActive ? 'active' : ''}" onclick="loadSession('\${s.id}')">
+        <div class="session-item \${s.isActive ? 'active' : ''}" onclick="loadSession(\${JSON.stringify(s.id)})">
           <div class="session-name">\${escapeHtml(s.name)}</div>
           <div class="session-meta">\${s.messageCount} \${__t('web.messages_count').replace('{{count}}', '')}</div>
         </div>

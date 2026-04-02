@@ -62,7 +62,32 @@ export class ChatService {
     this.currentSessionName = sessionId
     this.messages = [...session.messages]
 
+    // Keep the shared SessionManager in sync so tools see the correct active session
+    this.sessionManager.switchTo(sessionId)
+
     return this.messages.map((m) => this.toUIMessage(m))
+  }
+
+  /**
+   * Resume an existing session by name (loads messages, syncs SessionManager).
+   * Returns null if the session doesn't exist.
+   */
+  resumeSession(name: string): UISession | null {
+    const session = this.sessionManager.getSession(name)
+    if (!session) return null
+
+    this.currentSessionName = name
+    this.messages = [...session.messages]
+    this.sessionManager.switchTo(name)
+
+    return {
+      id: session.name,
+      name: session.name,
+      messageCount: session.messages.length,
+      created: session.created,
+      updated: session.updated,
+      isActive: true,
+    }
   }
 
   newSession(name?: string): UISession {
@@ -72,6 +97,9 @@ export class ChatService {
     this.messages = []
 
     const session = this.sessionManager.createSession(sessionName)
+
+    // Keep the shared SessionManager in sync
+    this.sessionManager.switchTo(sessionName)
 
     eventBus.emit('session:changed', {
       previousSession: previous || undefined,
