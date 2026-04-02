@@ -1,5 +1,6 @@
 import { loadConfig, saveConfig, getConfigPath } from '../config'
 import { refreshAuth, authLabel, type AuthResult } from '../auth'
+import { formatAutoRefreshStatus, updateAutoRefreshAuth } from '../auto-refresh'
 import { loadSkills, buildSystemPrompt, formatSkillList } from '../skills'
 import type { SessionPickerEntry, NewsPickerEntry, DashboardLayout, DashboardPanel } from '../tui'
 import { TUI } from '../tui'
@@ -12,6 +13,7 @@ import { getPersona, formatPersonaList } from '../personas'
 import { copyToClipboard } from '../clipboard'
 import { undoStack } from '../tools'
 import { formatPluginList } from '../plugins'
+import { formatPluginRegistry, disablePlugin, enablePlugin, getPlugin, installPlugin, uninstallPlugin, listInstalledPlugins } from '../plugin-system'
 import { formatApprovalPrompt, formatEditDiff } from '../approval'
 import { fetchNews, fetchNewsItems, fetchNewsContent, getNewsCategories, addNewsFeed, removeNewsFeed, disableNewsFeed, enableNewsFeed, listNewsFeeds, type NewsCategory, type NewsItem } from '../news'
 import { generateBriefing, getTimeContext, type TimeContext } from '../briefing'
@@ -30,6 +32,7 @@ import {
   type ScheduleType,
 } from '../scheduler'
 import { addTransaction, getMonthSummary, getRecentTransactions } from '../finance'
+import { verifyTransaction, recordVerifiedTransaction, formatVerification, getTodaySpendingSummary } from '../finance-guard'
 import { searchDecisions, listDecisions, formatDecisionList } from '../decisions'
 import { runWorkflow, listWorkflows, getWorkflow, deleteWorkflow, updateWorkflow, formatWorkflowList, formatWorkflowDetail } from '../workflows'
 import { startMonitor, stopMonitor, listMonitors, stopAllMonitors } from '../monitor'
@@ -313,6 +316,7 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
           if ('updateToken' in ctx.claude) {
             (ctx.claude as any).updateToken(freshAuth.token)
           }
+          updateAutoRefreshAuth(freshAuth)
           ctx.tui.showSystem(`Sessao renovada. Expira: ${new Date(freshAuth.expiresAt).toLocaleString()}`)
         } else {
           ctx.tui.showSystem('claude executado, mas credenciais nao atualizaram. Tente novamente.')
@@ -320,6 +324,12 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
       } catch (err) {
         ctx.tui.showError(`Falha ao renovar: ${err instanceof Error ? err.message : String(err)}`)
       }
+      break
+    }
+
+    case 'auto-refresh':
+    case 'autorefresh': {
+      ctx.tui.showSystem(formatAutoRefreshStatus())
       break
     }
 
@@ -429,6 +439,19 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
           '  /entrada <$> <cat>   Registrar entrada',
           '  /saida <$> <cat>     Registrar saida',
           '  /finance /balanco    Resumo mensal',
+          '',
+          'Auth:',
+          '  /refresh /renovar    Renovar sessao manualmente',
+          '  /auto-refresh        Status do auto-refresh de token',
+          '',
+          'Plugins:',
+          '  /plugins /plugin         Listar plugins',
+          '  /plugin install owner/r  Instalar do GitHub',
+          '  /plugin uninstall <n>    Desinstalar plugin',
+          '  /plugin installed        Listar instalados',
+          '  /plugin info <nome>      Detalhes do plugin',
+          '  /plugin enable <n>       Habilitar plugin',
+          '  /plugin disable <n>      Desabilitar plugin',
           '',
           'Decisoes / Decisions:',
           '  /decisoes [busca]    Listar/buscar decisoes',
@@ -616,8 +639,74 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
       break
     }
 
-    case 'plugins': {
-      ctx.tui.showSystem(formatPluginList(ctx.plugins))
+    case 'plugins':
+    case 'plugin': {
+      const sub = args[0]
+      if (sub === 'disable' || sub === 'desabilitar') {
+        const name = args[1]
+        if (!name) { ctx.tui.showSystem('Uso: /plugin disable <nome>'); break }
+        if (disablePlugin(name)) {
+          ctx.tui.showSystem(`Plugin "${name}" desabilitado.`)
+        } else {
+          ctx.tui.showError(`Plugin "${name}" nao encontrado.`)
+        }
+      } else if (sub === 'enable' || sub === 'habilitar') {
+        const name = args[1]
+        if (!name) { ctx.tui.showSystem('Uso: /plugin enable <nome>'); break }
+        if (await enablePlugin(name)) {
+          ctx.tui.showSystem(`Plugin "${name}" habilitado.`)
+        } else {
+          ctx.tui.showError(`Plugin "${name}" nao encontrado ou ja habilitado.`)
+        }
+      } else if (sub === 'install' || sub === 'instalar') {
+        const source = args[1]
+        if (!source) { ctx.tui.showSystem('Uso: /plugin install owner/repo'); break }
+        ctx.tui.showSystem(`Instalando plugin de ${source}...`)
+        const result = await installPlugin(source)
+        if (result.success) {
+          ctx.tui.showSystem(result.message)
+        } else {
+          ctx.tui.showError(result.message)
+        }
+      } else if (sub === 'uninstall' || sub === 'desinstalar') {
+        const name = args[1]
+        if (!name) { ctx.tui.showSystem('Uso: /plugin uninstall <nome>'); break }
+        const result = uninstallPlugin(name)
+        if (result.success) {
+          ctx.tui.showSystem(result.message)
+        } else {
+          ctx.tui.showError(result.message)
+        }
+      } else if (sub === 'installed' || sub === 'instalados') {
+        const installed = listInstalledPlugins()
+        if (installed.length === 0) {
+          ctx.tui.showSystem('Nenhum plugin instalado do GitHub.')
+        } else {
+          const lines = ['Plugins instalados do GitHub:']
+          for (const p of installed) {
+            const date = new Date(p.installedAt).toLocaleDateString('pt-BR')
+            lines.push(`  ${p.name} — github.com/${p.source} (${date})`)
+          }
+          ctx.tui.showSystem(lines.join('\n'))
+        }
+      } else if (sub === 'info') {
+        const name = args[1]
+        if (!name) { ctx.tui.showSystem('Uso: /plugin info <nome>'); break }
+        const p = getPlugin(name)
+        if (p) {
+          ctx.tui.showSystem(
+            `${p.name} v${p.version} (${p.type})\n` +
+            `  ${p.description}\n` +
+            `  Status: ${p.enabled ? 'ativo' : 'desabilitado'}\n` +
+            `  Source: ${p.source}\n` +
+            `  Tools: ${p.tools.map((t) => t.name).join(', ') || 'nenhuma'}`,
+          )
+        } else {
+          ctx.tui.showError(`Plugin "${name}" nao encontrado.`)
+        }
+      } else {
+        ctx.tui.showSystem(formatPluginRegistry())
+      }
       break
     }
 
@@ -1185,8 +1274,18 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
         ctx.tui.showSystem('Uso: /entrada <valor> <categoria> <descricao>')
         break
       }
-      const tx = addTransaction('entrada', amount, args[1], args.slice(2).join(' '))
+      const cat = args[1]
+      const desc = args.slice(2).join(' ')
+      const check = verifyTransaction('entrada', amount, cat, desc)
+      if (!check.allowed) {
+        ctx.tui.showError(check.blocked!)
+        break
+      }
+      const tx = addTransaction('entrada', amount, cat, desc)
+      recordVerifiedTransaction('entrada', amount, cat)
+      const warn = formatVerification(check)
       ctx.tui.showSystem(`+ R$ ${tx.amount.toFixed(2)} (${tx.category}) — ${tx.description}`)
+      if (warn) ctx.tui.showSystem(warn)
       break
     }
 
@@ -1197,8 +1296,18 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
         ctx.tui.showSystem('Uso: /saida <valor> <categoria> <descricao>')
         break
       }
-      const tx = addTransaction('saida', amount, args[1], args.slice(2).join(' '))
+      const cat = args[1]
+      const desc = args.slice(2).join(' ')
+      const check = verifyTransaction('saida', amount, cat, desc)
+      if (!check.allowed) {
+        ctx.tui.showError(check.blocked!)
+        break
+      }
+      const tx = addTransaction('saida', amount, cat, desc)
+      recordVerifiedTransaction('saida', amount, cat)
+      const warn = formatVerification(check)
       ctx.tui.showSystem(`- R$ ${tx.amount.toFixed(2)} (${tx.category}) — ${tx.description}`)
+      if (warn) ctx.tui.showSystem(warn)
       break
     }
 
@@ -1914,15 +2023,35 @@ export async function generateDashboardBriefing(dataDir?: string): Promise<Dashb
     const events = await getOutlookEvents()
     const eventLines = events.split('\n').filter((l) => l.trim()).slice(0, 6)
 
-    if (eventLines.length > 0) {
+    // Check if the response is a real event list or a fallback/error message
+    const isError = eventLines.length === 1 && (
+      eventLines[0].startsWith('Outlook nao disponivel') ||
+      eventLines[0].startsWith('Outlook timeout') ||
+      eventLines[0].startsWith('Outlook integration only')
+    )
+
+    if (isError) {
+      // Show the error so the user knows what happened
       panels.push({
         id: 'calendar',
         title: 'Agenda',
+        content: [eventLines[0]],
+      })
+      logger.debug('Calendar fallback in dashboard', { message: eventLines[0] })
+    } else if (eventLines.length > 0) {
+      panels.push({
+        id: 'calendar',
+        title: `Agenda (${eventLines.length > 1 || eventLines[0] !== 'Nenhum evento hoje.' ? eventLines.length : 0})`,
         content: eventLines,
       })
     }
   } catch (err) {
     logger.debug('Calendar unavailable for dashboard', { error: err })
+    panels.push({
+      id: 'calendar',
+      title: 'Agenda',
+      content: ['Erro ao acessar Outlook'],
+    })
   }
 
   // Project summary

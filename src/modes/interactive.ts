@@ -12,6 +12,8 @@ import { stopPomodoroTimer } from '../pomodoro'
 import { stopAllMonitors } from '../monitor'
 import { stopScheduler } from '../scheduler'
 import { stopAutoBackup } from '../vault'
+import { startAutoRefresh, stopAutoRefresh, updateAutoRefreshAuth } from '../auto-refresh'
+import { shutdownPluginSystem } from '../plugin-system'
 import { isFirstRunToday, markMorningDone, generateMorningBriefing } from '../morning'
 import { runSelfReflection } from '../services/docs-engine'
 import { getVersion } from '../cli'
@@ -52,6 +54,19 @@ export async function runInteractive(
     logger.debug('Time context init failed, using productivity mode', { error: err })
     tui.setPersonaMode('productivity')
   }
+
+  // Start auto-refresh for OAuth token
+  startAutoRefresh(authHolder.auth, {
+    onRefreshed: (fresh) => {
+      authHolder.auth = fresh
+      if ('updateToken' in claude) {
+        (claude as any).updateToken(fresh.token)
+      }
+    },
+    onRefreshFailed: (msg) => {
+      tui.showError(`Auto-refresh: ${msg}`)
+    },
+  })
 
   // Wire tool approval callback
   if (config.toolApproval !== 'auto' && claude.setApprovalCallback) {
@@ -219,6 +234,8 @@ export async function runInteractive(
     stopAllMonitors()
     stopScheduler()
     stopAutoBackup()
+    stopAutoRefresh()
+    shutdownPluginSystem().catch(() => { /* best effort */ })
 
     // Run self-reflection asynchronously before exit (non-blocking)
     runSelfReflection().catch(() => {

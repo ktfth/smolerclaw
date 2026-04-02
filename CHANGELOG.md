@@ -10,14 +10,26 @@ e o versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 ## [Unreleased]
 
 ### Added
+- **Auto-refresh de token OAuth** (`src/auto-refresh.ts`) — monitora expiracao do token e renova automaticamente antes de expirar, spawna `claude` para rotacao real quando re-leitura nao e suficiente
+- **Finance Guard** (`src/finance-guard.ts`) — camada de verificacao para operacoes financeiras com validacao de valor, deteccao de duplicatas, alertas de gasto diario, e trilha de auditoria via event bus
+- **Plugin System aprimorado** (`src/plugin-system.ts`) — suporte a plugins JSON (legado) e TypeScript/JavaScript com lifecycle hooks (`onLoad`/`onUnload`), subscricoes de eventos, `onToolCall`, enable/disable persistente, e registro com versionamento
+- **Instalacao de plugins do GitHub** — `/plugin install owner/repo` clona repositorio, descobre entry point (plugin.json, plugin.ts, index.ts, ou campo `smolerclaw` no package.json), e registra automaticamente
+- Comando `/auto-refresh` para visualizar status do auto-refresh de token
+- Comandos `/plugin install`, `/plugin uninstall`, `/plugin installed`, `/plugin info`, `/plugin enable`, `/plugin disable`
+- Ledger diario separado no finance-guard para tracking de gastos que persiste o dia todo (independente da janela de duplicatas)
+- 66 novos testes para auto-refresh, finance-guard e plugin-system (total: 865 testes)
 - Logger estruturado (`src/core/logger.ts`) com niveis debug/info/warn/error, controlado por `LOG_LEVEL`
 - Deteccao de secrets em tool calls (15 patterns: API keys, tokens, passwords)
 - Protecao de paths do sistema (System32, /etc, .ssh, etc.) em write/edit
 - Rate limiting por ferramenta (write_file 100/min, run_command 50/min)
 - Documentacao arquitetural (`docs/ARCHITECTURE.md`)
-- 190 novos testes para context-window, event-bus e windows-agent (total: 799 testes)
+- 190 novos testes para context-window, event-bus e windows-agent
 
 ### Changed
+- `initSession()` agora e async para suportar inicializacao do plugin system aprimorado
+- Comandos `/entrada` e `/saida` agora passam por verificacao do finance-guard antes de persistir
+- Tool `record_transaction` agora valida via finance-guard e retorna avisos ao modelo
+- `/plugins` agora usa registry do plugin system aprimorado (suporta JSON + script)
 - `src/tools.ts` (3.369 LOC) dividido em 14 modulos em `src/tools/`
 - `src/index.ts` (2.419 LOC) dividido em `src/init/`, `src/modes/`, `src/commands/`
 - Parametro `apiKey` renomeado para `token` em ClaudeProvider (reflete uso de subscription)

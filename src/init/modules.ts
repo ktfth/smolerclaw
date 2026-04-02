@@ -4,6 +4,7 @@ import { initMemos } from '../memos'
 import { initMaterials } from '../materials'
 import { initNews } from '../news'
 import { initFinance } from '../finance'
+import { initFinanceGuard } from '../finance-guard'
 import { initDecisions } from '../decisions'
 import { initPomodoro } from '../pomodoro'
 import { initWorkflows } from '../workflows'
@@ -37,6 +38,7 @@ export function initAllModules(
   initNews(dataDir)
   registerSessionManager(sessions)
   initFinance(dataDir)
+  initFinanceGuard()
   initDecisions(dataDir)
   initPomodoro((msg) => tui.showSystem(`\n*** ${msg} ***\n`))
   initWorkflows(dataDir)

@@ -17,6 +17,7 @@ import {
   type ScheduleType,
 } from '../scheduler'
 import { addTransaction, getMonthSummary, getRecentTransactions } from '../finance'
+import { verifyTransaction, recordVerifiedTransaction, formatVerification } from '../finance-guard'
 import { logDecision, searchDecisions, listDecisions, formatDecisionList, formatDecisionDetail } from '../decisions'
 import {
   runWorkflow, listWorkflows, getWorkflow, createWorkflow, deleteWorkflow,
@@ -1335,9 +1336,20 @@ export async function executeBusinessTool(
       const category = input.category as string
       const description = input.description as string
       if (!type || !amount || !category || !description) return 'Error: all fields required.'
+
+      const verification = verifyTransaction(type, amount, category, description)
+      if (!verification.allowed) {
+        return `Error: ${verification.blocked}`
+      }
+
       const tx = addTransaction(type, amount, category, description)
+      recordVerifiedTransaction(type, amount, category)
+
       const sign = tx.type === 'entrada' ? '+' : '-'
-      return `${sign} R$ ${tx.amount.toFixed(2)} (${tx.category}) — ${tx.description} [${tx.id}]`
+      const warningText = formatVerification(verification)
+      return `${sign} R$ ${tx.amount.toFixed(2)} (${tx.category}) — ${tx.description} [${tx.id}]${
+        warningText ? '\n' + warningText : ''
+      }`
     }
     case 'financial_summary':
       return getMonthSummary()

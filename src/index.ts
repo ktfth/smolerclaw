@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     activeSystemPrompt,
     enableTools,
     plugins,
-  } = initSession(config, cliArgs.session, cliArgs.noTools)
+  } = await initSession(config, cliArgs.session, cliArgs.noTools)
 
   // ── Pipe mode: stdin is not a TTY ────────────────────────
   const isPiped = !process.stdin.isTTY

@@ -12,9 +12,10 @@
  * SECURITY: All commands go through this single entry point.
  */
 
-import { existsSync, appendFileSync, mkdirSync } from 'node:fs'
+import { existsSync, appendFileSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { tmpdir, homedir } from 'node:os'
+import { randomBytes } from 'node:crypto'
 
 // ─── Constants ──────────────────────────────────────────────
 
@@ -316,6 +317,132 @@ export async function executePowerShellScript(
   const quotedPath = normalizePathForPS(scriptPath)
   const command = `& ${quotedPath}`
   return executePowerShell(command, options)
+}
+
+/**
+ * Execute a PowerShell script by writing it to a temp .ps1 file
+ * and running it with -File. This avoids all -Command parsing issues
+ * with long/complex scripts (WinRT, COM interop, etc.).
+ *
+ * The temp file is cleaned up after execution.
+ */
+export async function executePowerShellAsFile(
+  script: string,
+  options: ExecutionOptions = {},
+): Promise<ExecutionResult> {
+  const {
+    timeout = DEFAULT_TIMEOUT_MS,
+    cwd,
+    debug = _debugEnabled,
+    sta = false,
+  } = options
+
+  const startTime = performance.now()
+
+  // Write script to temp file with UTF-8 BOM + encoding prefix
+  const id = randomBytes(4).toString('hex')
+  const tempPath = join(tmpdir(), `smolerclaw-${id}.ps1`)
+  const fullScript = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n${script}`
+
+  try {
+    writeFileSync(tempPath, fullScript, 'utf-8')
+  } catch (err) {
+    return {
+      stdout: '',
+      stderr: `Failed to write temp script: ${err instanceof Error ? err.message : String(err)}`,
+      exitCode: 1,
+      duration: Math.round(performance.now() - startTime),
+      timedOut: false,
+    }
+  }
+
+  if (debug) {
+    debugLog('INFO', 'Executing PowerShell via temp file', {
+      tempPath,
+      scriptLength: script.length,
+      timeout,
+      sta,
+    })
+  }
+
+  // Build args: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass [-STA] -File <path>
+  const args: string[] = ['powershell', ...PS_BASE_FLAGS]
+  if (sta) {
+    args.push('-STA')
+  }
+  args.push('-File', tempPath)
+
+  let proc: ReturnType<typeof Bun.spawn>
+
+  try {
+    proc = Bun.spawn(args, {
+      stdout: 'pipe',
+      stderr: 'pipe',
+      cwd,
+    })
+  } catch (err) {
+    cleanup(tempPath)
+    return {
+      stdout: '',
+      stderr: `Failed to spawn PowerShell: ${err instanceof Error ? err.message : String(err)}`,
+      exitCode: 1,
+      duration: Math.round(performance.now() - startTime),
+      timedOut: false,
+    }
+  }
+
+  let timedOut = false
+  const timeoutId = setTimeout(() => {
+    timedOut = true
+    try { proc.kill() } catch { /* already exited */ }
+  }, timeout)
+
+  try {
+    const [stdout, stderr] = await Promise.all([
+      proc.stdout instanceof ReadableStream ? new Response(proc.stdout).text() : '',
+      proc.stderr instanceof ReadableStream ? new Response(proc.stderr).text() : '',
+    ])
+
+    const exitCode = await proc.exited
+    clearTimeout(timeoutId)
+    cleanup(tempPath)
+
+    const duration = Math.round(performance.now() - startTime)
+
+    const result: ExecutionResult = {
+      stdout: cleanOutput(stdout),
+      stderr: cleanOutput(stderr),
+      exitCode: timedOut ? -1 : exitCode,
+      duration,
+      timedOut,
+    }
+
+    if (debug) {
+      debugLog(result.exitCode === 0 ? 'INFO' : 'WARN', 'File command completed', {
+        exitCode: result.exitCode,
+        duration,
+        timedOut,
+      })
+    }
+
+    return result
+  } catch (err) {
+    clearTimeout(timeoutId)
+    cleanup(tempPath)
+
+    return {
+      stdout: '',
+      stderr: `Execution error: ${err instanceof Error ? err.message : String(err)}`,
+      exitCode: 1,
+      duration: Math.round(performance.now() - startTime),
+      timedOut,
+    }
+  }
+}
+
+/** Best-effort cleanup of temp file */
+function cleanup(path: string): void {
+  try { unlinkSync(path) } catch { /* ignore */ }
 }
 
 /**

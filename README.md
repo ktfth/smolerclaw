@@ -58,6 +58,9 @@ smolerclaw is a terminal AI assistant that lives on your Windows machine. It can
 - **Clipboard OCR** — read text or extract text from images via Windows.Media.Ocr
 - **Screen awareness** — map foreground window and all visible windows
 - **Session refresh** — renew Claude Code auth token without leaving the TUI
+- **Auto-refresh** — proactive OAuth token monitoring and renewal before expiration
+- **Finance verification** — amount limits, duplicate detection, daily spending alerts
+- **Plugin system** — install plugins from GitHub with `/plugin install owner/repo`, supports JSON and TypeScript plugins with lifecycle hooks
 
 ## TUI Commands
 
@@ -75,11 +78,14 @@ smolerclaw is a terminal AI assistant that lives on your Windows machine. It can
 /relatorio     Progress report       /oportunidades List opportunities
 /clipboard     Read clipboard/OCR    /tela          Screen context
 /ps1 <script>  Run PowerShell        /refresh       Renew auth token
+/auto-refresh  Token refresh status  /plugins       List plugins
+/plugin install owner/repo           /plugin info   Plugin details
+/entrada 500 cat  Record income      /saida 50 cat  Record expense
 ```
 
 ## Auth
 
-Claude Code subscription (auto-detected from `~/.claude/.credentials.json`). Use `/refresh` to renew the token if it expires during a session.
+Claude Code subscription (auto-detected from `~/.claude/.credentials.json`). Token is automatically renewed via auto-refresh. Use `/refresh` for manual renewal or `/auto-refresh` to check status.
 
 ## Requirements
 
@@ -148,6 +154,9 @@ smolerclaw e um assistente de IA no terminal que vive na sua maquina Windows. El
 - **OCR de clipboard** — ler texto ou extrair texto de imagens via Windows.Media.Ocr
 - **Consciencia de tela** — mapear janela em foco e todas as janelas visiveis
 - **Renovacao de sessao** — renovar token de autenticacao Claude Code sem sair da TUI
+- **Auto-refresh** — monitoramento proativo de token OAuth com renovacao automatica antes da expiracao
+- **Verificacao financeira** — limites de valor, deteccao de duplicatas, alertas de gasto diario
+- **Sistema de plugins** — instalar plugins do GitHub com `/plugin install owner/repo`, suporte a plugins JSON e TypeScript com lifecycle hooks
 
 ## Comandos na TUI
 
@@ -165,11 +174,14 @@ smolerclaw e um assistente de IA no terminal que vive na sua maquina Windows. El
 /relatorio     Relatorio progresso   /oportunidades Listar oportunidades
 /area          Ler clipboard/OCR     /tela          Contexto de tela
 /ps1 <script>  Executar PowerShell   /refresh       Renovar token auth
+/auto-refresh  Status auto-refresh   /plugins       Listar plugins
+/plugin install owner/repo           /plugin info   Detalhes plugin
+/entrada 500 cat  Registrar entrada  /saida 50 cat  Registrar saida
 ```
 
 ## Autenticacao
 
-Assinatura Claude Code (detectada automaticamente de `~/.claude/.credentials.json`). Use `/refresh` para renovar o token se expirar durante a sessao.
+Assinatura Claude Code (detectada automaticamente de `~/.claude/.credentials.json`). O token e renovado automaticamente via auto-refresh. Use `/refresh` para renovacao manual ou `/auto-refresh` para ver o status.
 
 ## Requisitos
 

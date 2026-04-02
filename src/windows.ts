@@ -10,6 +10,7 @@
 import { IS_WINDOWS } from './platform'
 import {
   executePowerShell,
+  executePowerShellAsFile,
   startProcess,
   invokeItem,
   getVisibleProcesses,
@@ -252,27 +253,46 @@ export async function getDateTimeInfo(): Promise<string> {
   return lines.join('\n')
 }
 
-// ─── Outlook Calendar (if available) ────────────────────────
+// ─── Calendar (Outlook COM + WinRT fallback) ────────────────
 
 /**
- * Get today's Outlook calendar events (read-only).
- * Falls back gracefully if Outlook is not installed.
- * Uses olFolderCalendar = 9 from the Outlook COM object model.
+ * Get today's calendar events.
+ *
+ * Strategy:
+ *   1. Try Outlook COM (classic desktop Outlook)
+ *   2. If COM fails (new Outlook / no classic install), fall back to
+ *      Windows Calendar API (WinRT AppointmentManager) which works with
+ *      any calendar provider: new Outlook, Windows Calendar, Google, etc.
  */
 export async function getOutlookEvents(): Promise<string> {
   if (!IS_WINDOWS) return 'Outlook integration only available on Windows.'
 
+  // --- Strategy 1: Classic Outlook COM ---
+  const comResult = await tryOutlookCOM()
+  if (comResult.success) return comResult.data
+
+  // --- Strategy 2: WinRT Calendar API (new Outlook / Windows Calendar) ---
+  const winrtResult = await tryWinRTCalendar()
+  if (winrtResult.success) return winrtResult.data
+
+  // Both failed — return the most informative error
+  return winrtResult.data || comResult.data || 'Calendario nao disponivel.'
+}
+
+async function tryOutlookCOM(): Promise<{ success: boolean; data: string }> {
   const cmd = [
     'try {',
     '  $outlook = New-Object -ComObject Outlook.Application -ErrorAction Stop',
     '  $ns = $outlook.GetNamespace("MAPI")',
-    '  $cal = $ns.GetDefaultFolder(9)',  // olFolderCalendar
+    '  $cal = $ns.GetDefaultFolder(9)',
     '  $today = (Get-Date).Date',
     '  $tomorrow = $today.AddDays(1)',
     '  $items = $cal.Items',
     '  $items.Sort("[Start]")',
     '  $items.IncludeRecurrences = $true',
-    '  $filter = "[Start] >= \'$($today.ToString(\'g\'))\' AND [Start] < \'$($tomorrow.ToString(\'g\'))\'"',
+    '  $todayStr = $today.ToString("MM/dd/yyyy HH:mm")',
+    '  $tomorrowStr = $tomorrow.ToString("MM/dd/yyyy HH:mm")',
+    '  $filter = "[Start] >= \'$todayStr\' AND [Start] < \'$tomorrowStr\'"',
     '  $events = $items.Restrict($filter)',
     '  $results = @()',
     '  foreach ($e in $events) {',
@@ -280,22 +300,113 @@ export async function getOutlookEvents(): Promise<string> {
     '    $end = ([DateTime]$e.End).ToString("HH:mm")',
     '    $results += "$start-$end $($e.Subject)"',
     '  }',
-    '  if ($results.Count -eq 0) { "Nenhum evento hoje." }',
-    '  else { $results -join [char]10 }',
+    '  if ($results.Count -eq 0) { Write-Output "Nenhum evento hoje." }',
+    '  else { Write-Output ($results -join [char]10) }',
     '} catch {',
-    '  "Outlook nao disponivel ou sem eventos."',
+    '  Write-Error $_.Exception.Message',
+    '  exit 1',
     '}',
   ].join('\n')
 
   try {
-    // Outlook COM operations can be slow
-    const result = await executePowerShell(cmd, { timeout: 30_000 })
+    const result = await executePowerShell(cmd, { timeout: 30_000, sta: true })
     if (result.timedOut) {
-      return 'Outlook timeout - pode estar em processo de inicializacao.'
+      return { success: false, data: 'Outlook timeout.' }
     }
-    return result.stdout.trim() || 'Outlook nao disponivel.'
+    if (result.exitCode === 0 && result.stdout.trim()) {
+      return { success: true, data: result.stdout.trim() }
+    }
+    return { success: false, data: result.stderr.trim() || 'Outlook COM indisponivel.' }
   } catch {
-    return 'Outlook nao disponivel.'
+    return { success: false, data: 'Outlook COM indisponivel.' }
+  }
+}
+
+async function tryWinRTCalendar(): Promise<{ success: boolean; data: string }> {
+  // Windows Calendar API via WinRT — accesses calendars synced to Windows.
+  // Requires the Microsoft account to be added in Windows Settings > Accounts.
+  // Uses executePowerShellAsFile to avoid -Command parsing issues with long scripts.
+  const script = `
+try {
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime -ErrorAction Stop
+
+  $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods()) | Where-Object {
+    $_.Name -eq "AsTask" -and
+    $_.GetParameters().Count -eq 1 -and
+    $_.GetParameters()[0].ParameterType.Name -eq "IAsyncOperation\`\`1"
+  } | Select-Object -First 1
+
+  if ($null -eq $asTaskGeneric) {
+    Write-Error "WinRT AsTask nao encontrado"
+    exit 1
+  }
+
+  function AwaitOp($op, [Type]$rt) {
+    $t = $asTaskGeneric.MakeGenericMethod($rt).Invoke($null, @($op))
+    $t.Wait(15000) | Out-Null
+    return $t.Result
+  }
+
+  [void][Windows.ApplicationModel.Appointments.AppointmentManager, Windows.Foundation.UniversalApiContract, ContentType=WindowsRuntime]
+
+  $store = AwaitOp ([Windows.ApplicationModel.Appointments.AppointmentManager]::RequestStoreAsync(
+    [Windows.ApplicationModel.Appointments.AppointmentStoreAccessType]::AllCalendarsReadOnly
+  )) ([Windows.ApplicationModel.Appointments.AppointmentStore])
+
+  if ($null -eq $store) {
+    Write-Error "Store nulo - conta nao sincronizada no Windows"
+    exit 1
+  }
+
+  $cals = AwaitOp ($store.FindAppointmentCalendarsAsync()) ([System.Collections.Generic.IReadOnlyList[Windows.ApplicationModel.Appointments.AppointmentCalendar]])
+
+  if ($cals.Count -eq 0) {
+    Write-Error "Nenhum calendario sincronizado. Adicione sua conta em Configuracoes > Contas > Email e contas."
+    exit 1
+  }
+
+  # Use 2-param overload (no FindAppointmentsOptions) — avoids WinRT IVector
+  # COM interop issues. Subject, StartTime, Duration are populated by default.
+  $appts = AwaitOp ($store.FindAppointmentsAsync(
+    [DateTimeOffset]::Now.Date,
+    [TimeSpan]::FromDays(1)
+  )) ([System.Collections.Generic.IReadOnlyList[Windows.ApplicationModel.Appointments.Appointment]])
+
+  $results = @()
+  if ($null -ne $appts) {
+    foreach ($a in $appts) {
+      $s = $a.StartTime.LocalDateTime.ToString("HH:mm")
+      $e = $a.StartTime.Add($a.Duration).LocalDateTime.ToString("HH:mm")
+      $subj = if ($a.Subject) { $a.Subject } else { "(sem titulo)" }
+      $results += "$s-$e $subj"
+    }
+  }
+
+  $calNames = @()
+  foreach ($c in $cals) { $calNames += $c.DisplayName }
+
+  if ($results.Count -eq 0) {
+    Write-Output "Nenhum evento hoje. Calendarios: $($calNames -join ', ')"
+  } else {
+    Write-Output ($results -join [char]10)
+  }
+} catch {
+  Write-Error $_.Exception.Message
+  exit 1
+}
+`
+
+  try {
+    const result = await executePowerShellAsFile(script, { timeout: 30_000, sta: true })
+    if (result.timedOut) {
+      return { success: false, data: 'Calendario timeout.' }
+    }
+    if (result.exitCode === 0 && result.stdout.trim()) {
+      return { success: true, data: result.stdout.trim() }
+    }
+    return { success: false, data: result.stderr.trim() || 'Calendario Windows indisponivel.' }
+  } catch {
+    return { success: false, data: 'Calendario Windows indisponivel.' }
   }
 }
 

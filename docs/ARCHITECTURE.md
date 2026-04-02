@@ -29,6 +29,7 @@ smolerclaw e um assistente de IA de terminal que combina o Claude da Anthropic c
 │  news · finance · decisions · investigations        │
 │  workflows · scheduler · monitor · pomodoro         │
 │  email · briefing · morning · pitwall               │
+│  auto-refresh · finance-guard · plugin-system       │
 ├─────────────────────────────────────────────────────┤
 │              Services Layer (Smart)                  │
 │  decision-engine · agency-engine · docs-engine      │
@@ -99,8 +100,16 @@ User Input
     │                │ refreshAuth() → re-read credentials
     │                └── updateToken() → recreate client
     │
-    └── On /refresh → spawn `claude -p 'Fresh!'`
-                       → re-read credentials
+    ├── On /refresh → spawn `claude -p 'Fresh!'`
+    │                  → re-read credentials
+    │
+    └── Auto-refresh (auto-refresh.ts)
+         │ timer check a cada 60s
+         ├── Token longe de expirar → noop
+         ├── Token perto de expirar → re-read disk
+         │   └── Token ja rotacionado → adota novo token
+         └── Token nao mudou → spawn `claude -p 'Fresh!'`
+              → re-read → updateToken()
 ```
 
 ### Persistencia
@@ -124,6 +133,15 @@ User Input
 ├── rag/rag-index.json      Indice de busca RAG
 ├── vault-checksums.json    Integridade SHA-256
 └── .backup/                Repo git de backup
+
+%APPDATA%/smolerclaw/ (ou ~/.config/smolerclaw/)
+├── config.json             Configuracao do usuario
+└── plugins/                Diretorio de plugins
+    ├── *.json              Plugins JSON (legado)
+    ├── *.ts / *.js         Script plugins com lifecycle
+    ├── disabled/           Plugins desabilitados
+    └── installed/          Plugins clonados do GitHub
+        └── owner--repo/    Repo clonado + .smolerclaw-install.json
 ```
 
 Toda escrita usa `atomicWriteFile()` (tmp + rename) com checksums SHA-256 verificados na leitura.
@@ -155,6 +173,18 @@ Cada dominio (tasks, people, memos, etc.) vive em seu proprio modulo com estado 
 - Lazy loading futuro
 - Facil adicao de novos dominios
 - Limites claros de responsabilidade
+
+### Por que Auto-Refresh Proativo?
+
+O token OAuth do Claude Code expira periodicamente. Sem auto-refresh, o usuario so descobre quando a proxima chamada falha com 401. O auto-refresh monitora a expiracao com timer (check a cada 60s, refresh 5min antes de expirar) e tenta re-ler o token do disco — se Claude Code ja rotacionou, basta adotar. Se nao, spawna `claude -p 'Fresh!'` para forcar a rotacao. Nenhuma interrupcao da conversa.
+
+### Por que Finance Guard como Camada Separada?
+
+O finance-guard opera como middleware entre comandos/tools e o modulo finance.ts. Separar a logica de verificacao (limites, duplicatas, gasto diario) da persistencia permite que regras de negocio evoluc para sem alterar o armazenamento. O ledger diario e separado da janela de duplicatas — duplicatas expiram em 5min, mas gastos do dia persistem ate meia-noite. Eventos de auditoria via event bus permitem que outros modulos reajam a atividade financeira.
+
+### Por que Plugin System com Lifecycle?
+
+O sistema original de plugins (JSON-only, shell templates) era limitado a ferramentas simples sem estado. O plugin system aprimorado adiciona: (1) script plugins com `onLoad`/`onUnload` para estado e recursos, (2) `onToolCall` para logica customizada em vez de shell, (3) subscricoes de eventos para reatividade, (4) enable/disable persistente, (5) install/uninstall via GitHub. A interface `PluginContext` fornece `notify()` e `dataDir` isolado por plugin. JSON plugins continuam funcionando sem mudanca.
 
 ### Por que RAG Local (TF-IDF + BM25)?
 
@@ -197,6 +227,13 @@ Busca semantica sem depender de APIs externas. Indexa memos, materiais, decisoes
 | `docs-engine.ts` | 829 | Self-reflection, living manual |
 | `dependency-graph.ts` | 491 | Blast radius, refactor planning |
 
+### Cross-Cutting Modules
+| Modulo | LOC | Responsabilidade |
+|--------|-----|------------------|
+| `auto-refresh.ts` | 280 | Monitoramento e renovacao automatica de token OAuth |
+| `finance-guard.ts` | 240 | Verificacao de transacoes: limites, duplicatas, gasto diario |
+| `plugin-system.ts` | 530 | Registry de plugins: JSON + script, lifecycle, GitHub install |
+
 ### Core Infrastructure
 | Modulo | LOC | Responsabilidade |
 |--------|-----|------------------|
@@ -231,5 +268,5 @@ Busca semantica sem depender de APIs externas. Indexa memos, materiais, decisoes
 
 ---
 
-*Gerado em: 2026-03-31*
-*smolerclaw v1.3.6*
+*Atualizado em: 2026-04-01*
+*smolerclaw v1.4.0*
