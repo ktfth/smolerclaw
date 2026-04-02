@@ -3,6 +3,7 @@
  */
 import { UndoStack } from '../undo'
 import { type Plugin, executePlugin } from '../plugins'
+import { executePluginTool } from '../plugin-system'
 import { observeEvent } from '../services/docs-engine'
 import { toolReadFile, toolWriteFile, toolEditFile } from './file-tools'
 import { toolSearchFiles, toolFindFiles, toolListDirectory } from './search-tools'
@@ -98,7 +99,11 @@ async function executeToolInternal(
   const bizResult = await executeBusinessTool(name, input, sessionManager)
   if (bizResult !== null) return bizResult
 
-  // Check plugins
+  // Check enhanced plugin system first (supports both JSON and script plugins)
+  const pluginResult = await executePluginTool(name, input)
+  if (pluginResult !== null) return pluginResult
+
+  // Fallback: legacy JSON plugins passed as parameter
   const plugin = plugins.find((p) => p.name === name)
   if (plugin) return await executePlugin(plugin, input)
 
