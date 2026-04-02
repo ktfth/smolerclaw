@@ -4,8 +4,7 @@ import { buildMaterialsContext } from '../materials'
 import { registerWindowsTools, registerPlugins, TOOLS } from '../tools'
 import { loadPlugins, pluginsToTools, getPluginDir } from '../plugins'
 import { initPluginSystem, getPluginTools } from '../plugin-system'
-import { join } from 'node:path'
-import type { loadConfig } from '../config'
+import { getConfigDir, type loadConfig } from '../config'
 
 export interface SessionSetup {
   sessions: SessionManager
@@ -34,7 +33,7 @@ export async function initSession(
   registerWindowsTools()
 
   // Load plugins (legacy JSON)
-  const pluginDir = getPluginDir(join(config.dataDir, '..'))
+  const pluginDir = getPluginDir(getConfigDir())
   const plugins = loadPlugins(pluginDir)
   if (plugins.length > 0) {
     registerPlugins(plugins)

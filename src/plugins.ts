@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type Anthropic from '@anthropic-ai/sdk'
 import { getShell } from './platform'
+import { getConfigDir } from './config'
 
 export interface Plugin {
   name: string
@@ -111,7 +112,7 @@ export async function executePlugin(
  * Format plugin list for display.
  */
 export function formatPluginList(plugins: Plugin[]): string {
-  if (plugins.length === 0) return 'No plugins loaded. Add .json files to ~/.config/smolerclaw/plugins/'
+  if (plugins.length === 0) return `No plugins loaded. Add .json files to ${join(getConfigDir(), 'plugins')}`
   return 'Plugins:\n' + plugins.map((p) => `  ${p.name} — ${p.description}`).join('\n')
 }
 

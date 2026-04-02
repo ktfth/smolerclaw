@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, copyFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { IS_WINDOWS } from './platform'
@@ -108,14 +108,54 @@ export function getDataDir(): string {
   return DATA_DIR
 }
 
+export function getConfigDir(): string {
+  return CONFIG_DIR
+}
+
 /** One-time migration from old ~/.config/smolerclaw paths on Windows */
 function migrateOldPaths(): void {
-  const oldConfig = join(HOME, '.config', 'smolerclaw', 'config.json')
+  const oldConfigDir = join(HOME, '.config', 'smolerclaw')
+
+  // Migrate config.json
+  const oldConfig = join(oldConfigDir, 'config.json')
   if (existsSync(oldConfig) && !existsSync(CONFIG_FILE)) {
     try {
       const data = readFileSync(oldConfig, 'utf-8')
       ensureDir(CONFIG_DIR)
       atomicWriteFile(CONFIG_FILE, data)
     } catch { /* best effort */ }
+  }
+
+  // Migrate subdirectories (plugins, materials) from old path
+  for (const subdir of ['plugins', 'materials']) {
+    const oldDir = join(oldConfigDir, subdir)
+    const newDir = join(CONFIG_DIR, subdir)
+    if (existsSync(oldDir) && (!existsSync(newDir) || isEmptyDir(newDir))) {
+      try {
+        copyDirRecursive(oldDir, newDir)
+      } catch { /* best effort */ }
+    }
+  }
+}
+
+function isEmptyDir(dir: string): boolean {
+  try {
+    return readdirSync(dir).length === 0
+  } catch {
+    return true
+  }
+}
+
+function copyDirRecursive(src: string, dest: string): void {
+  ensureDir(dest)
+  const entries = readdirSync(src, { withFileTypes: true })
+  for (const entry of entries) {
+    const srcPath = join(src, entry.name)
+    const destPath = join(dest, entry.name)
+    if (entry.isDirectory()) {
+      copyDirRecursive(srcPath, destPath)
+    } else if (entry.isFile()) {
+      copyFileSync(srcPath, destPath)
+    }
   }
 }
