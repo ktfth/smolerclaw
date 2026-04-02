@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 
+export type UIMode = 'tui' | 'web' | 'desktop'
+
 export interface CliArgs {
   help: boolean
   version: boolean
@@ -9,6 +11,8 @@ export interface CliArgs {
   maxTokens?: number
   noTools: boolean
   print: boolean
+  uiMode: UIMode
+  port?: number
   prompt?: string
 }
 
@@ -21,6 +25,7 @@ export function parseArgs(argv: string[]): CliArgs {
     version: false,
     noTools: false,
     print: false,
+    uiMode: 'tui',
   }
 
   const positional: string[] = []
@@ -67,6 +72,20 @@ export function parseArgs(argv: string[]): CliArgs {
         args.print = true
         break
 
+      case 'ui':
+        args.uiMode = 'web'
+        break
+
+      case 'desktop':
+        args.uiMode = 'desktop'
+        break
+
+      case '--port':
+        const port = Number(argv[++i])
+        if (!port || port <= 0 || port > 65535) die('--port requires a valid port number (1-65535)')
+        args.port = port
+        break
+
       default:
         if (arg.startsWith('-')) {
           die(`Unknown option: ${arg}. Try --help`)
@@ -103,7 +122,12 @@ export function printHelp(): void {
   console.log(`smolerclaw v${version} — the micro AI assistant
 
 Usage:
-  smolerclaw [options] [prompt]
+  smolerclaw [command] [options] [prompt]
+
+Commands:
+  (none)               Interactive TUI mode (default)
+  ui                   Launch web-based UI (browser)
+  desktop              Launch desktop app (Electrobun)
 
 Options:
   -h, --help           Show this help
@@ -113,9 +137,13 @@ Options:
   --max-tokens <n>     Override max tokens per response
   --no-tools           Disable tool use for this session
   -p, --print          Print response and exit (no TUI)
+  --port <n>           Port for web/desktop UI (default: 3847)
 
 Examples:
   smolerclaw                        Interactive TUI mode
+  smolerclaw ui                     Web UI at http://localhost:3847
+  smolerclaw desktop                Desktop app (Electrobun)
+  smolerclaw ui --port 8080         Web UI on custom port
   smolerclaw "explain this error"   Launch TUI with initial prompt
   smolerclaw -p "what is 2+2"      Print answer and exit
   echo "review" | smolerclaw -p     Pipe input, print response

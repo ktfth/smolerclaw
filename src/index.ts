@@ -7,6 +7,7 @@ import { initProvider, type AuthHolder } from './init/providers'
 import { initSession } from './init/session'
 import { runPrintMode } from './modes/print-mode'
 import { runInteractive } from './modes/interactive'
+import { runWebUI, runDesktopUI } from './modes/ui-mode'
 
 async function main(): Promise<void> {
   const cliArgs = parseArgs(process.argv.slice(2))
@@ -49,6 +50,28 @@ async function main(): Promise<void> {
     enableTools,
     plugins,
   } = await initSession(config, cliArgs.session, cliArgs.noTools)
+
+  // ── Web UI mode ─────────────────────────────────────────
+  if (cliArgs.uiMode === 'web') {
+    await runWebUI({
+      provider: claude,
+      systemPrompt,
+      enableTools,
+      port: cliArgs.port,
+    })
+    return
+  }
+
+  // ── Desktop UI mode ────────────────────────────────────
+  if (cliArgs.uiMode === 'desktop') {
+    await runDesktopUI({
+      provider: claude,
+      systemPrompt,
+      enableTools,
+      port: cliArgs.port,
+    })
+    return
+  }
 
   // ── Pipe mode: stdin is not a TTY ────────────────────────
   const isPiped = !process.stdin.isTTY

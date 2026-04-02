@@ -16,7 +16,8 @@
     "prepublishOnly": "node scripts/build.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.80.0"
+    "@anthropic-ai/sdk": "^0.80.0",
+    "hono": "^4.6.0"
   },
   "files": [
     "dist",
@@ -31,6 +32,8 @@
     "assistant",
     "cli",
     "tui",
+    "web",
+    "desktop",
     "anthropic",
     "claude",
     "terminal",
@@ -42,7 +45,9 @@
     "windows",
     "plugins",
     "bun",
-    "typescript"
+    "typescript",
+    "hono",
+    "electrobun"
   ],
   "license": "MIT",
   "devDependencies": {
