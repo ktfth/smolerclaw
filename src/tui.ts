@@ -87,6 +87,7 @@ export class TUI {
     '/investigar', '/investigate', '/investigacoes',
     '/monitor', '/vigiar',
     '/workflow', '/fluxo',
+    '/macro', '/macros', '/atalho', '/atalhos',
     '/pomodoro', '/foco',
     '/entrada', '/saida', '/income', '/expense', '/finance', '/financas', '/balanco',
     '/decisions', '/decisoes',
@@ -158,6 +159,11 @@ export class TUI {
     '/vault': ['status', 'backup', 'sync', 'init'],
     '/workflow': ['list', 'run', 'info', 'create', 'delete', 'enable', 'disable'],
     '/fluxo': ['list', 'run', 'info', 'create', 'delete', 'ativar', 'desativar'],
+    // Macros
+    '/macro': ['list', 'all', 'info', 'create', 'delete', 'enable', 'disable'],
+    '/macros': ['list', 'all', 'info', 'create', 'delete', 'enable', 'disable'],
+    '/atalho': ['list', 'all', 'info', 'criar', 'deletar', 'ativar', 'desativar'],
+    '/atalhos': ['list', 'all', 'info', 'criar', 'deletar', 'ativar', 'desativar'],
   }
 
   private onSubmit: ((s: string) => void) | null = null

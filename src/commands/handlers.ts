@@ -35,6 +35,7 @@ import { addTransaction, getMonthSummary, getRecentTransactions } from '../finan
 import { verifyTransaction, recordVerifiedTransaction, formatVerification, getTodaySpendingSummary } from '../finance-guard'
 import { searchDecisions, listDecisions, formatDecisionList } from '../decisions'
 import { runWorkflow, listWorkflows, getWorkflow, deleteWorkflow, updateWorkflow, formatWorkflowList, formatWorkflowDetail } from '../workflows'
+import { runMacro, listMacros, listAllMacros, getMacro, createMacro, deleteMacro, updateMacro, formatMacroList, formatMacroDetail, getMacroNames, type MacroAction } from '../macros'
 import { startMonitor, stopMonitor, listMonitors, stopAllMonitors } from '../monitor'
 import { buildIndex, queryMemory, getIndexStats, formatQueryResults } from '../memory'
 import { getVaultStatus, formatVaultStatus, initShadowBackup, performBackup, syncBackupToRemote, startAutoBackup, stopAutoBackup } from '../vault'
@@ -429,6 +430,12 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
           'Workflows:',
           '  /workflow /fluxo     Listar workflows',
           '  /workflow run <nome> Executar (ex: /workflow iniciar-dia)',
+          '',
+          'Macros / Atalhos:',
+          '  /macro /atalho       Listar macros (atalhos rapidos)',
+          '  /macro <nome>        Executar macro (ex: /macro vscode)',
+          '  /macro info <nome>   Ver detalhes do macro',
+          '  /macro create        Criar novo macro',
           '',
           'Pomodoro:',
           '  /pomodoro /foco      Iniciar (ex: /foco revisar codigo)',
@@ -1087,6 +1094,84 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
           ctx.tui.showSystem(result)
         } catch (err) {
           ctx.tui.showError(`Workflow: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        ctx.tui.enableInput()
+      }
+      break
+    }
+
+    // ── Macro commands ────────────────────────────────────
+
+    case 'macro':
+    case 'macros':
+    case 'atalho':
+    case 'atalhos': {
+      const sub = args[0]?.toLowerCase()
+      if (!sub || sub === 'list' || sub === 'listar') {
+        const tag = args[1]
+        ctx.tui.showSystem(formatMacroList(listMacros(tag)))
+      } else if (sub === 'all' || sub === 'todos') {
+        ctx.tui.showSystem(formatMacroList(listAllMacros()))
+      } else if (sub === 'info' || sub === 'detalhe') {
+        const name = args[1]
+        if (!name) { ctx.tui.showError('Uso: /macro info <nome>'); break }
+        const m = getMacro(name)
+        if (m) { ctx.tui.showSystem(formatMacroDetail(m)) }
+        else { ctx.tui.showError(`Macro nao encontrado: ${name}`) }
+      } else if (sub === 'create' || sub === 'criar' || sub === 'new' || sub === 'novo') {
+        // Usage: /macro create <name> <action> <target> [description]
+        // Example: /macro create mysite open_url https://example.com "Meu site favorito"
+        const name = args[1]
+        const action = args[2] as MacroAction
+        const target = args[3]
+        if (!name || !action || !target) {
+          ctx.tui.showSystem(
+            'Uso: /macro create <nome> <acao> <target> [descricao]\n' +
+            'Acoes: open_app, open_url, open_file, run_command\n' +
+            'Exemplos:\n' +
+            '  /macro create mysite open_url https://example.com "Meu site"\n' +
+            '  /macro create docs open_file C:\\Users\\Docs "Pasta de documentos"\n' +
+            '  /macro create cleanup run_command "Remove-Item $env:TEMP\\* -Force"',
+          )
+          break
+        }
+        const validActions: MacroAction[] = ['open_app', 'open_url', 'open_file', 'run_command']
+        if (!validActions.includes(action)) {
+          ctx.tui.showError(`Acao invalida: ${action}. Use: ${validActions.join(', ')}`)
+          break
+        }
+        const description = args.slice(4).join(' ') || `Macro: ${name}`
+        const macro = createMacro(name, description, action, target)
+        ctx.tui.showSystem(`Macro criado: "${macro.name}" (${macro.action}: ${macro.target})`)
+      } else if (sub === 'delete' || sub === 'deletar' || sub === 'rm') {
+        const name = args[1]
+        if (!name) { ctx.tui.showError('Uso: /macro delete <nome>'); break }
+        if (deleteMacro(name)) { ctx.tui.showSystem(`Macro removido: ${name}`) }
+        else { ctx.tui.showError(`Macro nao encontrado: ${name}`) }
+      } else if (sub === 'enable' || sub === 'ativar') {
+        const name = args[1]
+        if (!name) { ctx.tui.showError('Uso: /macro enable <nome>'); break }
+        const updated = updateMacro(name, { enabled: true })
+        if (updated) { ctx.tui.showSystem(`Macro ativado: ${updated.name}`) }
+        else { ctx.tui.showError(`Macro nao encontrado: ${name}`) }
+      } else if (sub === 'disable' || sub === 'desativar') {
+        const name = args[1]
+        if (!name) { ctx.tui.showError('Uso: /macro disable <nome>'); break }
+        const updated = updateMacro(name, { enabled: false })
+        if (updated) { ctx.tui.showSystem(`Macro desativado: ${updated.name}`) }
+        else { ctx.tui.showError(`Macro nao encontrado: ${name}`) }
+      } else {
+        // Treat as macro name to run: /macro vscode -> run vscode macro
+        ctx.tui.disableInput()
+        try {
+          const result = await runMacro(sub)
+          if (result.success) {
+            ctx.tui.showSystem(`${result.message} (${result.duration}ms)`)
+          } else {
+            ctx.tui.showError(result.message)
+          }
+        } catch (err) {
+          ctx.tui.showError(`Macro: ${err instanceof Error ? err.message : String(err)}`)
         }
         ctx.tui.enableInput()
       }

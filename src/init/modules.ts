@@ -8,6 +8,7 @@ import { initFinanceGuard } from '../finance-guard'
 import { initDecisions } from '../decisions'
 import { initPomodoro } from '../pomodoro'
 import { initWorkflows } from '../workflows'
+import { initMacros } from '../macros'
 import { initInvestigations } from '../investigate'
 import { initMemory } from '../memory'
 import { initProjects } from '../projects'
@@ -46,6 +47,7 @@ export function initCoreModules(
   initFinanceGuard()
   initDecisions(dataDir)
   initWorkflows(dataDir)
+  initMacros(dataDir)
   initInvestigations(dataDir)
   initMemory(dataDir)
   initProjects(dataDir)
