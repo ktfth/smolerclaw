@@ -46,7 +46,7 @@
     "plugins",
     "bun",
     "typescript",
-    "hono",
+    "hono"
   ],
   "license": "MIT",
   "devDependencies": {
