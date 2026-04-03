@@ -152,18 +152,45 @@ export function getMemoTags(): Array<{ tag: string; count: number }> {
 export function formatMemoList(memos: Memo[]): string {
   if (memos.length === 0) return 'Nenhum memo encontrado.'
 
-  const lines = memos.map((m) => {
-    const date = new Date(m.updatedAt).toLocaleDateString('pt-BR', {
-      day: '2-digit', month: '2-digit',
-    })
+  const now = new Date()
+  const todayStr = toDateKey(now)
+  const yesterdayDate = new Date(now)
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1)
+  const yesterdayStr = toDateKey(yesterdayDate)
+
+  const groups: Record<string, string[]> = {}
+  const groupOrder: string[] = []
+
+  for (const m of memos) {
+    const mDate = new Date(m.updatedAt)
+    const mKey = toDateKey(mDate)
+
+    let label: string
+    if (mKey === todayStr) {
+      label = `Hoje (${formatDatePtBr(mDate)})`
+    } else if (mKey === yesterdayStr) {
+      label = `Ontem (${formatDatePtBr(mDate)})`
+    } else {
+      label = formatDatePtBr(mDate)
+    }
+
+    if (!groups[label]) {
+      groups[label] = []
+      groupOrder.push(label)
+    }
+
     const tags = m.tags.length > 0 ? ` [${m.tags.map((t) => `#${t}`).join(' ')}]` : ''
     const preview = m.content.length > 80
       ? m.content.slice(0, 80).replace(/\n/g, ' ') + '...'
       : m.content.replace(/\n/g, ' ')
-    return `  [${date}] ${preview}${tags}  {${m.id}}`
-  })
+    groups[label].push(`  ${preview}${tags}  {${m.id}}`)
+  }
 
-  return `Memos (${memos.length}):\n${lines.join('\n')}`
+  const sections = groupOrder.map((label) =>
+    `  ${label}:\n${groups[label].map((l) => `  ${l}`).join('\n')}`,
+  )
+
+  return `Memos (${memos.length}):\n${sections.join('\n\n')}`
 }
 
 export function formatMemoDetail(memo: Memo): string {
@@ -186,4 +213,17 @@ export function formatMemoTags(): string {
 
 function genId(): string {
   return randomUUID().slice(0, 8)
+}
+
+/** YYYY-MM-DD key for date comparison (local timezone). */
+function toDateKey(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/** dd/MM format for display. */
+function formatDatePtBr(d: Date): string {
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
 }
