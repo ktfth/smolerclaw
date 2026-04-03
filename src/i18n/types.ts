@@ -9,36 +9,6 @@ export interface TranslationParams {
 }
 
 export interface TranslationKeys {
-  // ─── Desktop Menus ──────────────────────────────────────
-  'desktop.about': string
-  'desktop.settings': string
-  'desktop.quit': string
-  'desktop.chat': string
-  'desktop.new_chat': string
-  'desktop.clear_chat': string
-  'desktop.edit': string
-  'desktop.undo': string
-  'desktop.redo': string
-  'desktop.cut': string
-  'desktop.copy': string
-  'desktop.paste': string
-  'desktop.select_all': string
-  'desktop.view': string
-  'desktop.toggle_theme': string
-  'desktop.actual_size': string
-  'desktop.zoom_in': string
-  'desktop.zoom_out': string
-  'desktop.dev_tools': string
-  'desktop.window': string
-  'desktop.minimize': string
-  'desktop.zoom': string
-  'desktop.close': string
-  'desktop.help': string
-  'desktop.documentation': string
-  'desktop.report_issue': string
-  'desktop.not_available': string
-  'desktop.opening_browser': string
-
   // ─── Web UI ─────────────────────────────────────────────
   'web.title': string
   'web.welcome_title': string
@@ -73,7 +43,6 @@ export interface TranslationKeys {
 
   // ─── UI Mode Console ───────────────────────────────────
   'ui.starting_web': string
-  'ui.starting_desktop': string
   'ui.running_at': string
 
   // ─── Session ────────────────────────────────────────────

@@ -387,6 +387,20 @@ export async function runMacro(nameOrId: string): Promise<MacroRunResult> {
   const macro = getMacro(nameOrId)
 
   if (!macro) {
+    // Check if the input matches a tag instead of a macro name
+    const lower = nameOrId.toLowerCase().trim()
+    const tagMatches = _macros.filter(
+      (m) => m.enabled && m.tags.some((t) => t === lower),
+    )
+    if (tagMatches.length > 0) {
+      const names = tagMatches.map((m) => m.name).join(', ')
+      return {
+        macro: nameOrId,
+        success: false,
+        message: `"${nameOrId}" e uma tag, nao um macro. Macros com tag "${nameOrId}": ${names}`,
+        duration: Math.round(performance.now() - start),
+      }
+    }
     const available = _macros.filter((m) => m.enabled).map((m) => m.name).join(', ')
     return {
       macro: nameOrId,

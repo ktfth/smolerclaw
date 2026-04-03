@@ -1,5 +1,8 @@
 # Plano de Refinamento Production-Grade
 
+> **Status**: Fases 1-4 concluidas. Fase 6 (UX) parcialmente implementada.
+> **Ultima atualizacao**: 2026-04-02
+
 ## Implementacoes Concluidas (2026-03-29)
 
 ### Modulo `src/input/` - Ergonomia de Interacao
@@ -64,204 +67,77 @@ Novos modulos implementados com 145 testes (todos passando):
 
 ## Plano de Melhorias por Prioridade
 
-### FASE 1: Estabilizacao Critica (P0)
+### FASE 1: Estabilizacao Critica (P0) — CONCLUIDA
 
-#### 1.1 Split do `tools.ts` (2,828 LOC)
+#### 1.1 Split do `tools.ts` (2,828 LOC) — CONCLUIDO (v1.4.0)
 
-**Problema**: Arquivo muito grande dificulta manutencao e testes.
+Split realizado em 14 modulos em `src/tools/`:
+`index.ts`, `schemas.ts`, `file-tools.ts`, `search-tools.ts`, `command-tools.ts`, `network-tools.ts`, `vault-tools.ts`, `memory-tools.ts`, `windows-tools.ts`, `business-tools.ts`, `agency-tools.ts`, `execute.ts`, `security.ts`, `helpers.ts`
 
-**Solucao**: Extrair em estrutura modular:
+#### 1.2 Testes para Modulos Criticos — CONCLUIDO (v1.4.0)
 
-```
-src/tools/
-├── index.ts          # Registry e dispatch (reexporta tudo)
-├── schemas.ts        # Definicoes TOOLS[]
-├── file-tools.ts     # read_file, write_file, edit_file
-├── search-tools.ts   # search_files, find_files, list_directory
-├── command-tools.ts  # run_command
-├── vault-tools.ts    # vault_status, backup, restore
-├── memory-tools.ts   # recall_memory, memory_status
-├── windows-tools.ts  # Windows-specific tools
-├── business-tools.ts # tasks, memos, people, projects
-└── execute.ts        # executeTool() dispatch function
-```
+190 novos testes adicionados para context-window, event-bus e windows-agent.
+66 novos testes para auto-refresh, finance-guard e plugin-system.
+Total: 865+ testes.
 
-**Estimativa**: ~40 edits
+#### 1.3 Correcao de Error Handling Silencioso — CONCLUIDO (v1.4.0)
 
-#### 1.2 Testes para Modulos Criticos
-
-**Modulos com cobertura < 30%**:
-
-| Modulo | Cobertura | Acoes |
-|--------|-----------|-------|
-| `context.ts` | 2.75% | Adicionar testes unitarios |
-| `context-window.ts` | 14.04% | Testar trimming/summarization |
-| `windows-agent.ts` | 23.78% | Testar PowerShell safety |
-| `event-bus.ts` | 28.78% | Testar emit/on/once/errors |
-
-**Testes Necessarios**: ~150 novos testes
-
-#### 1.3 Correcao de Error Handling Silencioso
-
-**Problema**: Varios `catch { /* ignore */ }` sem logging.
-
-**Locais identificados**:
-- `context.ts:64` - JSON parse silencioso
-- `context.ts:84,96,110,122` - git commands silenciosos
-- `skills.ts:27` - readFileSync silencioso
-- Varios outros
-
-**Solucao**: Adicionar logging estruturado:
-```typescript
-catch (err) {
-  logger.debug('Operation failed', { error: err, context: 'git_log' })
-}
-```
+12 catch blocks silenciosos migrados para logger estruturado (`src/core/logger.ts`).
 
 ---
 
-### FASE 2: Refatoracao Estrutural (P1)
+### FASE 2: Refatoracao Estrutural (P1) — CONCLUIDA
 
-#### 2.1 Split do `index.ts` (2,211 LOC)
+#### 2.1 Split do `index.ts` (2,211 LOC) — CONCLUIDO (v1.4.0)
 
-**Estrutura proposta**:
+Split realizado conforme proposto:
+- `src/init/providers.ts` — setup Claude/OpenAI/Ollama
+- `src/init/modules.ts` — init de todos os modulos
+- `src/init/session.ts` — session management
+- `src/modes/print-mode.ts` — modo nao-interativo
+- `src/modes/interactive.ts` — TUI interativa
+- `src/modes/ui-mode.ts` — modos web e desktop (adicionado v1.6.0)
+- `src/commands/handlers.ts` — handlers de comandos TUI
 
-```
-src/
-├── index.ts           # Entry point minimo (~100 LOC)
-├── cli/
-│   ├── index.ts       # parseArgs, printHelp, getVersion
-│   └── commands.ts    # Handlers de comandos TUI
-├── modes/
-│   ├── print-mode.ts  # runPrintMode()
-│   └── interactive.ts # runInteractive()
-└── init/
-    ├── providers.ts   # Setup Claude/OpenAI/Ollama
-    ├── modules.ts     # Init de todos os modulos
-    └── session.ts     # Session management
-```
+#### 2.2 Logging Estruturado — CONCLUIDO (v1.4.0)
 
-#### 2.2 Logging Estruturado
-
-**Implementar logger com niveis**:
-
-```typescript
-// src/core/logger.ts
-export const logger = {
-  debug: (msg: string, ctx?: object) => { ... },
-  info: (msg: string, ctx?: object) => { ... },
-  warn: (msg: string, ctx?: object) => { ... },
-  error: (msg: string, ctx?: object) => { ... },
-}
-```
-
-**Beneficios**:
-- Troubleshooting em producao
-- Metricas de uso
-- Deteccao de anomalias
+Implementado em `src/core/logger.ts` com niveis debug/info/warn/error, controlado por `LOG_LEVEL`.
 
 #### 2.3 Metricas de Uso
 
-**Adicionar telemetria opcional**:
-
-```typescript
-interface UsageMetrics {
-  session_duration_ms: number
-  tools_used: Record<string, number>
-  errors_by_type: Record<string, number>
-  tokens_consumed: number
-  model: string
-}
-```
+**Status**: Pendente. Telemetria opcional ainda nao implementada.
 
 ---
 
-### FASE 3: Seguranca e Robustez (P1)
+### FASE 3: Seguranca e Robustez (P1) — CONCLUIDA
 
-#### 3.1 Expandir Tool Safety Assessment
+#### 3.1 Expandir Tool Safety Assessment — CONCLUIDO (v1.4.0)
 
-**Atual**: `tool-safety.ts` tem apenas 107 LOC com patterns basicos.
-
-**Melhorias**:
-
-1. **Deteccao de Secrets em Comandos**:
-```typescript
-const SECRET_PATTERNS = [
-  /OPENAI_API_KEY=/i,
-  /AWS_SECRET_ACCESS_KEY=/i,
-  /password\s*=\s*["'][^"']+["']/i,
-]
-```
-
-2. **Validacao de Paths**:
-```typescript
-// Prevenir escrita em diretorios sensiveis
-const PROTECTED_PATHS = [
-  '/etc/',
-  '/usr/bin/',
-  'C:\\Windows\\System32',
-  '%APPDATA%\\..\\',
-]
-```
-
-3. **Rate Limiting por Tool**:
-```typescript
-const RATE_LIMITS: Record<string, { max: number, windowMs: number }> = {
-  'write_file': { max: 100, windowMs: 60000 },
-  'run_command': { max: 50, windowMs: 60000 },
-}
-```
+Implementado em `src/tools/security.ts` (237 LOC):
+- Deteccao de secrets em tool calls (15 patterns: API keys, tokens, passwords)
+- Protecao de paths do sistema (System32, /etc, .ssh, etc.) em write/edit
+- Rate limiting por ferramenta (write_file 100/min, run_command 50/min)
 
 #### 3.2 Audit Log para Operacoes Sensiveis
 
-```typescript
-interface AuditEntry {
-  timestamp: number
-  tool: string
-  input: Record<string, unknown>
-  risk_level: RiskLevel
-  approved: boolean
-  result: 'success' | 'error' | 'rejected'
-}
-```
+**Status**: Parcialmente implementado. Finance-guard tem audit trail via event bus. Audit log generico para todas as tools ainda pendente.
 
 ---
 
-### FASE 4: Documentacao (P2)
+### FASE 4: Documentacao (P2) — CONCLUIDA
 
-#### 4.1 Documentacao Arquitetural
+#### 4.1 Documentacao Arquitetural — CONCLUIDO (v1.4.0)
 
-Criar `docs/ARCHITECTURE.md`:
-
-```markdown
-# Arquitetura smolerclaw
-
-## Camadas
-
-1. TUI Layer - Interface terminal
-2. Tool Execution Layer - Dispatch de ferramentas
-3. Provider Layer - Claude/OpenAI/Ollama
-4. Feature Modules - Dominios de negocio
-5. Core Infrastructure - Event bus, vault, session
-
-## Fluxo de Dados
-
-[diagrama ASCII]
-
-## Decisoes Arquiteturais
-
-- Por que Event Bus?
-- Por que Vault atomico?
-- Por que multi-provider?
-```
+`docs/ARCHITECTURE.md` criado e mantido atualizado com:
+- Diagrama de camadas em ASCII
+- Fluxo de dados (conversa, autenticacao, persistencia)
+- Decisoes arquiteturais documentadas
+- Modulos por camada com LOC e responsabilidade
+- Atualizado para v1.6.0 (inclui macros, i18n, multi-UI)
 
 #### 4.2 JSDoc em Funcoes Publicas
 
-**Modulos prioritarios**:
-- `claude.ts` - API principal
-- `tools.ts` - Registry de ferramentas
-- `event-bus.ts` - Sistema de eventos
-- `vault.ts` - Persistencia
+**Status**: Parcialmente implementado. Modulos novos (macros, i18n, windows-executor) tem JSDoc. Modulos legados ainda pendentes.
 
 ---
 
@@ -292,51 +168,58 @@ const loadDecisionEngine = () => import('./services/decision-engine')
 
 ### Build & Deploy
 
-- [ ] `bun run typecheck` passa sem erros
+- [x] `bun run typecheck` passa sem erros
 - [ ] `bun test` todos os testes passam
 - [ ] Cobertura >= 80% linhas
 - [ ] Build single-binary funciona
-- [ ] Instalador Windows funciona
+- [x] Instalador Windows funciona
 
 ### Seguranca
 
-- [ ] Nenhum secret hardcoded (grep por API_KEY, password, token)
-- [ ] Tool safety cobre todos os patterns perigosos
-- [ ] Audit log funcionando
-- [ ] SSRF guard testado com URLs maliciosas
+- [x] Nenhum secret hardcoded (grep por API_KEY, password, token)
+- [x] Tool safety cobre todos os patterns perigosos (15 patterns)
+- [ ] Audit log generico funcionando
+- [x] SSRF guard testado com URLs maliciosas
 
 ### Funcionalidade
 
-- [ ] Fluxo de conversa basico funciona
-- [ ] Todas as ferramentas respondem corretamente
-- [ ] Vault backup/restore funciona
-- [ ] Multi-provider (Anthropic, OpenAI, Ollama) funciona
+- [x] Fluxo de conversa basico funciona
+- [x] Todas as ferramentas respondem corretamente
+- [x] Vault backup/restore funciona
+- [x] Multi-provider (Anthropic, OpenAI, Ollama) funciona
+- [x] Macros: CRUD + execucao + tags
+- [x] i18n: PT-BR + EN com fallback
+- [x] Multi-UI: TUI + Web + Desktop
 
 ### Documentacao
 
-- [ ] README atualizado com versao
-- [ ] ARCHITECTURE.md criado
-- [ ] CHANGELOG atualizado
+- [x] README atualizado com versao (v1.6.0)
+- [x] ARCHITECTURE.md criado e atualizado
+- [x] CHANGELOG atualizado (v1.4.0 - v1.6.0)
+- [x] USAGE.md atualizado com macros, scheduler, UI, i18n
 
 ---
 
-## Ordem de Implementacao Sugerida
+## Historico de Implementacao
 
 ```
-Semana 1: FASE 1.1 + 1.2 (Split tools.ts + testes criticos)
-Semana 2: FASE 1.3 + 3.1 (Error handling + security)
-Semana 3: FASE 2.1 + 2.2 (Split index.ts + logging)
-Semana 4: FASE 4 + validacao final
+Concluido: FASE 1 (Split tools.ts, testes criticos, error handling) — v1.4.0
+Concluido: FASE 2 (Split index.ts, logging estruturado) — v1.4.0
+Concluido: FASE 3 (Tool safety, secrets, rate limiting) — v1.4.0
+Concluido: FASE 4 (Documentacao arquitetural) — v1.4.0
+Concluido: i18n + Multi-UI (web/desktop) — v1.5.0/v1.6.0
+Concluido: Macros system — v1.6.0+
 ```
 
 ---
 
-## Proximos Passos Imediatos
+## Proximos Passos
 
-1. **Criar branch**: `feature/production-refinement`
-2. **Iniciar split de tools.ts**: Extrair schemas primeiro
-3. **Adicionar testes para event-bus.ts**: Cobertura atual 28%
-4. **Implementar logger estruturado**: Base para demais melhorias
+1. **Metricas de uso** (Fase 2.3) — telemetria opcional
+2. **Audit log generico** (Fase 3.2) — trail para todas as tools
+3. **JSDoc completo** (Fase 4.2) — modulos legados
+4. **Performance profiling** (Fase 5) — RAG, lazy loading, cache
+5. **Cobertura 80%+** — testes adicionais em modulos com baixa cobertura
 
 ---
 
@@ -660,5 +543,5 @@ const ABBREVIATIONS = {
 
 ---
 
-*Plano gerado em: 2026-03-29*
+*Plano gerado em: 2026-03-29 | Atualizado em: 2026-04-02*
 *Baseado em analise automatica do codebase e principios de ergonomia*

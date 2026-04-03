@@ -11,8 +11,11 @@ smolerclaw e um assistente de IA de terminal que combina o Claude da Anthropic c
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                     TUI Layer                        │
-│  tui.ts · cli.ts · ansi.ts · markdown.ts            │
+│                   UI Layer (multi)                    │
+│  TUI: tui.ts · cli.ts · ansi.ts · markdown.ts      │
+│  Web: ui/web/ (Hono server)                         │
+│  Desktop: ui/desktop/ (Electrobun)                  │
+│  Shared: ui/shared/ (chat-service, types)           │
 ├─────────────────────────────────────────────────────┤
 │                  Provider Layer                      │
 │  claude.ts · openai-provider.ts · providers.ts       │
@@ -28,7 +31,7 @@ smolerclaw e um assistente de IA de terminal que combina o Claude da Anthropic c
 │  tasks · memos · materials · people · projects      │
 │  news · finance · decisions · investigations        │
 │  workflows · scheduler · monitor · pomodoro         │
-│  email · briefing · morning · pitwall               │
+│  email · briefing · morning · pitwall · macros      │
 │  auto-refresh · finance-guard · plugin-system       │
 ├─────────────────────────────────────────────────────┤
 │              Services Layer (Smart)                  │
@@ -37,10 +40,11 @@ smolerclaw e um assistente de IA de terminal que combina o Claude da Anthropic c
 ├─────────────────────────────────────────────────────┤
 │            Core Infrastructure Layer                 │
 │  event-bus · logger · vault · session · config      │
-│  memory (RAG) · platform · undo                     │
+│  memory (RAG) · platform · undo · i18n              │
 ├─────────────────────────────────────────────────────┤
 │           Windows Integration Layer                  │
 │  windows.ts · windows-agent.ts · clipboard.ts       │
+│  utils/windows-executor.ts                          │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -136,6 +140,7 @@ User Input
 
 %APPDATA%/smolerclaw/ (ou ~/.config/smolerclaw/)
 ├── config.json             Configuracao do usuario
+├── macros.json             Atalhos rapidos (macros)
 └── plugins/                Diretorio de plugins
     ├── *.json              Plugins JSON (legado)
     ├── *.ts / *.js         Script plugins com lifecycle
@@ -190,17 +195,38 @@ O sistema original de plugins (JSON-only, shell templates) era limitado a ferram
 
 Busca semantica sem depender de APIs externas. Indexa memos, materiais, decisoes e sessoes. Indexacao incremental via hashes SHA-256. Roda 100% offline, sem custo, com latencia minima.
 
+### Por que Macros Separado de Workflows?
+
+Macros executam uma unica acao instantanea (abrir app, URL, arquivo, ou comando). Workflows sao rotinas de multiplos passos com controle de fluxo. A separacao mantem cada sistema simples: macros sao CRUD + execute, workflows tem steps, condicoes, e error handling. Macros vem com 16 atalhos padrao para produtividade imediata.
+
+### Por que Multi-UI (TUI + Web + Desktop)?
+
+A TUI e o modo principal, mas nem todo contexto de uso favorece o terminal. A interface web (Hono) permite acesso via navegador sem instalar nada extra. O modo desktop (Electrobun) oferece janela nativa para quem prefere app dedicado. O `chat-service` compartilhado em `ui/shared/` garante que a logica de conversa e reutilizada entre os tres modos sem duplicacao.
+
+### Por que i18n com Fallback?
+
+O sistema de traducao (`src/i18n/`) usa dicionarios tipados (PT-BR e EN). A funcao `t(key, params?)` busca no dicionario atual e faz fallback automatico para ingles se a chave nao existir. Isso permite traducao incremental — novas features podem ser adicionadas em ingles e traduzidas gradualmente. Parametros sao interpolados via `{{key}}` no template.
+
+### Por que Windows Executor Centralizado?
+
+Toda execucao de PowerShell no codebase passa por `utils/windows-executor.ts`. Isso garante flags obrigatorios (-NoProfile, -NonInteractive), timeout com kill de processo, encoding UTF-8, e logging centralizado. O executor tambem valida existencia de executaveis via `Get-Command` com fallback para App Paths registry, cobrindo apps como Chrome que nao estao no PATH.
+
 ---
 
 ## Modulos por Camada
 
-### TUI Layer
+### UI Layer
 | Modulo | LOC | Responsabilidade |
 |--------|-----|------------------|
 | `tui.ts` | ~2,000 | Interface terminal, rendering, input handling |
-| `cli.ts` | 137 | Parse de argumentos, help, versao |
+| `cli.ts` | 166 | Parse de argumentos, help, versao, modos (tui/web/desktop) |
 | `ansi.ts` | 243 | Sequencias ANSI, cores, formatacao |
 | `markdown.ts` | 148 | Rendering markdown no terminal |
+| `ui/web/` | ~200 | Servidor Hono para interface web |
+| `ui/desktop/` | ~150 | App desktop via Electrobun |
+| `ui/shared/` | ~300 | Chat service e tipos compartilhados entre modos |
+| `modes/ui-mode.ts` | 87 | Orquestracao de modos web e desktop |
+| `i18n/` | ~300 | Traducoes PT-BR/EN com fallback e interpolacao |
 
 ### Provider Layer
 | Modulo | LOC | Responsabilidade |
@@ -233,6 +259,8 @@ Busca semantica sem depender de APIs externas. Indexa memos, materiais, decisoes
 | `auto-refresh.ts` | 280 | Monitoramento e renovacao automatica de token OAuth |
 | `finance-guard.ts` | 240 | Verificacao de transacoes: limites, duplicatas, gasto diario |
 | `plugin-system.ts` | 530 | Registry de plugins: JSON + script, lifecycle, GitHub install |
+| `macros.ts` | 546 | Atalhos rapidos: CRUD, execucao, tags, 16 defaults |
+| `utils/windows-executor.ts` | 679 | Executor centralizado PowerShell: timeouts, logs, App Paths |
 
 ### Core Infrastructure
 | Modulo | LOC | Responsabilidade |
@@ -268,5 +296,5 @@ Busca semantica sem depender de APIs externas. Indexa memos, materiais, decisoes
 
 ---
 
-*Atualizado em: 2026-04-01*
-*smolerclaw v1.4.0*
+*Atualizado em: 2026-04-02*
+*smolerclaw v1.6.0*

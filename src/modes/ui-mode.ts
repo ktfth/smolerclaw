@@ -1,12 +1,11 @@
 /**
- * UI Mode - Launches web or desktop interface
+ * UI Mode - Launches web interface
  */
 
 import { exec } from 'node:child_process'
 import type { Message, ChatEvent } from '../types'
 import type { SessionManager } from '../session'
 import { createWebServer } from '../ui/web'
-import { launchDesktopApp } from '../ui/desktop'
 import { t } from '../i18n'
 
 /**
@@ -36,12 +35,12 @@ function openBrowser(url: string): void {
       : `xdg-open "${url}"`
 
   exec(cmd, (err) => {
-    if (err) console.error(t('desktop.opening_browser', { url }), err.message)
+    if (err) console.error(`Failed to open browser: ${url}`, err.message)
   })
 }
 
 /**
- * Run web UI mode (Hono server)
+ * Run web UI mode (Hono server + opens browser)
  */
 export async function runWebUI(config: UIModeConfig): Promise<void> {
   const port = config.port || 3847
@@ -60,26 +59,6 @@ export async function runWebUI(config: UIModeConfig): Promise<void> {
 
   const url = `http://localhost:${port}`
   openBrowser(url)
-
-  // Keep the process running
-  await new Promise(() => {})
-}
-
-/**
- * Run desktop UI mode (Electrobun)
- */
-export async function runDesktopUI(config: UIModeConfig): Promise<void> {
-  console.log(`\n  ${t('ui.starting_desktop')}\n`)
-
-  const { url } = await launchDesktopApp({
-    provider: config.provider,
-    systemPrompt: config.systemPrompt,
-    enableTools: config.enableTools,
-    sessionManager: config.sessionManager,
-    devMode: process.env.NODE_ENV === 'development',
-  })
-
-  console.log(`  ${t('ui.running_at', { url })}\n`)
 
   // Keep the process running
   await new Promise(() => {})

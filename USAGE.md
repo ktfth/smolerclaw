@@ -8,13 +8,15 @@
 ## Sumario
 
 1. [Inicio Rapido](#inicio-rapido)
-2. [Autenticacao](#autenticacao)
-3. [Modelos Disponiveis](#modelos-disponiveis)
-4. [Comandos TUI](#comandos-tui)
-5. [Ferramentas da IA (Tools)](#ferramentas-da-ia-tools)
-6. [Atalhos de Teclado](#atalhos-de-teclado)
-7. [Skills e Personas](#skills-e-personas)
-8. [Configuracao](#configuracao)
+2. [Modos de Interface](#modos-de-interface)
+3. [Autenticacao](#autenticacao)
+4. [Modelos Disponiveis](#modelos-disponiveis)
+5. [Comandos TUI](#comandos-tui)
+6. [Ferramentas da IA (Tools)](#ferramentas-da-ia-tools)
+7. [Atalhos de Teclado](#atalhos-de-teclado)
+8. [Skills e Personas](#skills-e-personas)
+9. [Internacionalizacao (i18n)](#internacionalizacao-i18n)
+10. [Configuracao](#configuracao)
 
 ---
 
@@ -46,6 +48,32 @@ smolerclaw
 | `--max-tokens` | Limite de tokens | `smolerclaw --max-tokens 8192` |
 | `--no-tools` | Desativar ferramentas | `smolerclaw --no-tools` |
 | `-p, --print` | Modo nao-interativo | `echo "oi" | smolerclaw -p` |
+| `ui` | Interface web (navegador) | `smolerclaw ui` |
+| `desktop` | App desktop (Electrobun) | `smolerclaw desktop` |
+| `--port` | Porta para UI web/desktop | `smolerclaw ui --port 8080` |
+
+---
+
+## Modos de Interface
+
+smolerclaw oferece tres modos de interface:
+
+| Modo | Comando | Descricao |
+|------|---------|-----------|
+| TUI | `smolerclaw` | Interface terminal interativa (padrao) |
+| Web | `smolerclaw ui` | Interface no navegador via servidor Hono (default: `http://localhost:3847`) |
+| Desktop | `smolerclaw desktop` | Janela nativa via Electrobun |
+
+```bash
+# Web UI na porta padrao
+smolerclaw ui
+
+# Web UI em porta customizada
+smolerclaw ui --port 8080
+
+# Desktop app
+smolerclaw desktop
+```
 
 ---
 
@@ -281,6 +309,45 @@ Tipos de step: `open_app`, `open_url`, `run_command`, `wait`, `notify`, `if_app_
 
 Controle de erros por step: `on_error: 'stop' | 'skip' | 'continue'`
 
+### Macros (Atalhos Rapidos)
+
+| Comando EN | Comando PT | Descricao | Exemplo |
+|------------|------------|-----------|---------|
+| `/macro` | `/atalho` | Listar macros disponiveis | `/macro` |
+| `/macro <nome>` | `/atalho <nome>` | Executar macro | `/macro vscode` |
+| `/macro info <nome>` | `/atalho detalhe <nome>` | Ver detalhes do macro | `/macro info chrome` |
+| `/macro create <nome> <acao> <target>` | `/atalho criar` | Criar novo macro | `/macro create mysite open_url https://example.com` |
+| `/macro delete <nome>` | `/atalho deletar <nome>` | Remover macro | `/macro delete mysite` |
+| `/macro enable <nome>` | `/atalho ativar <nome>` | Ativar macro | `/macro enable chrome` |
+| `/macro disable <nome>` | `/atalho desativar <nome>` | Desativar macro | `/macro disable chrome` |
+| `/macro all` | `/atalho todos` | Listar todos (incluindo desativados) | `/macro all` |
+
+Acoes disponiveis: `open_app`, `open_url`, `open_file`, `run_command`
+
+Macros padrao incluem: `vscode`, `terminal`, `excel`, `word`, `outlook`, `teams`, `edge`, `chrome`, `explorer`, `calc`, `notepad`, `tarefas`, `settings`, `github`, `claude`, `chatgpt`
+
+Exemplo de criacao:
+```
+/macro create docs open_file C:\Users\Docs "Pasta de documentos"
+/macro create cleanup run_command "Remove-Item $env:TEMP\* -Force"
+```
+
+### Agendador (Scheduler)
+
+| Comando EN | Comando PT | Descricao | Exemplo |
+|------------|------------|-----------|---------|
+| `/schedule` | `/agendar` | Listar jobs agendados | `/schedule list` |
+| `/schedule <msg> <hora>` | `/agendar <msg> <hora>` | Agendar notificacao | `/agendar "Reuniao" 14:00` |
+| `/schedule <msg> <hora> daily` | `/agendar <msg> <hora> diario` | Job recorrente diario | `/agendar "Standup" 09:00 daily` |
+| `/schedule info <id>` | `/agendar info <id>` | Detalhes de um job | `/schedule info abc123` |
+| `/schedule delete <id>` | `/agendar deletar <id>` | Remover job | `/schedule delete abc123` |
+| `/schedule enable <id>` | `/agendar ativar <id>` | Ativar job | `/schedule enable abc123` |
+| `/schedule disable <id>` | `/agendar desativar <id>` | Desativar job | `/schedule disable abc123` |
+| `/schedule run <id>` | `/agendar run <id>` | Executar job agora | `/schedule run abc123` |
+| `/schedules` | — | Listar todos os jobs | `/schedules` |
+
+Tipos de agendamento: `once`, `daily`, `weekly`
+
 ### Gestao de Projetos
 
 | Comando EN | Comando PT | Descricao | Exemplo |
@@ -435,6 +502,15 @@ Essas ferramentas sao usadas **automaticamente pela IA** durante a conversa. Voc
 | `add_opportunity` | Registrar nova oportunidade |
 | `update_opportunity_status` | Atualizar status de oportunidade |
 
+### Macros
+
+| Tool | Descricao |
+|------|-----------|
+| `run_macro` | Executar macro por nome |
+| `list_macros` | Listar macros disponiveis |
+| `create_macro` | Criar novo macro |
+| `delete_macro` | Remover macro |
+
 ### Sessoes
 
 | Tool | Descricao |
@@ -479,8 +555,23 @@ Skills definem o comportamento base da IA. Ficam na pasta `skills/`.
 |---------|---------|-----------|
 | `default` | `skills/default.md` | Assistente versatil (codigo, pesquisa, escrita, qualquer topico) |
 | `business` | `skills/business.md` | Assistente executivo (noticias, decisoes, delegacoes, briefings) |
+| `agency` | `skills/agency.md` | Protocolo de alta agencia: planeja antes de executar, pede aprovacao |
 
 Trocar: `/persona business` ou `/modo default`
+
+---
+
+## Internacionalizacao (i18n)
+
+smolerclaw suporta Portugues (BR) e Ingles. O idioma e detectado automaticamente pelo sistema, mas pode ser configurado manualmente.
+
+| Comando EN | Comando PT | Descricao | Exemplo |
+|------------|------------|-----------|---------|
+| `/lang <idioma>` | `/idioma <idioma>` | Definir idioma | `/lang pt` |
+
+Valores aceitos: `pt`, `en`, `auto`
+
+A interface (mensagens de erro, labels, prompts) e traduzida automaticamente. O sistema de traducao usa fallback para ingles quando uma chave nao existe no idioma atual.
 
 ---
 
@@ -532,6 +623,7 @@ Local: `%LOCALAPPDATA%/smolerclaw/` (Windows) ou `~/.local/share/smolerclaw/` (L
 | `work-sessions.json` | Sessoes de trabalho |
 | `opportunities.json` | Oportunidades |
 | `news-feeds.json` | Fontes RSS customizadas |
+| `macros.json` | Atalhos rapidos (macros) |
 | `rag/rag-index.json` | Indice de busca semantica |
 | `vault-checksums.json` | Checksums de integridade |
 | `.backup/` | Repositorio git de backup |
@@ -576,4 +668,4 @@ Operacoes **sinalizadas** (requerem confirmacao em `confirm-writes`):
 
 ---
 
-*Gerado para smolerclaw v1.0.5*
+*Atualizado para smolerclaw v1.6.0*

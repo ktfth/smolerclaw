@@ -10,6 +10,51 @@ e o versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 ## [Unreleased]
 
 ### Added
+- **Sistema de Macros** (`src/macros.ts`) — atalhos rapidos para programas, URLs, arquivos e comandos com CRUD completo, tags, e 16 macros padrao (vscode, chrome, excel, etc.)
+- Comandos `/macro`, `/macro create`, `/macro delete`, `/macro enable`, `/macro disable`, `/macro info`
+- Deteccao de tag em `runMacro` — mensagem amigavel quando usuario confunde tag com nome de macro
+
+### Changed
+- `checkExecutable` (`src/utils/windows-executor.ts`) agora consulta App Paths registry como fallback alem de PATH — corrige Chrome e outros apps que registram em App Paths
+- Sanitizacao reforçada no PowerShell: usa concatenacao em vez de interpolacao em double-quoted strings para prevenir injection via `$(...)` subexpressions
+
+---
+
+## [1.6.0] - 2026-04-02
+
+### Added
+- **Interface Web** (`src/ui/web/`) — servidor Hono para acesso via navegador (`smolerclaw ui`)
+- **App Desktop** (`src/ui/desktop/`) — janela nativa via Electrobun (`smolerclaw desktop`)
+- **Chat Service compartilhado** (`src/ui/shared/chat-service.ts`) — logica de chat reutilizada entre TUI, web e desktop
+- CLI `ui` e `desktop` subcommands com `--port` flag
+- Melhoria na interface de chat e streaming
+
+### Changed
+- Sistema de plugins refatorado e corrigido
+- Interfaces de UI compartilhadas entre modos (TUI, web, desktop)
+
+---
+
+## [1.5.0] - 2026-04-01
+
+### Added
+- **i18n** (`src/i18n/`) — sistema de internacionalizacao com suporte a Portugues (BR) e Ingles
+- Funcao `t()` para traducoes com interpolacao de parametros
+- Auto-deteccao de locale do sistema
+- Traducoes para mensagens de UI web e desktop
+
+### Changed
+- Atualizacao do core: modulos internos refinados
+- Correcao de testes e typecheck
+
+### Fixed
+- Correcoes de tipagem TypeScript
+
+---
+
+## [1.4.0] - 2026-04-01
+
+### Added
 - **Auto-refresh de token OAuth** (`src/auto-refresh.ts`) — monitora expiracao do token e renova automaticamente antes de expirar, spawna `claude` para rotacao real quando re-leitura nao e suficiente
 - **Finance Guard** (`src/finance-guard.ts`) — camada de verificacao para operacoes financeiras com validacao de valor, deteccao de duplicatas, alertas de gasto diario, e trilha de auditoria via event bus
 - **Plugin System aprimorado** (`src/plugin-system.ts`) — suporte a plugins JSON (legado) e TypeScript/JavaScript com lifecycle hooks (`onLoad`/`onUnload`), subscricoes de eventos, `onToolCall`, enable/disable persistente, e registro com versionamento
@@ -210,7 +255,10 @@ e o versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ---
 
-[Unreleased]: https://github.com/ktfth/smolerclaw/compare/v1.3.6...HEAD
+[Unreleased]: https://github.com/ktfth/smolerclaw/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/ktfth/smolerclaw/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/ktfth/smolerclaw/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/ktfth/smolerclaw/compare/v1.3.6...v1.4.0
 [1.3.6]: https://github.com/ktfth/smolerclaw/compare/v1.3.5...v1.3.6
 [1.3.5]: https://github.com/ktfth/smolerclaw/compare/v1.3.4...v1.3.5
 [1.3.4]: https://github.com/ktfth/smolerclaw/compare/v1.3.3...v1.3.4

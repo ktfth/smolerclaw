@@ -47,7 +47,6 @@
     "bun",
     "typescript",
     "hono",
-    "electrobun"
   ],
   "license": "MIT",
   "devDependencies": {

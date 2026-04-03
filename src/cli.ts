@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 
-export type UIMode = 'tui' | 'web' | 'desktop'
+export type UIMode = 'tui' | 'web'
 
 export interface CliArgs {
   help: boolean
@@ -76,10 +76,6 @@ export function parseArgs(argv: string[]): CliArgs {
         args.uiMode = 'web'
         break
 
-      case 'desktop':
-        args.uiMode = 'desktop'
-        break
-
       case '--port':
         const port = Number(argv[++i])
         if (!port || port <= 0 || port > 65535) die('--port requires a valid port number (1-65535)')
@@ -127,7 +123,6 @@ Usage:
 Commands:
   (none)               Interactive TUI mode (default)
   ui                   Launch web-based UI (browser)
-  desktop              Launch desktop app (Electrobun)
 
 Options:
   -h, --help           Show this help
@@ -137,12 +132,11 @@ Options:
   --max-tokens <n>     Override max tokens per response
   --no-tools           Disable tool use for this session
   -p, --print          Print response and exit (no TUI)
-  --port <n>           Port for web/desktop UI (default: 3847)
+  --port <n>           Port for web UI (default: 3847)
 
 Examples:
   smolerclaw                        Interactive TUI mode
   smolerclaw ui                     Web UI at http://localhost:3847
-  smolerclaw desktop                Desktop app (Electrobun)
   smolerclaw ui --port 8080         Web UI on custom port
   smolerclaw "explain this error"   Launch TUI with initial prompt
   smolerclaw -p "what is 2+2"      Print answer and exit

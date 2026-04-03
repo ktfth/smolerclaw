@@ -146,8 +146,18 @@ export async function checkExecutable(name: string): Promise<CommandCheckResult>
     return { exists: false, error: `File not found: ${name}` }
   }
 
-  // Use PowerShell Get-Command to find the executable
-  const cmd = `(Get-Command '${name}' -ErrorAction SilentlyContinue).Source`
+  // Use PowerShell Get-Command first, then fall back to App Paths registry.
+  // Many Windows apps (Chrome, etc.) register in App Paths but not in PATH.
+  const safeName = name.replace(/'/g, "''")
+  const cmd = [
+    `$c = Get-Command '${safeName}' -ErrorAction SilentlyContinue`,
+    `if ($c) { $c.Source } else {`,
+    `  $exeName = if ('${safeName}' -like '*.exe') { '${safeName}' } else { '${safeName}.exe' }`,
+    `  $appBase = 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\'`,
+    `  $r = Get-ItemProperty ($appBase + $exeName) -ErrorAction SilentlyContinue`,
+    `  if ($r -and $r.'(default)') { $r.'(default)' }`,
+    `}`,
+  ].join('; ')
 
   try {
     const result = await executePowerShell(cmd, { timeout: 5000 })
@@ -158,7 +168,7 @@ export async function checkExecutable(name: string): Promise<CommandCheckResult>
       return found
     }
 
-    const notFound: CommandCheckResult = { exists: false, error: `'${name}' not found in PATH` }
+    const notFound: CommandCheckResult = { exists: false, error: `'${name}' not found in PATH or App Paths` }
     _executableCache.set(name.toLowerCase(), notFound)
     return notFound
   } catch (err) {

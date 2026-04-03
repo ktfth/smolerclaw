@@ -61,6 +61,21 @@ smolerclaw is a terminal AI assistant that lives on your Windows machine. It can
 - **Auto-refresh** — proactive OAuth token monitoring and renewal before expiration
 - **Finance verification** — amount limits, duplicate detection, daily spending alerts
 - **Plugin system** — install plugins from GitHub with `/plugin install owner/repo`, supports JSON and TypeScript plugins with lifecycle hooks
+- **Macros** — quick program launchers (`/macro vscode`, `/macro chrome`), create custom macros for apps, URLs, files, and commands
+- **Web UI** — browser-based interface via `smolerclaw ui` (Hono server)
+- **Desktop app** — native desktop window via `smolerclaw desktop` (Electrobun)
+- **i18n** — full Portuguese and English interface, auto-detected or set with `/lang`
+- **Scheduler** — recurring jobs via Windows Task Scheduler (`/schedule`, `/jobs`)
+
+## Modes
+
+```bash
+smolerclaw                  # Interactive TUI (default)
+smolerclaw ui               # Web UI at http://localhost:3847
+smolerclaw desktop          # Desktop app (Electrobun)
+smolerclaw ui --port 8080   # Custom port
+smolerclaw -p "question"    # Print mode (non-interactive)
+```
 
 ## TUI Commands
 
@@ -81,6 +96,8 @@ smolerclaw is a terminal AI assistant that lives on your Windows machine. It can
 /auto-refresh  Token refresh status  /plugins       List plugins
 /plugin install owner/repo           /plugin info   Plugin details
 /entrada 500 cat  Record income      /saida 50 cat  Record expense
+/macro vscode  Run macro             /macro list    List all macros
+/schedule      Manage scheduled jobs /jobs          List jobs
 ```
 
 ## Auth
@@ -157,6 +174,21 @@ smolerclaw e um assistente de IA no terminal que vive na sua maquina Windows. El
 - **Auto-refresh** — monitoramento proativo de token OAuth com renovacao automatica antes da expiracao
 - **Verificacao financeira** — limites de valor, deteccao de duplicatas, alertas de gasto diario
 - **Sistema de plugins** — instalar plugins do GitHub com `/plugin install owner/repo`, suporte a plugins JSON e TypeScript com lifecycle hooks
+- **Macros** — atalhos rapidos para programas (`/macro vscode`, `/macro chrome`), crie macros customizados para apps, URLs, arquivos e comandos
+- **Interface Web** — interface no navegador via `smolerclaw ui` (servidor Hono)
+- **App Desktop** — janela nativa via `smolerclaw desktop` (Electrobun)
+- **i18n** — interface em Portugues e Ingles, detectado automaticamente ou via `/idioma`
+- **Agendador** — jobs recorrentes via Agendador de Tarefas do Windows (`/schedule`, `/jobs`)
+
+## Modos
+
+```bash
+smolerclaw                  # TUI interativa (padrao)
+smolerclaw ui               # Interface Web em http://localhost:3847
+smolerclaw desktop          # App Desktop (Electrobun)
+smolerclaw ui --port 8080   # Porta customizada
+smolerclaw -p "pergunta"    # Modo print (nao-interativo)
+```
 
 ## Comandos na TUI
 
@@ -177,6 +209,8 @@ smolerclaw e um assistente de IA no terminal que vive na sua maquina Windows. El
 /auto-refresh  Status auto-refresh   /plugins       Listar plugins
 /plugin install owner/repo           /plugin info   Detalhes plugin
 /entrada 500 cat  Registrar entrada  /saida 50 cat  Registrar saida
+/macro vscode  Executar macro        /macro list    Listar macros
+/schedule      Gerenciar agendamentos /jobs          Listar jobs
 ```
 
 ## Autenticacao

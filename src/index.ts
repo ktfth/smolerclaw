@@ -7,7 +7,7 @@ import { initProvider, type AuthHolder } from './init/providers'
 import { initSession } from './init/session'
 import { runPrintMode } from './modes/print-mode'
 import { runInteractive } from './modes/interactive'
-import { runWebUI, runDesktopUI } from './modes/ui-mode'
+import { runWebUI } from './modes/ui-mode'
 import { initI18n } from './i18n'
 import { initCoreModules } from './init/modules'
 
@@ -55,25 +55,13 @@ async function main(): Promise<void> {
   } = await initSession(config, cliArgs.session, cliArgs.noTools)
 
   // Initialize core data modules (vault, tasks, memory, etc.)
-  // This makes all tools functional in every mode (TUI, web, desktop, print).
+  // This makes all tools functional in every mode (TUI, web, print).
   // TUI-specific modules (pomodoro notifications, etc.) init later in interactive mode.
   initCoreModules(config.dataDir, sessions)
 
   // ── Web UI mode ─────────────────────────────────────────
   if (cliArgs.uiMode === 'web') {
     await runWebUI({
-      provider: claude,
-      systemPrompt,
-      enableTools,
-      sessionManager: sessions,
-      port: cliArgs.port,
-    })
-    return
-  }
-
-  // ── Desktop UI mode ────────────────────────────────────
-  if (cliArgs.uiMode === 'desktop') {
-    await runDesktopUI({
       provider: claude,
       systemPrompt,
       enableTools,

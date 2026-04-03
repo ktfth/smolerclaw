@@ -1,36 +1,6 @@
 import type { TranslationDict } from './types'
 
 export const pt: TranslationDict = {
-  // ─── Desktop Menus ──────────────────────────────────────
-  'desktop.about': 'Sobre o smolerclaw',
-  'desktop.settings': 'Configurações...',
-  'desktop.quit': 'Sair',
-  'desktop.chat': 'Conversa',
-  'desktop.new_chat': 'Nova Conversa',
-  'desktop.clear_chat': 'Limpar Conversa',
-  'desktop.edit': 'Editar',
-  'desktop.undo': 'Desfazer',
-  'desktop.redo': 'Refazer',
-  'desktop.cut': 'Recortar',
-  'desktop.copy': 'Copiar',
-  'desktop.paste': 'Colar',
-  'desktop.select_all': 'Selecionar Tudo',
-  'desktop.view': 'Visualizar',
-  'desktop.toggle_theme': 'Alternar Tema',
-  'desktop.actual_size': 'Tamanho Real',
-  'desktop.zoom_in': 'Aumentar Zoom',
-  'desktop.zoom_out': 'Diminuir Zoom',
-  'desktop.dev_tools': 'Ferramentas do Desenvolvedor',
-  'desktop.window': 'Janela',
-  'desktop.minimize': 'Minimizar',
-  'desktop.zoom': 'Zoom',
-  'desktop.close': 'Fechar',
-  'desktop.help': 'Ajuda',
-  'desktop.documentation': 'Documentação',
-  'desktop.report_issue': 'Reportar Problema',
-  'desktop.not_available': 'Electrobun não disponível.',
-  'desktop.opening_browser': 'Abrindo no navegador padrão: {{url}}',
-
   // ─── Web UI ─────────────────────────────────────────────
   'web.title': 'smolerclaw',
   'web.welcome_title': 'Bem-vindo ao smolerclaw',
@@ -65,7 +35,6 @@ export const pt: TranslationDict = {
 
   // ─── UI Mode Console ───────────────────────────────────
   'ui.starting_web': 'Iniciando interface web do smolerclaw...',
-  'ui.starting_desktop': 'Iniciando app desktop do smolerclaw...',
   'ui.running_at': 'App rodando em: {{url}}',
 
   // ─── Session ────────────────────────────────────────────

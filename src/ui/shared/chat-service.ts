@@ -1,6 +1,6 @@
 /**
  * Shared Chat Service
- * Wraps the Claude provider for use in both desktop and web UIs.
+ * Wraps the Claude provider for use in the web UI.
  * Delegates session persistence to SessionManager (shared with CLI).
  */
 

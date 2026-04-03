@@ -27,7 +27,7 @@ let _coreInitialized = false
 
 /**
  * Initialize core data modules that do NOT depend on TUI.
- * Safe to call from any mode (TUI, web, desktop).
+ * Safe to call from any mode (TUI, web).
  * Idempotent — only runs once.
  */
 export function initCoreModules(
