@@ -48,7 +48,7 @@ describe('i18n', () => {
 
     it('interpolates parameters', () => {
       initI18n('pt')
-      expect(t('desktop.opening_browser', { url: 'http://test' })).toBe('Abrindo no navegador padrão: http://test')
+      expect(t('ui.running_at', { url: 'http://test' })).toBe('App rodando em: http://test')
     })
 
     it('interpolates multiple parameters', () => {
@@ -72,7 +72,7 @@ describe('i18n', () => {
       initI18n('pt')
       const translations = getTranslations()
       expect(translations['web.welcome_title']).toBe('Bem-vindo ao smolerclaw')
-      expect(translations['desktop.quit']).toBe('Sair')
+      expect(translations['ui.starting_web']).toBe('Iniciando interface web do smolerclaw...')
     })
   })
 

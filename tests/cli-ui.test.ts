@@ -21,22 +21,25 @@ describe('CLI UI mode parsing', () => {
     })
   })
 
-  describe('desktop command', () => {
-    it('parses "desktop" command', () => {
+  describe('desktop command (removed)', () => {
+    it('treats "desktop" as prompt text (mode was removed)', () => {
       const args = parseArgs(['desktop'])
-      expect(args.uiMode).toBe('desktop')
+      expect(args.uiMode).toBe('tui')
+      expect(args.prompt).toBe('desktop')
     })
 
-    it('parses "desktop" with port', () => {
+    it('treats "desktop" with port as prompt + port', () => {
       const args = parseArgs(['desktop', '--port', '9000'])
-      expect(args.uiMode).toBe('desktop')
+      expect(args.uiMode).toBe('tui')
       expect(args.port).toBe(9000)
+      expect(args.prompt).toBe('desktop')
     })
 
-    it('parses "desktop" with no-tools', () => {
+    it('treats "desktop" with no-tools as prompt + flag', () => {
       const args = parseArgs(['desktop', '--no-tools'])
-      expect(args.uiMode).toBe('desktop')
+      expect(args.uiMode).toBe('tui')
       expect(args.noTools).toBe(true)
+      expect(args.prompt).toBe('desktop')
     })
   })
 
