@@ -13,6 +13,10 @@ import { initInvestigations } from '../investigate'
 import { initMemory } from '../memory'
 import { initProjects } from '../projects'
 import { initRecommendations } from '../recommendations'
+import { initNeighborhoods } from '../neighborhoods'
+import { startMapServer } from '../map-server'
+import { initEnergy } from '../energy'
+import { initAttention } from '../attention'
 import { initPitwall } from '../pitwall'
 import { initDecisionEngine } from '../services/decision-engine'
 import { initDocsEngine } from '../services/docs-engine'
@@ -55,6 +59,10 @@ export function initCoreModules(
   initPitwall(dataDir)
   initDecisionEngine(dataDir)
   initRecommendations(dataDir)
+  initNeighborhoods(dataDir)
+  initEnergy(dataDir)
+  initAttention(dataDir)
+  startMapServer()
   initTasks(dataDir, () => {}) // no-op notifier for headless modes; TUI overrides later
 }
 

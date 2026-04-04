@@ -42,6 +42,9 @@ import { getVaultStatus, formatVaultStatus, initShadowBackup, performBackup, syn
 import { executePowerShellScript, analyzeScreenContext, readClipboardContent } from '../windows-agent'
 import { openApp, openFile, openUrl, getRunningApps, getSystemInfo, getDateTimeInfo, getOutlookEvents, getKnownApps } from '../windows'
 import { runSelfReflection } from '../services/docs-engine'
+import { getEnergyState, formatEnergyState, getProfile, type EnergyLevel } from '../energy'
+import { getAttentionStats, formatAttentionStatus, getFocusMode } from '../attention'
+import { listNeighborhoods } from '../neighborhoods'
 import {
   setActiveProject, getActiveProject, autoDetectProject,
   listProjects, getProject, startSession, endSession, getOpenSession,
@@ -422,6 +425,7 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
           '  /delegations /delegacoes Listar delegacoes',
           '  /followups              Follow-ups pendentes',
           '  /dashboard /painel      Painel geral',
+          '  /verificar /status      Energia, foco e Lokaliza',
           '',
           'Monitor:',
           '  /monitor /vigiar     Monitorar processo (ex: /monitor nginx)',
@@ -1922,6 +1926,107 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
     case 'followups': {
       const followUps = getPendingFollowUps()
       ctx.tui.showSystem(formatFollowUps(followUps))
+      break
+    }
+
+    case 'verificar':
+    case 'status': {
+      const statusPanels: DashboardPanel[] = []
+
+      // Energy panel
+      const energy = getEnergyState()
+      const levelIcons: Record<EnergyLevel, string> = { alto: '🟢', medio: '🟡', baixo: '🟠', critico: '🔴' }
+      const phaseLabels: Record<string, string> = {
+        aquecimento: 'Aquecimento', pico: 'Pico', sustentado: 'Sustentado',
+        declinio: 'Declinio', esgotado: 'Esgotado',
+      }
+      statusPanels.push({
+        id: 'energy',
+        title: `${levelIcons[energy.level]} Energia: ${energy.score}/100`,
+        content: [
+          `Fase: ${phaseLabels[energy.phase] ?? energy.phase}`,
+          `Sessao: ${energy.sessionDurationMin} min`,
+          `Streak: ${energy.currentStreak} min sem pausa`,
+          `Pausas: ${energy.breaksTaken}`,
+          `Interacoes: ${energy.interactionCount}`,
+          '',
+          energy.suggestion,
+        ],
+      })
+
+      // Focus / Attention panel
+      const attention = getAttentionStats()
+      const focusLabels: Record<string, string> = {
+        desligado: 'Desligado', leve: 'Leve', profundo: 'Profundo', nao_perturbe: 'Nao Perturbe',
+      }
+      statusPanels.push({
+        id: 'attention',
+        title: `Foco: ${focusLabels[attention.focusMode] ?? attention.focusMode}`,
+        content: [
+          `Pendentes: ${attention.pending}`,
+          `Bloqueadas hoje: ${attention.blockedToday}`,
+          `Total hoje: ${attention.totalToday}`,
+        ],
+      })
+
+      // Optimal hours panel
+      const profile = getProfile()
+      if (profile.totalSessions >= 3) {
+        statusPanels.push({
+          id: 'profile',
+          title: 'Perfil de Energia',
+          content: [
+            `Melhores horarios: ${profile.bestHours.map((h) => `${h}h`).join(', ')}`,
+            `Sessao media: ${profile.avgSessionMin} min`,
+            `Intervalo entre pausas: ${profile.avgBreakInterval} min`,
+            `Total sessoes: ${profile.totalSessions}`,
+          ],
+        })
+      }
+
+      // Lokaliza panel
+      const hoods = listNeighborhoods()
+      if (hoods.length > 0) {
+        const totalPois = hoods.reduce((acc, h) => acc + h.pois.length, 0)
+        const totalLayers = hoods.reduce((acc, h) => acc + h.layers.length, 0)
+        statusPanels.push({
+          id: 'lokaliza',
+          title: `Lokaliza (${hoods.length} bairros)`,
+          content: [
+            `POIs: ${totalPois} | Camadas: ${totalLayers}`,
+            ...hoods.slice(0, 5).map((h) => `• ${h.name} — ${h.city}/${h.state}`),
+            ...(hoods.length > 5 ? [`... +${hoods.length - 5} mais`] : []),
+          ],
+        })
+      }
+
+      // Tasks summary panel
+      const statusTasks = listTasks()
+      const doneTasks = listTasks(true).filter((t) => t.done)
+      statusPanels.push({
+        id: 'tasks-summary',
+        title: `Tarefas`,
+        content: [
+          `Pendentes: ${statusTasks.length}`,
+          `Concluidas hoje: ${doneTasks.filter((t) => {
+            const d = new Date(t.createdAt)
+            return d.toDateString() === new Date().toDateString()
+          }).length}`,
+        ],
+      })
+
+      const statusLayout: DashboardLayout = {
+        panels: statusPanels,
+        columns: 2,
+        gap: 1,
+      }
+      ctx.tui.enterDashboardMode(statusLayout)
+
+      process.stdin.once('data', () => {
+        if (ctx.tui.getViewMode() === 'dashboard') {
+          ctx.tui.enterChatMode()
+        }
+      })
       break
     }
 

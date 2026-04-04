@@ -19,6 +19,8 @@ export interface Person {
   role?: string           // "dev frontend", "esposa", "filho", "fornecedor"
   contact?: string        // phone, email, etc.
   notes?: string          // free-text notes
+  neighborhood?: string   // linked neighborhood name or ID (Lokaliza)
+  location?: string       // free-text location (city, region)
   createdAt: string
 }
 
@@ -89,13 +91,15 @@ export function initPeople(dataDir: string): void {
 
 // ─── People CRUD ────────────────────────────────────────────
 
-export function addPerson(name: string, group: PersonGroup, role?: string, contact?: string): Person {
+export function addPerson(name: string, group: PersonGroup, role?: string, contact?: string, neighborhood?: string, location?: string): Person {
   const person: Person = {
     id: genId(),
     name: name.trim(),
     group,
     role: role?.trim(),
     contact: contact?.trim(),
+    neighborhood: neighborhood?.trim(),
+    location: location?.trim(),
     createdAt: new Date().toISOString(),
   }
   _data = { ..._data, people: [..._data.people, person] }
@@ -103,7 +107,7 @@ export function addPerson(name: string, group: PersonGroup, role?: string, conta
   return person
 }
 
-export function updatePerson(idOrName: string, updates: Partial<Pick<Person, 'name' | 'group' | 'role' | 'contact' | 'notes'>>): Person | null {
+export function updatePerson(idOrName: string, updates: Partial<Pick<Person, 'name' | 'group' | 'role' | 'contact' | 'notes' | 'neighborhood' | 'location'>>): Person | null {
   const person = findPerson(idOrName)
   if (!person) return null
 
@@ -329,6 +333,8 @@ export function formatPersonDetail(person: Person): string {
   lines.push(`Grupo: ${GROUP_LABELS[person.group]}`)
   if (person.role) lines.push(`Papel: ${person.role}`)
   if (person.contact) lines.push(`Contato: ${person.contact}`)
+  if (person.neighborhood) lines.push(`Bairro: ${person.neighborhood}`)
+  if (person.location) lines.push(`Local: ${person.location}`)
   if (person.notes) lines.push(`Notas: ${person.notes}`)
 
   // Recent interactions

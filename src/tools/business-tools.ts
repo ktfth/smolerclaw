@@ -6,7 +6,7 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { resolve, sep } from 'node:path'
 import { writeFileSync } from 'node:fs'
-import { fetchNews, type NewsCategory } from '../news'
+import { fetchNews, fetchRegionalNews, type NewsCategory } from '../news'
 import { addTask, completeTask, listTasks, formatTaskList, parseTime } from '../tasks'
 import { saveMemo, searchMemos, listMemos, formatMemoList } from '../memos'
 import { openEmailDraft, formatDraftPreview, type EmailDraft } from '../email'
@@ -80,6 +80,16 @@ import {
 import {
   openApp, openFile, openUrl, getRunningApps, getSystemInfo, getOutlookEvents,
 } from '../windows'
+import { getMapUrl, isMapServerRunning, startMapServer } from '../map-server'
+import {
+  recordInteraction, recordBreak, getEnergyState, endSession as endEnergySession,
+  formatEnergyState, formatEnergyProfile,
+} from '../energy'
+import {
+  setFocusMode, getFocusMode, pushNotification, dismissAll,
+  getAttentionStats, formatAttentionStatus,
+  type FocusMode,
+} from '../attention'
 import {
   executePowerShellScript, analyzeScriptSafety, analyzeScreenContext,
   readClipboardContent, sendNotification, type ScriptResult,
@@ -90,6 +100,13 @@ import {
   formatContentList, formatRecommendations, formatStats,
   type ContentType, type Mood,
 } from '../recommendations'
+import {
+  addNeighborhood, getNeighborhood, listNeighborhoods, removeNeighborhood,
+  searchNeighborhoods, addPOI, removePOI, addLayer, addLayerPoints,
+  toggleLayerVisibility, removeLayer,
+  formatNeighborhoodList, formatNeighborhoodDetail,
+  type LayerType,
+} from '../neighborhoods'
 import { parseFuzzyDate } from './helpers'
 
 // ─── Task/Reminder Tools (cross-platform) ──────────────────
@@ -233,6 +250,8 @@ export const PEOPLE_TOOLS: Anthropic.Tool[] = [
         group: { type: 'string', enum: ['equipe', 'familia', 'contato'], description: 'Group: equipe, familia, or contato' },
         role: { type: 'string', description: 'Role or relationship (e.g. "dev frontend", "esposa", "fornecedor"). Optional.' },
         contact: { type: 'string', description: 'Phone, email, or other contact info. Optional.' },
+        neighborhood: { type: 'string', description: 'Linked neighborhood name or ID from Lokaliza. Optional.' },
+        location: { type: 'string', description: 'Free-text location (city, region). Optional.' },
       },
       required: ['name', 'group'],
     },
@@ -1285,6 +1304,316 @@ export const RECOMMENDATION_TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+// ─── Neighborhood / Geo Tools ───────────────────────────────
+
+export const NEIGHBORHOOD_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'add_neighborhood',
+    description:
+      'Register a neighborhood for mapping. Auto-fetches coordinates and boundary polygon ' +
+      'from OpenStreetMap. Opens it on the /map web view.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string', description: 'Neighborhood name (e.g. "Copacabana")' },
+        city: { type: 'string', description: 'City (e.g. "Rio de Janeiro")' },
+        state: { type: 'string', description: 'State (e.g. "RJ")' },
+        country: { type: 'string', description: 'Country. Default: Brazil.' },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Tags for categorization. Optional.',
+        },
+      },
+      required: ['name', 'city', 'state'],
+    },
+  },
+  {
+    name: 'get_neighborhood',
+    description: 'Get detailed info about a registered neighborhood by ID or name.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        reference: { type: 'string', description: 'Neighborhood ID or name' },
+      },
+      required: ['reference'],
+    },
+  },
+  {
+    name: 'list_neighborhoods',
+    description: 'List all registered neighborhoods.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'remove_neighborhood',
+    description: 'Remove a registered neighborhood by ID or name.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        reference: { type: 'string', description: 'Neighborhood ID or name' },
+      },
+      required: ['reference'],
+    },
+  },
+  {
+    name: 'search_neighborhoods',
+    description: 'Search neighborhoods by name, city, tags, or POI names.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string', description: 'Search query' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'add_poi',
+    description:
+      'Add a Point of Interest (commerce, landmark, event) to a neighborhood.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        neighborhood: { type: 'string', description: 'Neighborhood ID or name' },
+        name: { type: 'string', description: 'POI name' },
+        category: { type: 'string', description: 'Category (e.g. "restaurante", "escola", "hospital")' },
+        lat: { type: 'number', description: 'Latitude' },
+        lng: { type: 'number', description: 'Longitude' },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Tags. Optional.',
+        },
+      },
+      required: ['neighborhood', 'name', 'category', 'lat', 'lng'],
+    },
+  },
+  {
+    name: 'remove_poi',
+    description: 'Remove a POI from a neighborhood.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        neighborhood: { type: 'string', description: 'Neighborhood ID or name' },
+        poi_id: { type: 'string', description: 'POI ID' },
+      },
+      required: ['neighborhood', 'poi_id'],
+    },
+  },
+  {
+    name: 'add_map_layer',
+    description:
+      'Add a data visualization layer to a neighborhood (heatmap, hexbin, scatter, arc, polygon, icon). ' +
+      'Layers are rendered on the Lokaliza map view.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        neighborhood: { type: 'string', description: 'Neighborhood ID or name' },
+        name: { type: 'string', description: 'Layer name (e.g. "Densidade Populacional", "Crimes 2024")' },
+        type: {
+          type: 'string',
+          enum: ['heatmap', 'hexbin', 'scatter', 'arc', 'polygon', 'icon'],
+          description: 'Visualization type',
+        },
+        color: { type: 'string', description: 'Hex color. Default: #00ffcc' },
+        points: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              lat: { type: 'number' },
+              lng: { type: 'number' },
+              value: { type: 'number', description: 'Numeric value for heatmap/hexbin intensity' },
+              label: { type: 'string', description: 'Optional label' },
+            },
+            required: ['lat', 'lng'],
+          },
+          description: 'Data points for the layer. Optional — can add later with add_layer_points.',
+        },
+      },
+      required: ['neighborhood', 'name', 'type'],
+    },
+  },
+  {
+    name: 'add_layer_points',
+    description: 'Add data points to an existing map layer.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        neighborhood: { type: 'string', description: 'Neighborhood ID or name' },
+        layer_id: { type: 'string', description: 'Layer ID' },
+        points: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              lat: { type: 'number' },
+              lng: { type: 'number' },
+              value: { type: 'number' },
+              label: { type: 'string' },
+            },
+            required: ['lat', 'lng'],
+          },
+          description: 'Data points to add',
+        },
+      },
+      required: ['neighborhood', 'layer_id', 'points'],
+    },
+  },
+  {
+    name: 'toggle_layer',
+    description: 'Toggle visibility of a data layer on the map.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        neighborhood: { type: 'string', description: 'Neighborhood ID or name' },
+        layer_id: { type: 'string', description: 'Layer ID' },
+      },
+      required: ['neighborhood', 'layer_id'],
+    },
+  },
+  {
+    name: 'remove_layer',
+    description: 'Remove a data layer from a neighborhood.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        neighborhood: { type: 'string', description: 'Neighborhood ID or name' },
+        layer_id: { type: 'string', description: 'Layer ID' },
+      },
+      required: ['neighborhood', 'layer_id'],
+    },
+  },
+  {
+    name: 'open_map',
+    description:
+      'Open the Lokaliza map in the default browser. ' +
+      'Automatically resolves the correct URL — no port needed.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        neighborhood: { type: 'string', description: 'Optional: fly to this neighborhood on open.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'analyze_neighborhood',
+    description:
+      'Run autonomous multi-step analysis on a neighborhood. ' +
+      'Auto-enriches with POIs if not done, generates category breakdown, ' +
+      'creates density layers, and produces a structured intelligence report. ' +
+      'The report is auto-saved as a memo.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        neighborhood: { type: 'string', description: 'Neighborhood ID or name' },
+        focus: {
+          type: 'string',
+          enum: ['infraestrutura', 'seguranca', 'educacao', 'saude', 'comercio', 'transporte', 'geral'],
+          description: 'Analysis focus area. Default: geral (all areas).',
+        },
+      },
+      required: ['neighborhood'],
+    },
+  },
+  {
+    name: 'get_regional_news',
+    description:
+      'Fetch news filtered by the state/region of registered neighborhoods. ' +
+      'Automatically uses regional feeds based on Lokaliza data.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        state: { type: 'string', description: 'State code (e.g. "SP", "RJ"). If omitted, uses all registered neighborhoods.' },
+      },
+      required: [],
+    },
+  },
+]
+
+// ─── Energy & Attention Tools ───────────────────────────────
+
+export const ENERGY_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'check_energy',
+    description:
+      'Check current energy level, cognitive load score, work phase, and get a smart suggestion. ' +
+      'Call this proactively when the user seems tired, before complex tasks, or periodically.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'take_break',
+    description:
+      'Record that the user is taking a break. Resets the work streak timer. ' +
+      'Call when the user says they are pausing, going for coffee, stretching, etc.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'energy_profile',
+    description:
+      'Show the user\'s learned energy profile — best hours, avg session duration, ' +
+      'weekly energy patterns. Based on historical data.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'set_focus',
+    description:
+      'Set focus/attention mode to filter notifications. Modes: ' +
+      'desligado (all notifications), leve (no noise), profundo (only urgent+important), ' +
+      'nao_perturbe (only urgent). Optional duration in minutes.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        mode: {
+          type: 'string',
+          enum: ['desligado', 'leve', 'profundo', 'nao_perturbe'],
+          description: 'Focus mode level',
+        },
+        duration_min: {
+          type: 'number',
+          description: 'Auto-expire after N minutes. Optional — permanent if omitted.',
+        },
+      },
+      required: ['mode'],
+    },
+  },
+  {
+    name: 'attention_status',
+    description:
+      'Show current attention/notification status — focus mode, pending notifications, blocked count.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'dismiss_notifications',
+    description: 'Dismiss all pending notifications.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+]
+
 // ─── Business Tool Execution ─────────────────────────────────
 
 export async function executeBusinessTool(
@@ -1410,8 +1739,9 @@ export async function executeBusinessTool(
       const group = input.group as PersonGroup
       const validGroups: PersonGroup[] = ['equipe', 'familia', 'contato']
       if (!validGroups.includes(group)) return 'Error: group must be equipe, familia, or contato.'
-      const person = addPerson(name, group, input.role as string, input.contact as string)
-      return `Pessoa adicionada: ${person.name} (${group}) [${person.id}]`
+      const person = addPerson(name, group, input.role as string, input.contact as string, input.neighborhood as string, input.location as string)
+      const loc = person.neighborhood ? ` — Bairro: ${person.neighborhood}` : person.location ? ` — ${person.location}` : ''
+      return `Pessoa adicionada: ${person.name} (${group})${loc} [${person.id}]`
     }
     case 'find_person_info': {
       const ref = input.name_or_id as string
@@ -2135,6 +2465,249 @@ export async function executeBusinessTool(
     case 'content_stats': {
       return formatStats(getStats())
     }
+
+    // ─── Neighborhood tools ──────────────────────────────────
+    case 'add_neighborhood': {
+      const name = input.name as string
+      const city = input.city as string
+      const state = input.state as string
+      if (!name?.trim() || !city?.trim() || !state?.trim()) {
+        return 'Error: name, city, and state are required.'
+      }
+      const country = (input.country as string) || 'Brazil'
+      const tags = (input.tags as string[]) || []
+      const hood = await addNeighborhood(name, city, state, country, tags)
+      const hasGeo = hood.center.lat !== 0
+      const hasBoundary = !!hood.boundary
+      const poiCount = hood.pois.length
+      const layerCount = hood.layers.length
+      const breakdown = hood.metadata?.poiBreakdown as Record<string, number> | undefined
+      const breakdownStr = breakdown
+        ? Object.entries(breakdown).map(([k, v]) => `${k}: ${v}`).join(', ')
+        : ''
+      return [
+        `Bairro registrado: "${hood.name}" — ${hood.city}/${hood.state}  [${hood.id}]`,
+        hasGeo ? `📍 ${hood.center.lat.toFixed(6)}, ${hood.center.lng.toFixed(6)}` : '⚠️ Coordenadas nao encontradas',
+        hasBoundary ? '📐 Limite poligonal obtido' : '📐 Sem limite poligonal',
+        poiCount > 0 ? `📊 Auto-enriquecido: ${poiCount} POIs encontrados (${breakdownStr})` : '',
+        layerCount > 0 ? `🗂️ ${layerCount} camada(s) de dados criada(s) automaticamente` : '',
+        `\n🗺️ Abra ${getMapUrl()} para visualizar no mapa.`,
+      ].filter(Boolean).join('\n')
+    }
+    case 'get_neighborhood': {
+      const ref = input.reference as string
+      if (!ref?.trim()) return 'Error: reference is required.'
+      const hood = getNeighborhood(ref)
+      if (!hood) return `Bairro nao encontrado: "${ref}"`
+      return formatNeighborhoodDetail(hood)
+    }
+    case 'list_neighborhoods': {
+      const hoods = listNeighborhoods()
+      return formatNeighborhoodList(hoods)
+    }
+    case 'remove_neighborhood': {
+      const ref = input.reference as string
+      if (!ref?.trim()) return 'Error: reference is required.'
+      return removeNeighborhood(ref) ? `Bairro removido: "${ref}"` : `Bairro nao encontrado: "${ref}"`
+    }
+    case 'search_neighborhoods': {
+      const q = input.query as string
+      if (!q?.trim()) return 'Error: query is required.'
+      const results = searchNeighborhoods(q)
+      if (!results.length) return `Nenhum bairro encontrado para "${q}"`
+      return results.map((r) => `• ${r.neighborhood.name} — ${r.neighborhood.city}/${r.neighborhood.state} (score: ${r.score})  [${r.neighborhood.id}]`).join('\n')
+    }
+    case 'add_poi': {
+      const hoodRef = input.neighborhood as string
+      const name = input.name as string
+      const category = input.category as string
+      const lat = input.lat as number
+      const lng = input.lng as number
+      if (!hoodRef || !name || !category || lat == null || lng == null) {
+        return 'Error: neighborhood, name, category, lat, lng are required.'
+      }
+      const tags = (input.tags as string[]) || []
+      const poi = addPOI(hoodRef, name, category, lat, lng, tags)
+      if (!poi) return `Bairro nao encontrado: "${hoodRef}"`
+      return `POI adicionado: "${poi.name}" (${poi.category}) at ${lat.toFixed(4)}, ${lng.toFixed(4)}  [${poi.id}]`
+    }
+    case 'remove_poi': {
+      const hoodRef = input.neighborhood as string
+      const poiId = input.poi_id as string
+      if (!hoodRef || !poiId) return 'Error: neighborhood and poi_id are required.'
+      return removePOI(hoodRef, poiId) ? `POI removido: ${poiId}` : 'POI nao encontrado.'
+    }
+    case 'add_map_layer': {
+      const hoodRef = input.neighborhood as string
+      const name = input.name as string
+      const type = input.type as LayerType
+      if (!hoodRef || !name || !type) return 'Error: neighborhood, name, type are required.'
+      const color = (input.color as string) || '#00ffcc'
+      const points = (input.points as Array<{ lat: number; lng: number; value?: number; label?: string }>) || []
+      const layer = addLayer(hoodRef, name, type, color, points)
+      if (!layer) return `Bairro nao encontrado: "${hoodRef}"`
+      return `Layer adicionada: "${layer.name}" (${layer.type}) — ${layer.points.length} pontos  [${layer.id}]`
+    }
+    case 'add_layer_points': {
+      const hoodRef = input.neighborhood as string
+      const layerId = input.layer_id as string
+      const points = input.points as Array<{ lat: number; lng: number; value?: number; label?: string }>
+      if (!hoodRef || !layerId || !points?.length) return 'Error: neighborhood, layer_id, points are required.'
+      return addLayerPoints(hoodRef, layerId, points) ? `${points.length} pontos adicionados.` : 'Layer ou bairro nao encontrado.'
+    }
+    case 'toggle_layer': {
+      const hoodRef = input.neighborhood as string
+      const layerId = input.layer_id as string
+      if (!hoodRef || !layerId) return 'Error: neighborhood and layer_id are required.'
+      return toggleLayerVisibility(hoodRef, layerId) ? 'Visibilidade alternada.' : 'Layer ou bairro nao encontrado.'
+    }
+    case 'remove_layer': {
+      const hoodRef = input.neighborhood as string
+      const layerId = input.layer_id as string
+      if (!hoodRef || !layerId) return 'Error: neighborhood and layer_id are required.'
+      return removeLayer(hoodRef, layerId) ? `Layer removida: ${layerId}` : 'Layer ou bairro nao encontrado.'
+    }
+    case 'open_map': {
+      if (!isMapServerRunning()) startMapServer()
+      const mapUrl = getMapUrl()
+      const hoodRef = input.neighborhood as string
+      const finalUrl = hoodRef ? `${mapUrl}#${encodeURIComponent(hoodRef)}` : mapUrl
+      await openUrl(finalUrl)
+      return `Mapa aberto: ${finalUrl}`
+    }
+    case 'analyze_neighborhood': {
+      const hoodRef = input.neighborhood as string
+      if (!hoodRef?.trim()) return 'Error: neighborhood is required.'
+      const hood = getNeighborhood(hoodRef)
+      if (!hood) return `Bairro nao encontrado: "${hoodRef}"`
+      const focus = (input.focus as string) || 'geral'
+
+      // Category breakdown
+      const categories = new Map<string, number>()
+      for (const poi of hood.pois) {
+        categories.set(poi.category, (categories.get(poi.category) ?? 0) + 1)
+      }
+
+      // Focus filter
+      const focusCategories: Record<string, string[]> = {
+        infraestrutura: ['escola', 'hospital', 'posto de saude', 'delegacia', 'bombeiros', 'banco'],
+        seguranca: ['delegacia', 'bombeiros'],
+        educacao: ['escola'],
+        saude: ['hospital', 'posto de saude', 'farmacia'],
+        comercio: ['supermercado', 'banco'],
+        transporte: ['estacao de trem', 'ponto de onibus'],
+        geral: [],
+      }
+      const focusFilter = focusCategories[focus] ?? []
+
+      const filteredPois = focusFilter.length > 0
+        ? hood.pois.filter((p) => focusFilter.includes(p.category))
+        : hood.pois
+
+      // Generate report
+      const lines: string[] = [
+        `# Relatorio de Inteligencia — ${hood.name}`,
+        `📍 ${hood.city}/${hood.state} | Foco: ${focus}`,
+        `📅 ${new Date().toLocaleDateString('pt-BR')}`,
+        '',
+        '## Resumo',
+        `- Total de POIs: ${hood.pois.length}`,
+        `- Camadas de dados: ${hood.layers.length}`,
+        `- Limite poligonal: ${hood.boundary ? 'Disponivel' : 'Indisponivel'}`,
+        hood.tags.length ? `- Tags: ${hood.tags.join(', ')}` : '',
+        '',
+        '## Distribuicao por Categoria',
+        ...[...categories.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .map(([cat, count]) => `  • ${cat}: ${count}`),
+        '',
+      ]
+
+      // Focus-specific analysis
+      if (focus !== 'geral') {
+        lines.push(`## Analise: ${focus.charAt(0).toUpperCase() + focus.slice(1)}`)
+        if (filteredPois.length === 0) {
+          lines.push(`  Nenhum POI encontrado para a categoria "${focus}".`)
+        } else {
+          lines.push(`  ${filteredPois.length} ponto(s) relevante(s):`)
+          for (const p of filteredPois.slice(0, 20)) {
+            const addr = (p.metadata?.['addr:street'] as string) || ''
+            lines.push(`  • ${p.name}${addr ? ` — ${addr}` : ''} (${p.position.lat.toFixed(4)}, ${p.position.lng.toFixed(4)})`)
+          }
+        }
+        lines.push('')
+      }
+
+      // Infrastructure scoring
+      const infraScore = Math.min(10, Math.round(
+        (categories.get('escola') ?? 0) * 1.5 +
+        (categories.get('hospital') ?? 0) * 2 +
+        (categories.get('posto de saude') ?? 0) * 1.5 +
+        (categories.get('farmacia') ?? 0) * 0.5 +
+        (categories.get('delegacia') ?? 0) * 1 +
+        (categories.get('estacao de trem') ?? 0) * 2 +
+        (categories.get('ponto de onibus') ?? 0) * 0.3 +
+        (categories.get('supermercado') ?? 0) * 0.5 +
+        (categories.get('banco') ?? 0) * 0.5 +
+        (categories.get('parque') ?? 0) * 0.5,
+      ))
+
+      lines.push('## Indice de Infraestrutura')
+      lines.push(`  Score: ${infraScore}/10`)
+      lines.push(`  ${infraScore >= 7 ? 'Boa cobertura' : infraScore >= 4 ? 'Cobertura moderada' : 'Cobertura insuficiente'}`)
+      lines.push('')
+
+      // Auto-save as memo
+      const report = lines.filter(Boolean).join('\n')
+      saveMemo(report, ['lokaliza', hood.name.toLowerCase(), focus, 'analise'])
+
+      return report + `\n\n📝 Relatorio salvo como memo (tags: lokaliza, ${hood.name.toLowerCase()}, ${focus}, analise)`
+    }
+    case 'get_regional_news': {
+      const state = input.state as string
+      if (state) {
+        return await fetchRegionalNews(state)
+      }
+      // Fetch for all registered neighborhood states
+      const hoods = listNeighborhoods()
+      if (!hoods.length) return 'Nenhum bairro cadastrado. Adicione bairros primeiro.'
+      const states = [...new Set(hoods.map((h) => h.state))]
+      const results: string[] = []
+      for (const s of states) {
+        const news = await fetchRegionalNews(s, 2)
+        results.push(news)
+      }
+      return results.join('\n\n')
+    }
+
+    // ─── Energy & Attention tools ────────────────────────────
+    case 'check_energy': {
+      recordInteraction()
+      const state = getEnergyState()
+      return formatEnergyState(state)
+    }
+    case 'take_break': {
+      recordBreak()
+      return 'Pausa registrada! Aproveite para descansar. O streak foi reiniciado.'
+    }
+    case 'energy_profile': {
+      return formatEnergyProfile()
+    }
+    case 'set_focus': {
+      const mode = input.mode as FocusMode
+      const validModes: FocusMode[] = ['desligado', 'leve', 'profundo', 'nao_perturbe']
+      if (!validModes.includes(mode)) return 'Error: modo invalido.'
+      const durationMin = input.duration_min as number | undefined
+      return setFocusMode(mode, durationMin)
+    }
+    case 'attention_status': {
+      return formatAttentionStatus()
+    }
+    case 'dismiss_notifications': {
+      const count = dismissAll()
+      return count > 0 ? `${count} notificacao(oes) dispensada(s).` : 'Nenhuma notificacao pendente.'
+    }
+
     default:
       return null
   }

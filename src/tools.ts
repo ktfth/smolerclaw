@@ -33,4 +33,6 @@ export {
   VAULT_TOOLS,
   MEMORY_TOOLS,
   AGENCY_TOOLS,
+  NEIGHBORHOOD_TOOLS,
+  ENERGY_TOOLS,
 } from './tools/index'

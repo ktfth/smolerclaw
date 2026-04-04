@@ -205,6 +205,79 @@ export function listNewsFeeds(): string {
   return lines.join('\n')
 }
 
+// ─── Regional Feeds (Lokaliza integration) ─────────────────
+
+/** Regional RSS feeds indexed by state/city */
+const REGIONAL_FEEDS: Record<string, Array<{ name: string; url: string }>> = {
+  'SP': [
+    { name: 'G1 Sao Paulo', url: 'https://g1.globo.com/rss/g1/sao-paulo/' },
+    { name: 'Folha SP', url: 'https://feeds.folha.uol.com.br/folha/cotidiano/rss091.xml' },
+  ],
+  'RJ': [
+    { name: 'G1 Rio', url: 'https://g1.globo.com/rss/g1/rio-de-janeiro/' },
+  ],
+  'MG': [
+    { name: 'G1 Minas', url: 'https://g1.globo.com/rss/g1/minas-gerais/' },
+  ],
+  'BA': [
+    { name: 'G1 Bahia', url: 'https://g1.globo.com/rss/g1/bahia/' },
+  ],
+  'PR': [
+    { name: 'G1 Parana', url: 'https://g1.globo.com/rss/g1/parana/' },
+  ],
+  'RS': [
+    { name: 'G1 RS', url: 'https://g1.globo.com/rss/g1/rs/' },
+  ],
+  'PE': [
+    { name: 'G1 Pernambuco', url: 'https://g1.globo.com/rss/g1/pernambuco/' },
+  ],
+  'CE': [
+    { name: 'G1 Ceara', url: 'https://g1.globo.com/rss/g1/ceara/' },
+  ],
+}
+
+/**
+ * Auto-register regional news feeds based on neighborhoods' states.
+ * Idempotent — skips already registered feeds.
+ */
+export function syncRegionalFeeds(states: string[]): string[] {
+  const added: string[] = []
+  const uniqueStates = [...new Set(states.map((s) => s.toUpperCase()))]
+
+  for (const state of uniqueStates) {
+    const feeds = REGIONAL_FEEDS[state]
+    if (!feeds) continue
+
+    for (const feed of feeds) {
+      const allUrls = [...DEFAULT_FEEDS, ..._customFeeds].map((f) => f.url)
+      if (allUrls.includes(feed.url)) continue
+
+      const result = addNewsFeed(feed.name, feed.url, `regional-${state.toLowerCase()}`)
+      if (typeof result !== 'string') {
+        added.push(`${feed.name} (${state})`)
+      }
+    }
+  }
+
+  return added
+}
+
+/**
+ * Fetch news filtered by a specific region/state.
+ */
+export async function fetchRegionalNews(state: string, maxPerSource: number = 3): Promise<string> {
+  const category = `regional-${state.toLowerCase()}`
+  const feeds = getActiveFeeds().filter(
+    (f) => f.category === category || f.category === 'brazil',
+  )
+  if (!feeds.length) {
+    return `Nenhum feed de noticias registrado para ${state}. Adicione bairros para ativar feeds regionais.`
+  }
+
+  // Fetch from regional feeds specifically
+  return fetchNews([category, 'brazil'], maxPerSource)
+}
+
 // ─── Constants ──────────────────────────────────────────────
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024  // 2 MB max per feed

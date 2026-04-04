@@ -11,6 +11,9 @@ import { listTasks, formatTaskList } from './tasks'
 import { getPendingFollowUps, getDelegations, formatFollowUps, formatDelegationList } from './people'
 import { IS_WINDOWS } from './platform'
 import { getProjectBriefingSummary } from './projects'
+import { listNeighborhoods } from './neighborhoods'
+import { getEnergyState, formatEnergyState, getProfile } from './energy'
+import { getAttentionStats } from './attention'
 
 let _dataDir = ''
 const LAST_RUN_FILE = () => join(_dataDir, 'last-morning.txt')
@@ -107,11 +110,49 @@ export async function generateMorningBriefing(): Promise<string> {
     sections.push('\n' + news)
   } catch { /* skip */ }
 
+  // Lokaliza — neighborhood summary
+  const hoods = listNeighborhoods()
+  if (hoods.length > 0) {
+    sections.push('\n--- Lokaliza ---')
+    const totalPois = hoods.reduce((acc, h) => acc + h.pois.length, 0)
+    const totalLayers = hoods.reduce((acc, h) => acc + h.layers.length, 0)
+    sections.push(`${hoods.length} bairro(s) monitorado(s), ${totalPois} POIs, ${totalLayers} camadas de dados.`)
+    for (const h of hoods.slice(0, 5)) {
+      const breakdown = h.metadata?.poiBreakdown as Record<string, number> | undefined
+      const topCategories = breakdown
+        ? Object.entries(breakdown).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k}: ${v}`).join(', ')
+        : `${h.pois.length} POIs`
+      sections.push(`  • ${h.name} (${h.city}/${h.state}) — ${topCategories}`)
+    }
+    if (hoods.length > 5) {
+      sections.push(`  ... e mais ${hoods.length - 5} bairro(s).`)
+    }
+  }
+
   // Pending tasks count
   const allPending = listTasks()
   if (allPending.length > 0 && todayTasks.length !== allPending.length) {
     sections.push(`\n${allPending.length} tarefa(s) pendente(s) no total. Use /tarefas para ver todas.`)
   }
+
+  // Energy & Attention
+  try {
+    const energy = getEnergyState()
+    const profile = getProfile()
+    const isOptimal = profile.bestHours.includes(hour)
+    sections.push('\n--- Energia ---')
+    sections.push(formatEnergyState(energy))
+    if (isOptimal) {
+      sections.push(`Este e um dos seus horarios de pico (${profile.bestHours.map((h) => `${h}h`).join(', ')}). Aproveite!`)
+    }
+  } catch { /* energy not initialized */ }
+
+  try {
+    const attention = getAttentionStats()
+    if (attention.blockedToday > 0) {
+      sections.push(`\n${attention.blockedToday} notificacao(oes) filtrada(s) hoje pelo modo foco.`)
+    }
+  } catch { /* attention not initialized */ }
 
   sections.push('\n==============================')
   return sections.join('\n')
