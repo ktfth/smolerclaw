@@ -16,6 +16,7 @@ import {
   TIER2_TOOLS, INVESTIGATE_TOOLS, MATERIAL_TOOLS, PROJECT_TOOLS,
   PITWALL_TOOLS, BLAST_RADIUS_TOOLS, DECISION_ENGINE_TOOLS,
   NEWSFEED_TOOLS, ARCHIVE_TOOLS, META_LEARNING_TOOLS,
+  RECOMMENDATION_TOOLS,
 } from './business-tools'
 import { VAULT_TOOLS } from './vault-tools'
 import { MEMORY_TOOLS } from './memory-tools'
@@ -81,6 +82,7 @@ export function registerWindowsTools(): void {
   TOOLS.push(...DECISION_ENGINE_TOOLS)
   TOOLS.push(...META_LEARNING_TOOLS)
   TOOLS.push(...AGENCY_TOOLS)
+  TOOLS.push(...RECOMMENDATION_TOOLS)
 }
 
 // ─── executeTool wrapper (preserves original signature) ──────
@@ -109,6 +111,7 @@ export {
   TIER2_TOOLS, INVESTIGATE_TOOLS, MATERIAL_TOOLS, PROJECT_TOOLS,
   PITWALL_TOOLS, BLAST_RADIUS_TOOLS, DECISION_ENGINE_TOOLS,
   NEWSFEED_TOOLS, ARCHIVE_TOOLS, META_LEARNING_TOOLS,
+  RECOMMENDATION_TOOLS,
 } from './business-tools'
 export { VAULT_TOOLS } from './vault-tools'
 export { MEMORY_TOOLS } from './memory-tools'

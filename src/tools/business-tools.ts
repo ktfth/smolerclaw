@@ -84,6 +84,12 @@ import {
   executePowerShellScript, analyzeScriptSafety, analyzeScreenContext,
   readClipboardContent, sendNotification, type ScriptResult,
 } from '../windows-agent'
+import {
+  addContent, rateContent, markConsumed, removeContent,
+  searchContent, listContent, getRecommendations, getStats,
+  formatContentList, formatRecommendations, formatStats,
+  type ContentType, type Mood,
+} from '../recommendations'
 import { parseFuzzyDate } from './helpers'
 
 // ─── Task/Reminder Tools (cross-platform) ──────────────────
@@ -1139,6 +1145,146 @@ export const META_LEARNING_TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+// ─── Recommendation Tools ─────────────────────────────────────
+
+export const RECOMMENDATION_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'add_content',
+    description:
+      'Add a video, movie, or music to the recommendation catalog. ' +
+      'Types: video, movie, music. Moods: relaxar, energizar, focar, inspirar, descontrair. ' +
+      'Use when the user mentions content they like or want to save for later.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        type: { type: 'string', enum: ['video', 'movie', 'music'], description: 'Content type' },
+        title: { type: 'string', description: 'Title of the content' },
+        creator: { type: 'string', description: 'Artist, director, channel, or band' },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Genre tags (e.g. "lo-fi", "comedia", "documentario"). Optional.',
+        },
+        moods: {
+          type: 'array',
+          items: { type: 'string', enum: ['relaxar', 'energizar', 'focar', 'inspirar', 'descontrair'] },
+          description: 'Moods this content fits. Optional.',
+        },
+        url: { type: 'string', description: 'URL (YouTube, Spotify, etc.). Optional.' },
+      },
+      required: ['type', 'title', 'creator'],
+    },
+  },
+  {
+    name: 'get_recommendations',
+    description:
+      'Get personalized content recommendations for decompression. ' +
+      'Optionally filter by mood (relaxar, energizar, focar, inspirar, descontrair) ' +
+      'and/or content type (video, movie, music). ' +
+      'Use when the user wants a suggestion to watch, listen, or relax. ' +
+      'Also responds to "o que assistir?", "me sugere uma musica", "preciso descomprimir".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        mood: {
+          type: 'string',
+          enum: ['relaxar', 'energizar', 'focar', 'inspirar', 'descontrair'],
+          description: 'Desired mood. Optional.',
+        },
+        type: {
+          type: 'string',
+          enum: ['video', 'movie', 'music'],
+          description: 'Content type filter. Optional.',
+        },
+        limit: { type: 'number', description: 'Max recommendations. Default 5.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'rate_content',
+    description:
+      'Rate a content item from 1 to 5 stars. Improves future recommendations.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Content ID' },
+        rating: { type: 'number', description: 'Rating from 1 to 5' },
+      },
+      required: ['id', 'rating'],
+    },
+  },
+  {
+    name: 'mark_content_consumed',
+    description:
+      'Mark a content item as watched/listened. Tracks consumption for better recommendations.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Content ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'search_content',
+    description:
+      'Search the content catalog by title, creator, tag, or type. ' +
+      'Use #tag syntax to search by tag (e.g. "#lo-fi").',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string', description: 'Search term or #tag' },
+        type: {
+          type: 'string',
+          enum: ['video', 'movie', 'music'],
+          description: 'Filter by content type. Optional.',
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'list_catalog',
+    description:
+      'List all content in the catalog, optionally filtered by type.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        type: {
+          type: 'string',
+          enum: ['video', 'movie', 'music'],
+          description: 'Filter by content type. Optional.',
+        },
+        limit: { type: 'number', description: 'Max items. Default 20.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'remove_content',
+    description: 'Remove a content item from the catalog by ID.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Content ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'content_stats',
+    description:
+      'Show statistics about the content catalog: items by type, mood distribution, ' +
+      'average rating, top rated, and most consumed.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+]
+
 // ─── Business Tool Execution ─────────────────────────────────
 
 export async function executeBusinessTool(
@@ -1921,6 +2067,73 @@ export async function executeBusinessTool(
       const count = Math.min(Math.max((input.count as number) || 5, 1), 20)
       const insights = getRecentInsights(count)
       return formatInsightList(insights)
+    }
+    // Recommendation tools
+    case 'add_content': {
+      const type = input.type as ContentType
+      const validTypes: ContentType[] = ['video', 'movie', 'music']
+      if (!validTypes.includes(type)) return 'Error: type must be video, movie, or music.'
+      const title = input.title as string
+      if (!title?.trim()) return 'Error: title is required.'
+      const creator = input.creator as string
+      if (!creator?.trim()) return 'Error: creator is required.'
+      const tags = (input.tags as string[]) || []
+      const moods = (input.moods as Mood[]) || []
+      const url = input.url as string | undefined
+      const item = addContent(type, title, creator, tags, moods, url)
+      const moodStr = item.moods.length > 0 ? ` (${item.moods.join(', ')})` : ''
+      const tagStr = item.tags.length > 0 ? ` [${item.tags.map((t) => '#' + t).join(' ')}]` : ''
+      return `Conteudo adicionado: "${item.title}" — ${item.creator}${moodStr}${tagStr}  {${item.id}}`
+    }
+    case 'get_recommendations': {
+      const mood = input.mood as Mood | undefined
+      const type = input.type as ContentType | undefined
+      const limit = Math.min(Math.max((input.limit as number) || 5, 1), 20)
+      const recs = getRecommendations(mood, type, limit)
+      return formatRecommendations(recs, mood)
+    }
+    case 'rate_content': {
+      const id = input.id as string
+      if (!id?.trim()) return 'Error: id is required.'
+      const rating = input.rating as number
+      if (typeof rating !== 'number' || rating < 1 || rating > 5) {
+        return 'Error: rating must be between 1 and 5.'
+      }
+      const item = rateContent(id, rating)
+      if (!item) return `Conteudo nao encontrado: "${id}"`
+      return `Avaliado: "${item.title}" — ${'*'.repeat(item.rating || 0)}/5`
+    }
+    case 'mark_content_consumed': {
+      const id = input.id as string
+      if (!id?.trim()) return 'Error: id is required.'
+      const item = markConsumed(id)
+      if (!item) return `Conteudo nao encontrado: "${id}"`
+      return `Marcado como consumido: "${item.title}" (${item.timesConsumed}x)`
+    }
+    case 'search_content': {
+      const query = input.query as string
+      if (!query?.trim()) return formatContentList(listContent())
+      let results = searchContent(query)
+      const typeFilter = input.type as ContentType | undefined
+      if (typeFilter) {
+        results = results.filter((i) => i.type === typeFilter)
+      }
+      return formatContentList(results)
+    }
+    case 'list_catalog': {
+      const type = input.type as ContentType | undefined
+      const limit = Math.min(Math.max((input.limit as number) || 20, 1), 100)
+      return formatContentList(listContent(type, limit))
+    }
+    case 'remove_content': {
+      const id = input.id as string
+      if (!id?.trim()) return 'Error: id is required.'
+      return removeContent(id)
+        ? 'Conteudo removido do catalogo.'
+        : `Conteudo nao encontrado: "${id}"`
+    }
+    case 'content_stats': {
+      return formatStats(getStats())
     }
     default:
       return null

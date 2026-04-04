@@ -12,6 +12,7 @@ import { initMacros } from '../macros'
 import { initInvestigations } from '../investigate'
 import { initMemory } from '../memory'
 import { initProjects } from '../projects'
+import { initRecommendations } from '../recommendations'
 import { initPitwall } from '../pitwall'
 import { initDecisionEngine } from '../services/decision-engine'
 import { initDocsEngine } from '../services/docs-engine'
@@ -53,6 +54,7 @@ export function initCoreModules(
   initProjects(dataDir)
   initPitwall(dataDir)
   initDecisionEngine(dataDir)
+  initRecommendations(dataDir)
   initTasks(dataDir, () => {}) // no-op notifier for headless modes; TUI overrides later
 }
 
