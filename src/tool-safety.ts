@@ -217,6 +217,27 @@ export function assessToolRisk(name: string, input: Record<string, unknown>): To
     case 'execute_powershell_script':
       return { level: 'dangerous', reason: `PowerShell script execution` }
 
+    // M365 tools — read operations are safe, write operations are moderate
+    case 'm365_list_emails':
+    case 'm365_read_email':
+    case 'm365_list_events':
+    case 'm365_list_todos':
+    case 'm365_list_files':
+    case 'm365_briefing':
+      return { level: 'safe' }
+
+    case 'm365_send_email':
+      return { level: 'moderate', reason: `send email to ${input.to ?? 'unknown'}` }
+
+    case 'm365_create_event':
+      return { level: 'moderate', reason: `create calendar event: ${input.subject ?? ''}` }
+
+    case 'm365_create_todo':
+      return { level: 'moderate', reason: `create To Do task: ${input.title ?? ''}` }
+
+    case 'm365_complete_todo':
+      return { level: 'moderate', reason: `complete To Do task: ${input.taskId ?? ''}` }
+
     default:
       return { level: 'moderate', reason: `unknown tool: ${name}` }
   }

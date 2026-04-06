@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
+    "@pnp/cli-microsoft365": "^11.6.0",
     "hono": "^4.6.0"
   },
   "files": [

@@ -13,6 +13,7 @@ import { executeVaultTool } from './vault-tools'
 import { executeMemoryTool } from './memory-tools'
 import { executeAgencyTool } from './agency-tools'
 import { executeBusinessTool } from './business-tools'
+import { executeM365Tool } from '../m365'
 
 /**
  * Execute a tool and observe the execution for meta-learning.
@@ -94,6 +95,10 @@ async function executeToolInternal(
   // Agency tools
   const agencyResult = await executeAgencyTool(name, input)
   if (agencyResult !== null) return agencyResult
+
+  // M365 tools
+  const m365Result = await executeM365Tool(name, input)
+  if (m365Result !== null) return m365Result
 
   // Business tools (all the rest)
   const bizResult = await executeBusinessTool(name, input, sessionManager)

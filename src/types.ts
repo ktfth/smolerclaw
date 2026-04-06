@@ -269,4 +269,7 @@ export interface EventBusEvents {
   'planning:step_completed': PlanningStepCompletedEvent
   'planning:blocked': PlanningBlockedEvent
   'planning:completed': PlanningCompletedEvent
+  // M365 events
+  'm365:auth_changed': { status: 'connected' | 'disconnected'; connectedAs: string | null; timestamp: number }
+  'm365:data_fetched': { service: string; command: string; duration: number; timestamp: number }
 }

@@ -51,6 +51,7 @@ import {
   listOpportunities, generateWorkReport, getProjectBriefingSummary,
   formatProjectList, formatProjectDetail, formatOpportunityList,
 } from '../projects'
+import { handleM365Command } from '../m365'
 import { writeFileSync } from 'node:fs'
 import { logger } from '../core/logger'
 import type { SessionManager } from '../session'
@@ -2121,6 +2122,14 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
       } else {
         ctx.tui.showError(`Tarefa nao encontrada: "${ref}"`)
       }
+      break
+    }
+
+    case 'm365': {
+      await handleM365Command(args, {
+        showSystem: (msg) => ctx.tui.showSystem(msg),
+        showError: (msg) => ctx.tui.showError(msg),
+      })
       break
     }
 
