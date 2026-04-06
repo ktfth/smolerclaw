@@ -1,6 +1,7 @@
 import { A, C, CSI, w, stripAnsi, wrapText, visibleLength, displayWidth, getPalette, type PersonaPalette } from './ansi'
 import { renderMarkdown } from './markdown'
 import { InputHistory } from './history'
+import { fuzzyFilter, highlightMatches, type FuzzyMatch } from './input/fuzzy'
 import { join } from 'node:path'
 import {
   ViewManager,
@@ -165,6 +166,95 @@ export class TUI {
     '/atalho': ['list', 'all', 'info', 'criar', 'deletar', 'ativar', 'desativar'],
     '/atalhos': ['list', 'all', 'info', 'criar', 'deletar', 'ativar', 'desativar'],
   }
+
+  /** Brief descriptions for commands (shown in completions) */
+  private commandDescriptions: Record<string, string> = {
+    '/help': 'Mostrar todos os comandos', '/ajuda': 'Mostrar todos os comandos',
+    '/clear': 'Limpar tela', '/limpar': 'Limpar tela',
+    '/commit': 'Git commit com mensagem IA', '/commitar': 'Git commit com mensagem IA',
+    '/persona': 'Trocar modo de persona', '/modo': 'Trocar modo de persona',
+    '/copy': 'Copiar ultima resposta', '/copiar': 'Copiar ultima resposta',
+    '/fork': 'Bifurcar sessao atual',
+    '/new': 'Nova sessao', '/novo': 'Nova sessao',
+    '/load': 'Carregar sessao', '/carregar': 'Carregar sessao',
+    '/sessions': 'Listar sessoes', '/sessoes': 'Listar sessoes',
+    '/delete': 'Deletar sessao', '/deletar': 'Deletar sessao',
+    '/model': 'Trocar modelo IA', '/modelo': 'Trocar modelo IA',
+    '/export': 'Exportar conversa', '/exportar': 'Exportar conversa',
+    '/cost': 'Ver custo da sessao', '/custo': 'Ver custo da sessao',
+    '/retry': 'Repetir ultima mensagem', '/repetir': 'Repetir ultima mensagem',
+    '/undo': 'Desfazer ultima acao', '/desfazer': 'Desfazer ultima acao',
+    '/search': 'Buscar na conversa', '/buscar': 'Buscar na conversa',
+    '/lang': 'Trocar idioma', '/idioma': 'Trocar idioma',
+    '/config': 'Configuracoes',
+    '/exit': 'Sair do aplicativo', '/sair': 'Sair do aplicativo',
+    '/briefing': 'Resumo diario', '/resumo': 'Resumo diario',
+    '/news': 'Feed de noticias', '/noticias': 'Feed de noticias',
+    '/open': 'Abrir aplicativo', '/abrir': 'Abrir aplicativo',
+    '/openfile': 'Abrir arquivo',
+    '/openurl': 'Abrir URL',
+    '/apps': 'Listar aplicativos', '/programas': 'Listar aplicativos',
+    '/sysinfo': 'Info do sistema', '/sistema': 'Info do sistema',
+    '/calendar': 'Ver calendario', '/calendario': 'Ver calendario', '/agenda': 'Ver calendario',
+    '/ask': 'Perguntar ao modelo', '/perguntar': 'Perguntar ao modelo',
+    '/budget': 'Ver orcamento', '/orcamento': 'Ver orcamento',
+    '/plugins': 'Gerenciar plugins',
+    '/task': 'Criar tarefa', '/tarefa': 'Criar tarefa',
+    '/tasks': 'Listar tarefas', '/tarefas': 'Listar tarefas',
+    '/done': 'Concluir tarefa', '/feito': 'Concluir tarefa', '/concluido': 'Concluir tarefa',
+    '/rmtask': 'Remover tarefa', '/rmtarefa': 'Remover tarefa',
+    '/people': 'Gerenciar pessoas', '/pessoas': 'Gerenciar pessoas',
+    '/team': 'Ver equipe', '/equipe': 'Ver equipe',
+    '/family': 'Ver familia', '/familia': 'Ver familia',
+    '/person': 'Ver pessoa', '/pessoa': 'Ver pessoa',
+    '/addperson': 'Adicionar pessoa', '/novapessoa': 'Adicionar pessoa', '/addpessoa': 'Adicionar pessoa',
+    '/delegate': 'Delegar tarefa', '/delegar': 'Delegar tarefa',
+    '/delegations': 'Ver delegacoes', '/delegacoes': 'Ver delegacoes', '/delegados': 'Ver delegacoes',
+    '/followups': 'Ver follow-ups',
+    '/dashboard': 'Painel visual', '/painel': 'Painel visual',
+    '/contacts': 'Ver contatos', '/contatos': 'Ver contatos',
+    '/investigar': 'Iniciar investigacao', '/investigate': 'Start investigation',
+    '/investigacoes': 'Ver investigacoes',
+    '/monitor': 'Monitorar recurso', '/vigiar': 'Monitorar recurso',
+    '/workflow': 'Gerenciar workflows', '/fluxo': 'Gerenciar workflows',
+    '/macro': 'Gerenciar macros', '/macros': 'Listar macros',
+    '/atalho': 'Gerenciar atalhos', '/atalhos': 'Listar atalhos',
+    '/pomodoro': 'Timer Pomodoro', '/foco': 'Timer Pomodoro',
+    '/entrada': 'Registrar receita', '/income': 'Registrar receita',
+    '/saida': 'Registrar despesa', '/expense': 'Registrar despesa',
+    '/finance': 'Ver financas', '/financas': 'Ver financas', '/balanco': 'Ver balanco',
+    '/decisions': 'Registro de decisoes', '/decisoes': 'Registro de decisoes',
+    '/email': 'Gerenciar email', '/rascunho': 'Rascunho de email',
+    '/memo': 'Criar memo', '/memos': 'Listar memos',
+    '/note': 'Criar nota', '/notas': 'Listar notas', '/anotar': 'Criar nota',
+    '/tags': 'Ver tags', '/memotags': 'Tags de memos',
+    '/rmmemo': 'Remover memo', '/rmnota': 'Remover nota',
+    '/index': 'Indexar conteudo', '/indexar': 'Indexar conteudo',
+    '/reindex': 'Reindexar tudo',
+    '/memory': 'Ver memoria', '/memoria': 'Ver memoria',
+    '/clipboard': 'Ver clipboard', '/area': 'Ver area de transferencia',
+    '/tela': 'Capturar tela', '/screen': 'Capturar tela',
+    '/ps1': 'Customizar prompt',
+    '/refresh': 'Atualizar dados', '/renovar': 'Atualizar dados',
+    '/vault': 'Gerenciar vault', '/backup': 'Fazer backup',
+    '/feeds': 'Ver feeds RSS', '/fontes': 'Ver fontes RSS',
+    '/addfeed': 'Adicionar feed', '/novafonte': 'Adicionar fonte',
+    '/rmfeed': 'Remover feed', '/rmfonte': 'Remover fonte',
+    '/disablefeed': 'Desativar feed', '/desativarfonte': 'Desativar fonte',
+    '/enablefeed': 'Ativar feed', '/ativarfonte': 'Ativar fonte',
+    '/projeto': 'Ver projeto', '/project': 'Ver projeto',
+    '/projetos': 'Listar projetos', '/projects': 'Listar projetos',
+    '/sessao': 'Sessao de trabalho', '/session': 'Work session',
+    '/relatorio': 'Gerar relatorio', '/report': 'Gerar relatorio',
+    '/oportunidades': 'Ver oportunidades', '/opportunities': 'Ver oportunidades',
+    '/schedule': 'Ver agenda',
+  }
+
+  // ── Autocomplete state ──────────────────────────────────────
+  private ghostText = ''                    // Dimmed suggestion after cursor
+  private tabCycleMatches: string[] = []    // Matches for Tab cycling
+  private tabCycleIndex = -1               // Current position in Tab cycle (-1 = not cycling)
+  private tabCycleBase = ''                 // Original input before Tab cycling started
 
   private onSubmit: ((s: string) => void) | null = null
   private onCancel: (() => void) | null = null
@@ -1530,64 +1620,221 @@ export class TUI {
   }
 
   /**
+   * Reset Tab cycling state (called on any non-Tab keystroke).
+   */
+  private resetTabCycle(): void {
+    this.tabCycleMatches = []
+    this.tabCycleIndex = -1
+    this.tabCycleBase = ''
+  }
+
+  /**
+   * Compute ghost text suggestion for current input.
+   * Shows dimmed text after cursor for quick acceptance with Right arrow.
+   */
+  private updateGhostText(): void {
+    const input = this.inputBuf
+    this.ghostText = ''
+
+    // Only show ghost when cursor is at end of input
+    if (this.inputPos !== input.length) return
+    if (input.length === 0) return
+
+    // Phase 1: Command ghost text
+    if (input.startsWith('/')) {
+      const parts = input.split(' ')
+
+      if (parts.length === 1) {
+        // Ghost for command name — find best fuzzy match
+        const results = fuzzyFilter(input, this.commands)
+        if (results.length > 0) {
+          const best = results[0].item as string
+          if (best !== input && best.startsWith(input)) {
+            // Show remaining part of the command
+            const remainder = best.slice(input.length)
+            const desc = this.commandDescriptions[best]
+            this.ghostText = desc ? `${remainder}  ${desc}` : remainder
+            return
+          }
+          // Fuzzy match (not prefix) — show full suggestion
+          if (best !== input) {
+            const desc = this.commandDescriptions[best]
+            this.ghostText = desc ? `  → ${best}  ${desc}` : `  → ${best}`
+            return
+          }
+        }
+      } else {
+        // Ghost for subcommand
+        const cmd = parts[0]
+        const sub = this.subcommands[cmd]
+        if (sub && sub.length > 0) {
+          const partial = parts[parts.length - 1].toLowerCase()
+          if (partial) {
+            const matches = sub.filter(s => s.toLowerCase().startsWith(partial))
+            if (matches.length > 0) {
+              this.ghostText = matches[0].slice(partial.length)
+              return
+            }
+          } else {
+            // Show first option as ghost
+            this.ghostText = sub[0]
+            return
+          }
+        }
+      }
+    }
+
+    // Phase 2: History-based ghost text for non-command input
+    if (!input.startsWith('/') && input.length >= 2 && this.history) {
+      const entries = this.history.getEntries()
+      // Search from most recent backward, find prefix match first
+      for (let i = entries.length - 1; i >= 0; i--) {
+        if (entries[i].startsWith(input) && entries[i] !== input) {
+          this.ghostText = entries[i].slice(input.length)
+          return
+        }
+      }
+      // If no prefix match, try fuzzy for hint
+      const results = fuzzyFilter(input, [...entries].reverse().slice(0, 100))
+      if (results.length > 0 && results[0].match.score > 50) {
+        const best = results[0].item as string
+        if (best !== input) {
+          this.ghostText = `  → ${best}`
+        }
+      }
+    }
+  }
+
+  /**
    * Complete a partial input. Handles both command and subcommand completion.
+   * Uses fuzzy matching for better discovery and Tab cycling for multiple matches.
    * Returns the completed value and optional list of matches to display.
    */
   private completeInput(input: string): { value: string; options?: string } | null {
     const parts = input.split(' ')
     const cmd = parts[0]
 
-    // Phase 1: completing the command itself (no space yet)
-    if (parts.length === 1) {
-      const matches = this.commands.filter((c) => c.startsWith(cmd))
-      if (matches.length === 1) {
-        // Check if this command has subcommands
-        const sub = this.subcommands[matches[0]]
-        if (sub && sub.length > 0) {
-          return { value: matches[0] + ' ', options: `Opcoes: ${sub.join('  ')}` }
-        }
-        return { value: matches[0] + ' ' }
+    // ── Tab cycling: if already cycling, advance to next match ──
+    if (this.tabCycleMatches.length > 1 && this.tabCycleBase) {
+      this.tabCycleIndex = (this.tabCycleIndex + 1) % this.tabCycleMatches.length
+      const match = this.tabCycleMatches[this.tabCycleIndex]
+      const counter = `[${this.tabCycleIndex + 1}/${this.tabCycleMatches.length}]`
+      const desc = this.commandDescriptions[match]
+      const hint = desc ? `${counter} ${desc}` : counter
+      // Is this a command or subcommand cycle?
+      if (parts.length === 1 || this.tabCycleBase.split(' ').length === 1) {
+        const hasSub = this.subcommands[match]
+        return { value: match + (hasSub?.length ? ' ' : ' '), options: hint }
+      } else {
+        const baseParts = this.tabCycleBase.split(' ')
+        baseParts[baseParts.length - 1] = match
+        return { value: baseParts.join(' ') + ' ', options: hint }
       }
-      if (matches.length > 1) {
-        let prefix = matches[0]
-        for (const m of matches) {
+    }
+
+    // ── Phase 1: completing the command itself (no space yet) ──
+    if (parts.length === 1) {
+      // Prefix matches first (fast path)
+      const prefixMatches = this.commands.filter(c => c.startsWith(cmd))
+      // Fuzzy matches (broader discovery)
+      const fuzzyResults = cmd.length >= 2
+        ? fuzzyFilter(cmd, this.commands).map(r => r.item as string)
+        : []
+      // Merge: prefix matches first, then fuzzy-only matches
+      const prefixSet = new Set(prefixMatches)
+      const allMatches = [...prefixMatches, ...fuzzyResults.filter(m => !prefixSet.has(m))]
+
+      if (allMatches.length === 0) return null
+
+      if (allMatches.length === 1) {
+        const match = allMatches[0]
+        const sub = this.subcommands[match]
+        const desc = this.commandDescriptions[match]
+        const opts = sub?.length ? `Opcoes: ${sub.join('  ')}` : undefined
+        const hint = desc ? (opts ? `${desc}\n${opts}` : desc) : opts
+        return { value: match + ' ', options: hint }
+      }
+
+      // Multiple matches — start Tab cycling
+      this.tabCycleMatches = allMatches
+      this.tabCycleIndex = 0
+      this.tabCycleBase = input
+
+      const match = allMatches[0]
+      const desc = this.commandDescriptions[match]
+      // Format options with descriptions
+      const optLines = allMatches.slice(0, 12).map(m => {
+        const d = this.commandDescriptions[m]
+        return d ? `${m} ${A.dim}${d}${A.reset}` : m
+      })
+      const more = allMatches.length > 12 ? `  ${A.dim}+${allMatches.length - 12} mais${A.reset}` : ''
+      const counter = `[1/${allMatches.length}]`
+
+      // If there's a common prefix among prefix matches, expand to it
+      if (prefixMatches.length > 1) {
+        let prefix = prefixMatches[0]
+        for (const m of prefixMatches) {
           while (!m.startsWith(prefix)) prefix = prefix.slice(0, -1)
         }
+        if (prefix.length > input.length) {
+          return { value: prefix, options: `${counter}\n${optLines.join('\n')}${more}` }
+        }
+      }
+
+      const hasSub = this.subcommands[match]
+      return {
+        value: match + (hasSub?.length ? ' ' : ' '),
+        options: `${counter}${desc ? ' ' + desc : ''}\n${optLines.join('\n')}${more}`,
+      }
+    }
+
+    // ── Phase 2: completing a subcommand/argument ──
+    const sub = this.subcommands[cmd]
+    if (!sub || sub.length === 0) return null
+
+    const partial = parts[parts.length - 1].toLowerCase()
+    const matches = partial
+      ? sub.filter(s => s.toLowerCase().startsWith(partial))
+      : [...sub]
+
+    // If no prefix matches but partial is non-empty, try fuzzy
+    if (matches.length === 0 && partial) {
+      const fuzzyResults = fuzzyFilter(partial, sub)
+      if (fuzzyResults.length > 0) {
+        const fuzzyMatches = fuzzyResults.map(r => r.item as string)
+        if (fuzzyMatches.length === 1) {
+          parts[parts.length - 1] = fuzzyMatches[0]
+          return { value: parts.join(' ') + ' ' }
+        }
+        // Start cycling fuzzy subcommand matches
+        this.tabCycleMatches = fuzzyMatches
+        this.tabCycleIndex = 0
+        this.tabCycleBase = input
+        parts[parts.length - 1] = fuzzyMatches[0]
         return {
-          value: prefix.length > input.length ? prefix : input,
-          options: matches.join('  '),
+          value: parts.join(' ') + ' ',
+          options: `[1/${fuzzyMatches.length}] ${fuzzyMatches.join('  ')}`,
         }
       }
       return null
     }
 
-    // Phase 2: completing a subcommand/argument
-    const sub = this.subcommands[cmd]
-    if (!sub || sub.length === 0) return null
-
-    const partial = parts[parts.length - 1].toLowerCase()
-    const matches = sub.filter((s) => s.toLowerCase().startsWith(partial))
-
     if (matches.length === 1) {
       parts[parts.length - 1] = matches[0]
       return { value: parts.join(' ') + ' ' }
     }
-    if (matches.length > 1) {
-      // Find common prefix among matches
-      let prefix = matches[0]
-      for (const m of matches) {
-        while (!m.toLowerCase().startsWith(prefix.toLowerCase())) prefix = prefix.slice(0, -1)
-      }
-      if (prefix.length > partial.length) {
-        parts[parts.length - 1] = prefix
-        return { value: parts.join(' '), options: matches.join('  ') }
-      }
-      return { value: input, options: matches.join('  ') }
-    }
 
-    // No matches — show all options if partial is empty
-    if (!partial && sub.length > 0) {
-      return { value: input, options: sub.join('  ') }
+    if (matches.length > 1) {
+      // Start cycling through subcommand matches
+      this.tabCycleMatches = matches
+      this.tabCycleIndex = 0
+      this.tabCycleBase = input
+
+      parts[parts.length - 1] = matches[0]
+      return {
+        value: parts.join(' ') + ' ',
+        options: `[1/${matches.length}] ${matches.join('  ')}`,
+      }
     }
 
     return null
@@ -1609,10 +1856,26 @@ export class TUI {
       w(`  ${C.ai}${this.getSpinnerChar()}${A.reset} ${A.dim}streaming... ${elapsed}s${A.reset}`)
       w(A.hide)
     } else {
-      const display = visibleLength(this.inputBuf) > this.width - 3
-        ? this.inputBuf.slice(this.inputBuf.length - this.width + 3)
+      const promptPrefix = `${C.prompt}❯${A.reset} `
+      const inputWidth = this.width - 3 // 2 for "❯ " + 1 margin
+
+      const display = visibleLength(this.inputBuf) > inputWidth
+        ? this.inputBuf.slice(this.inputBuf.length - inputWidth)
         : this.inputBuf
-      w(`${C.prompt}❯${A.reset} ${display}`)
+
+      w(promptPrefix + display)
+
+      // Show ghost text after input (dimmed) when cursor is at end
+      if (this.ghostText && this.inputPos === this.inputBuf.length) {
+        const availableSpace = inputWidth - visibleLength(this.inputBuf)
+        if (availableSpace > 2) {
+          const ghostDisplay = this.ghostText.length > availableSpace
+            ? this.ghostText.slice(0, availableSpace - 1) + '…'
+            : this.ghostText
+          w(`${A.dim}${A.italic}${ghostDisplay}${A.reset}`)
+        }
+      }
+
       // Unicode-aware cursor: compute display width of chars before cursor
       const beforeCursor = this.inputBuf.slice(0, this.inputPos)
       const cursorCol = visibleLength(beforeCursor) + 3
@@ -1666,6 +1929,8 @@ export class TUI {
         // First: clear the input field
         this.inputBuf = ''
         this.inputPos = 0
+        this.ghostText = ''
+        this.resetTabCycle()
         this.lastCtrlCTime = now
         this.renderInput()
         return
@@ -1698,17 +1963,27 @@ export class TUI {
     // Ignore input during streaming
     if (this.isStreaming) return
 
-    // Tab — command + subcommand completion
+    // Tab — command + subcommand completion with cycling
     if (key === '\t') {
       if (this.inputBuf.startsWith('/')) {
         const completed = this.completeInput(this.inputBuf)
         if (completed) {
           this.inputBuf = completed.value
           this.inputPos = this.inputBuf.length
+          this.ghostText = ''
           this.renderInput()
           if (completed.options) {
             this.showSystem(completed.options)
           }
+        }
+      } else if (this.ghostText) {
+        // Accept ghost text for non-command input (history suggestion)
+        const ghost = this.ghostText.startsWith('  →') ? '' : this.ghostText
+        if (ghost) {
+          this.inputBuf += ghost
+          this.inputPos = this.inputBuf.length
+          this.ghostText = ''
+          this.renderInput()
         }
       }
       return
@@ -1717,6 +1992,7 @@ export class TUI {
     // Paste detection: multi-char input that isn't an escape sequence
     // Covers both newline-containing pastes and plain text pastes
     if (key.length > 1 && !key.startsWith('\x1b') && !isSingleUnicodeChar(key)) {
+      this.resetTabCycle()
       const cleaned = key.replace(/\r?\n/g, ' ').trim()
       if (cleaned.length > 0) {
         this.inputBuf =
@@ -1724,6 +2000,7 @@ export class TUI {
           cleaned +
           this.inputBuf.slice(this.inputPos)
         this.inputPos += cleaned.length
+        this.updateGhostText()
         this.renderInput()
       }
       return
@@ -1731,6 +2008,9 @@ export class TUI {
 
     // Enter
     if (key === '\r' || key === '\n') {
+      this.resetTabCycle()
+      this.ghostText = ''
+
       // Backslash continuation for multi-line
       if (this.inputBuf.endsWith('\\')) {
         this.inputBuf = this.inputBuf.slice(0, -1) + '\n'
@@ -1752,12 +2032,14 @@ export class TUI {
 
     // Backspace
     if (key === '\x7f' || key === '\b') {
+      this.resetTabCycle()
       if (this.inputPos > 0) {
         const charLen = prevCharLength(this.inputBuf, this.inputPos)
         this.inputBuf =
           this.inputBuf.slice(0, this.inputPos - charLen) +
           this.inputBuf.slice(this.inputPos)
         this.inputPos -= charLen
+        this.updateGhostText()
         this.renderInput()
       }
       return
@@ -1765,17 +2047,35 @@ export class TUI {
 
     // Escape sequences
     if (key.startsWith('\x1b[')) {
+      this.resetTabCycle()
       const code = key.slice(2)
       switch (code) {
         case 'D': // Left
           if (this.inputPos > 0) {
             this.inputPos -= prevCharLength(this.inputBuf, this.inputPos)
+            this.ghostText = ''
             this.renderInput()
           }
           break
-        case 'C': // Right
+        case 'C': // Right — accept ghost text or move cursor
+          if (this.ghostText && this.inputPos === this.inputBuf.length) {
+            // Accept ghost text (only the direct completion part, not "→" hints)
+            const ghost = this.ghostText.startsWith('  →') ? '' : this.ghostText
+            if (ghost) {
+              // Accept only up to first double-space (strip description)
+              const descIdx = ghost.indexOf('  ')
+              const accepted = descIdx >= 0 ? ghost.slice(0, descIdx) : ghost
+              this.inputBuf += accepted
+              this.inputPos = this.inputBuf.length
+              this.ghostText = ''
+              this.updateGhostText()
+              this.renderInput()
+              break
+            }
+          }
           if (this.inputPos < this.inputBuf.length) {
             this.inputPos += nextCharLength(this.inputBuf, this.inputPos)
+            this.updateGhostText()
             this.renderInput()
           }
           break
@@ -1784,6 +2084,7 @@ export class TUI {
           if (prev !== null && prev !== undefined) {
             this.inputBuf = prev
             this.inputPos = this.inputBuf.length
+            this.updateGhostText()
             this.renderInput()
           }
           break
@@ -1793,6 +2094,7 @@ export class TUI {
           if (next !== undefined) {
             this.inputBuf = next
             this.inputPos = this.inputBuf.length
+            this.updateGhostText()
             this.renderInput()
           }
           break
@@ -1811,10 +2113,12 @@ export class TUI {
           break
         case 'H': // Home
           this.inputPos = 0
+          this.ghostText = ''
           this.renderInput()
           break
         case 'F': // End
           this.inputPos = this.inputBuf.length
+          this.updateGhostText()
           this.renderInput()
           break
         case '3~': { // Delete
@@ -1823,6 +2127,7 @@ export class TUI {
             this.inputBuf =
               this.inputBuf.slice(0, this.inputPos) +
               this.inputBuf.slice(this.inputPos + charLen)
+            this.updateGhostText()
             this.renderInput()
           }
           break
@@ -1833,11 +2138,13 @@ export class TUI {
 
     // Regular printable characters (including multi-byte Unicode like ç, ã, é)
     if (isPrintable(key)) {
+      this.resetTabCycle()
       this.inputBuf =
         this.inputBuf.slice(0, this.inputPos) +
         key +
         this.inputBuf.slice(this.inputPos)
       this.inputPos += key.length
+      this.updateGhostText()
       this.renderInput()
     }
   }

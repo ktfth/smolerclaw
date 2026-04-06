@@ -83,6 +83,13 @@ export class InputHistory {
     this.pending = ''
   }
 
+  /**
+   * Get all history entries (most recent last).
+   */
+  getEntries(): readonly string[] {
+    return this.entries
+  }
+
   private load(): void {
     try {
       if (existsSync(this.filePath)) {
