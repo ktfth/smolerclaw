@@ -14,6 +14,7 @@ import { executeMemoryTool } from './memory-tools'
 import { executeAgencyTool } from './agency-tools'
 import { executeBusinessTool } from './business-tools'
 import { executeM365Tool } from '../m365'
+import { executeGwsTool } from '../gws'
 
 /**
  * Execute a tool and observe the execution for meta-learning.
@@ -99,6 +100,10 @@ async function executeToolInternal(
   // M365 tools
   const m365Result = await executeM365Tool(name, input)
   if (m365Result !== null) return m365Result
+
+  // GWS tools
+  const gwsResult = await executeGwsTool(name, input)
+  if (gwsResult !== null) return gwsResult
 
   // Business tools (all the rest)
   const bizResult = await executeBusinessTool(name, input, sessionManager)

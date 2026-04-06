@@ -60,4 +60,25 @@ export const pt: TranslationDict = {
   // ─── Plugins ────────────────────────────────────────────
   'plugin.none_loaded': 'Nenhum plugin carregado. Adicione arquivos em {{dir}}',
   'plugin.list_title': 'Plugins:',
+
+  // ─── GWS (Google Workspace) ────────────────────────────
+  'gws.gmail': 'Gmail',
+  'gws.agenda': 'Agenda',
+  'gws.drive': 'Drive',
+  'gws.panel_title': 'Painel Google Workspace',
+  'gws.press_any_key': 'Pressione qualquer tecla para voltar',
+  'gws.unread_total': '{{unread}} nao lidos / {{total}} total',
+  'gws.events_today': '{{count}} eventos hoje',
+  'gws.no_events': 'Nenhum evento agendado',
+  'gws.items': '{{count}} itens',
+  'gws.no_files': 'Nenhum arquivo encontrado',
+  'gws.no_emails': 'Nenhum email encontrado.',
+  'gws.inbox_clear': 'Caixa limpa',
+  'gws.no_events_today': 'Nenhum evento hoje',
+  'gws.no_recent_files': 'Nenhum arquivo recente',
+  'gws.unread': '{{count}} nao lidos',
+  'gws.events': '{{count}} eventos',
+  'gws.recent_files': '{{count}} arquivos recentes',
+  'gws.briefing_title': 'Resumo Google Workspace',
+  'gws.error': 'Erro: {{msg}}',
 }

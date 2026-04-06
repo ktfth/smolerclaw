@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
+    "@googleworkspace/cli": "^0.22.0",
     "@pnp/cli-microsoft365": "^11.6.0",
     "hono": "^4.6.0"
   },
@@ -43,6 +44,9 @@
     "finance",
     "calendar",
     "outlook",
+    "gmail",
+    "google-workspace",
+    "drive",
     "windows",
     "plugins",
     "bun",

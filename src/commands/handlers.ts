@@ -52,6 +52,7 @@ import {
   formatProjectList, formatProjectDetail, formatOpportunityList,
 } from '../projects'
 import { handleM365Command } from '../m365'
+import { handleGwsCommand } from '../gws'
 import { writeFileSync } from 'node:fs'
 import { logger } from '../core/logger'
 import type { SessionManager } from '../session'
@@ -2129,6 +2130,26 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
       await handleM365Command(args, {
         showSystem: (msg) => ctx.tui.showSystem(msg),
         showError: (msg) => ctx.tui.showError(msg),
+      })
+      break
+    }
+
+    case 'gws': {
+      await handleGwsCommand(args, {
+        showSystem: (msg) => ctx.tui.showSystem(msg),
+        showError: (msg) => ctx.tui.showError(msg),
+        enterDashboard: (panels) => {
+          const layout = {
+            panels: panels.map((p, i) => ({
+              ...p,
+              col: i,
+              row: 0,
+            })),
+            columns: 3,
+            gap: 1,
+          }
+          ctx.tui.enterDashboardMode(layout)
+        },
       })
       break
     }

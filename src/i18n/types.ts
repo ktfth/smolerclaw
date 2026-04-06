@@ -68,6 +68,27 @@ export interface TranslationKeys {
   // ─── Plugins ────────────────────────────────────────────
   'plugin.none_loaded': string
   'plugin.list_title': string
+
+  // ─── GWS (Google Workspace) ────────────────────────────
+  'gws.gmail': string
+  'gws.agenda': string
+  'gws.drive': string
+  'gws.panel_title': string
+  'gws.press_any_key': string
+  'gws.unread_total': string
+  'gws.events_today': string
+  'gws.no_events': string
+  'gws.items': string
+  'gws.no_files': string
+  'gws.no_emails': string
+  'gws.inbox_clear': string
+  'gws.no_events_today': string
+  'gws.no_recent_files': string
+  'gws.unread': string
+  'gws.events': string
+  'gws.recent_files': string
+  'gws.briefing_title': string
+  'gws.error': string
 }
 
 export type TranslationDict = Record<keyof TranslationKeys, string>

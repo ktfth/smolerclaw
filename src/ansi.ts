@@ -207,6 +207,23 @@ export function wrapText(text: string, maxWidth: number): string[] {
     let current = ''
 
     for (const word of words) {
+      // Hard-break words that exceed maxWidth on their own (URLs, long tokens)
+      if (word.length > maxWidth) {
+        if (current) {
+          lines.push(current)
+          current = ''
+        }
+        let remaining = word
+        while (remaining.length > maxWidth) {
+          lines.push(remaining.slice(0, maxWidth))
+          remaining = remaining.slice(maxWidth)
+        }
+        if (remaining) {
+          current = '  ' + remaining
+        }
+        continue
+      }
+
       const testLen = current.length + (current ? 1 : 0) + word.length
       if (testLen > maxWidth && current) {
         lines.push(current)

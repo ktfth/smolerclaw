@@ -1048,14 +1048,22 @@ export class TUI {
   }
 
   showError(msg: string): void {
-    this.lines.push({ text: `  ${C.err}✗ ${msg}${A.reset}` })
+    const maxW = this.width - 6
+    for (const line of msg.split('\n')) {
+      for (const wrapped of wrapText(line, maxW)) {
+        this.lines.push({ text: `  ${C.err}✗ ${wrapped}${A.reset}` })
+      }
+    }
     this.lines.push({ text: '' })
     this.renderAll()
   }
 
   showSystem(msg: string): void {
+    const maxW = this.width - 4
     for (const line of msg.split('\n')) {
-      this.lines.push({ text: `  ${C.sys}${line}${A.reset}` })
+      for (const wrapped of wrapText(line, maxW)) {
+        this.lines.push({ text: `  ${C.sys}${wrapped}${A.reset}` })
+      }
     }
     this.lines.push({ text: '' })
     this.renderAll()
@@ -1913,6 +1921,12 @@ export class TUI {
       // This allows the user to start typing without being blocked
       this.dismissInsight()
       // Fall through to process the key normally
+    }
+
+    // ── Dashboard mode: any key returns to chat ──────────────
+    if (this.viewMode === 'dashboard') {
+      this.enterChatMode()
+      return
     }
 
     // Ctrl+C — clear input first, double-tap to exit
