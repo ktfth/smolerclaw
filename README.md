@@ -66,6 +66,7 @@ smolerclaw is a terminal AI assistant that lives on your Windows machine. It can
 - **Desktop app** — native desktop window via `smolerclaw desktop` (Electrobun)
 - **i18n** — full Portuguese and English interface, auto-detected or set with `/lang`
 - **Scheduler** — recurring jobs via Windows Task Scheduler (`/schedule`, `/jobs`)
+- **Offensive operations** — authorized red-team / pentest / CTF pipeline with three AI-augmented agents (Recon & Surface Mapping, Payload Mutation Loop, Prompt Injection Prober) sharing a persistent operation state and MITRE ATT&CK/ATLAS-mapped findings (`/offensive`)
 
 ## Modes
 
@@ -179,6 +180,7 @@ smolerclaw e um assistente de IA no terminal que vive na sua maquina Windows. El
 - **App Desktop** — janela nativa via `smolerclaw desktop` (Electrobun)
 - **i18n** — interface em Portugues e Ingles, detectado automaticamente ou via `/idioma`
 - **Agendador** — jobs recorrentes via Agendador de Tarefas do Windows (`/schedule`, `/jobs`)
+- **Operacoes ofensivas** — pipeline de red-team / pentest / CTF autorizado com tres agentes (Recon, Payload Mutation, Prompt Injection) compartilhando estado persistente e findings mapeados para MITRE ATT&CK/ATLAS (`/offensive`)
 
 ## Modos
 

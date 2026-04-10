@@ -53,6 +53,22 @@ import {
 } from '../projects'
 import { handleM365Command } from '../m365'
 import { handleGwsCommand } from '../gws'
+import {
+  authorizeOperation,
+  buildReport,
+  createOperation,
+  getCurrentOperation,
+  isOffensiveOpsInitialized,
+  listOperations,
+  loadOperation,
+  prioritizedVectors,
+  revokeAuthorization,
+  setKillChainPhase,
+  type KillChainPhase,
+} from '../services/offensive/state'
+import { describeTTPs } from '../services/offensive/mitre'
+import { runRecon } from '../services/offensive/recon'
+import { runPipeline } from '../services/offensive'
 import { writeFileSync } from 'node:fs'
 import { logger } from '../core/logger'
 import type { SessionManager } from '../session'
@@ -499,6 +515,14 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
           '  /tasks /tarefas         Listar pendentes',
           '  /done /feito            Marcar como concluida',
           '  /rmtask /rmtarefa       Remover tarefa',
+          '',
+          'Offensive / Red Team (authorized targets only):',
+          '  /offensive create <name> --domains a.com  Criar operacao com escopo',
+          '  /offensive authorize <justificativa>      Autorizar (obrigatorio)',
+          '  /offensive recon <target>                 Rodar Recon agent',
+          '  /offensive pipeline <target>              Pipeline completa',
+          '  /offensive status                         Ver operacao atual',
+          '  /offensive report                         Relatorio final com TTPs',
           '',
           'Meta-Learning:',
           '  /reflect /reflexao      Analisa uso e gera insights',
@@ -2126,6 +2150,13 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
       break
     }
 
+    case 'offensive':
+    case 'ofensiva':
+    case 'redteam': {
+      await handleOffensiveCommand(args, ctx)
+      break
+    }
+
     case 'm365': {
       await handleM365Command(args, {
         showSystem: (msg) => ctx.tui.showSystem(msg),
@@ -2320,6 +2351,278 @@ export async function generateDashboardBriefing(dataDir?: string): Promise<Dashb
     columns: Math.min(2, panels.length),
     gap: 1,
   }
+}
+
+/**
+ * /offensive command dispatcher — thin TUI wrapper around the offensive-ops
+ * subsystem. All real work happens in src/services/offensive.
+ */
+async function handleOffensiveCommand(args: string[], ctx: CommandContext): Promise<void> {
+  if (!isOffensiveOpsInitialized()) {
+    ctx.tui.showError('Offensive ops subsystem not initialized.')
+    return
+  }
+  const sub = (args[0] || '').toLowerCase()
+  const rest = args.slice(1)
+
+  const showOp = () => {
+    const op = getCurrentOperation()
+    if (!op) {
+      ctx.tui.showSystem('No active operation. Use /offensive create <name> --domains a.com,b.com')
+      return
+    }
+    const top = prioritizedVectors(5)
+    const lines = [
+      `Operation: ${op.scope.name} (${op.scope.operationId})`,
+      `Phase: ${op.phase}`,
+      `Authorized: ${op.scope.authorized ? 'YES — ' + op.scope.authorization : 'NO'}`,
+      `Scope: domains=[${op.scope.domains.join(', ')}] ips=[${op.scope.ips.join(', ')}] urls=[${op.scope.urls.join(', ')}]`,
+      '',
+      `Assets: ${op.assets.length} | Vectors: ${op.vectors.length} | Findings: ${op.findings.length}`,
+      '',
+      'Top vectors:',
+    ]
+    if (top.length === 0) lines.push('  (none yet — run recon)')
+    for (const { vector, asset, score } of top) {
+      lines.push(`  - [${score.toFixed(2)}] ${vector.class} @ ${asset?.value ?? vector.assetId}`)
+      lines.push(`      ${vector.rationale}`)
+    }
+    ctx.tui.showSystem(lines.join('\n'))
+  }
+
+  try {
+    switch (sub) {
+      case '':
+      case 'status':
+      case 'show':
+        showOp()
+        return
+
+      case 'help':
+      case '?':
+        ctx.tui.showSystem(
+          [
+            'Offensive operations (authorized red-team / pentest / CTF only):',
+            '  /offensive create <name> --domains a.com,b.com [--ips 1.2.3.4] [--urls https://x/]',
+            '  /offensive authorize <justification>   Required before any agent will run',
+            '  /offensive revoke [reason]             Revoke authorization',
+            '  /offensive list                        List saved operations',
+            '  /offensive load <operation_id>         Load an existing operation',
+            '  /offensive status                      Show current op',
+            '  /offensive phase <phase>               Set kill-chain phase',
+            '  /offensive recon <target>              Run recon agent',
+            '  /offensive pipeline <target>           Run recon → correlate → report',
+            '  /offensive report                      Print the final report',
+          ].join('\n'),
+        )
+        return
+
+      case 'list': {
+        const ops = listOperations()
+        if (ops.length === 0) {
+          ctx.tui.showSystem('No saved operations.')
+          return
+        }
+        ctx.tui.showSystem(
+          ops
+            .map((o) => `${o.operationId}  ${o.authorized ? '[A]' : '[ ]'}  ${o.name}  (${o.createdAt})`)
+            .join('\n'),
+        )
+        return
+      }
+
+      case 'load': {
+        const id = rest[0]
+        if (!id) {
+          ctx.tui.showError('Usage: /offensive load <operation_id>')
+          return
+        }
+        const op = loadOperation(id)
+        ctx.tui.showSystem(`Loaded operation ${op.scope.operationId} (${op.scope.name}).`)
+        return
+      }
+
+      case 'create': {
+        // /offensive create <name> --domains a,b --ips 1.2.3.4 --urls https://x
+        if (rest.length === 0) {
+          ctx.tui.showError('Usage: /offensive create <name> [--domains a,b] [--ips 1.2.3.4] [--urls https://x]')
+          return
+        }
+        const flags = parseFlags(rest)
+        const name = flags._positional.join(' ').trim()
+        if (!name) {
+          ctx.tui.showError('Operation name is required.')
+          return
+        }
+        const op = createOperation(name, {
+          domains: flags.domains,
+          ips: flags.ips,
+          urls: flags.urls,
+          orgName: flags.org,
+        })
+        ctx.tui.showSystem(
+          [
+            `Operation created: ${op.scope.operationId}`,
+            `Name: ${op.scope.name}`,
+            'Status: UNAUTHORIZED.',
+            'Run: /offensive authorize <engagement context> before any agent will act.',
+          ].join('\n'),
+        )
+        return
+      }
+
+      case 'authorize':
+      case 'autorizar': {
+        const justification = rest.join(' ').trim()
+        if (!justification) {
+          ctx.tui.showError('Usage: /offensive authorize <bug-bounty / engagement ID / CTF / lab notice>')
+          return
+        }
+        authorizeOperation(justification)
+        ctx.tui.showSystem(`Operation authorized: ${justification}`)
+        return
+      }
+
+      case 'revoke':
+      case 'revogar': {
+        revokeAuthorization(rest.join(' ').trim() || 'no reason given')
+        ctx.tui.showSystem('Authorization revoked.')
+        return
+      }
+
+      case 'phase':
+      case 'fase': {
+        const phase = (rest[0] || '').toLowerCase() as KillChainPhase
+        const valid: KillChainPhase[] = [
+          'reconnaissance', 'weaponization', 'delivery', 'exploitation',
+          'installation', 'command-and-control', 'actions-on-objectives',
+        ]
+        if (!valid.includes(phase)) {
+          ctx.tui.showError(`Phase must be one of: ${valid.join(', ')}`)
+          return
+        }
+        setKillChainPhase(phase)
+        ctx.tui.showSystem(`Phase set to ${phase}.`)
+        return
+      }
+
+      case 'recon': {
+        const target = rest[0]
+        if (!target) {
+          ctx.tui.showError('Usage: /offensive recon <target>')
+          return
+        }
+        ctx.tui.showSystem(`Running recon on ${target}...`)
+        const res = await runRecon(target)
+        ctx.tui.showSystem(
+          [
+            `Recon complete on ${res.target}`,
+            `Ran: ${res.ranSteps.join(', ') || 'none'}`,
+            `Skipped: ${res.skippedSteps.map((s) => `${s.step}(${s.reason})`).join(', ') || 'none'}`,
+            `Assets=${res.assetCount}, new vectors=${res.newVectors}`,
+          ].join('\n'),
+        )
+        return
+      }
+
+      case 'pipeline': {
+        const target = rest[0]
+        if (!target) {
+          ctx.tui.showError('Usage: /offensive pipeline <target>')
+          return
+        }
+        ctx.tui.showSystem(`Running pipeline on ${target}...`)
+        const res = await runPipeline({ rootTarget: target })
+        ctx.tui.showSystem(
+          [
+            `Pipeline complete.`,
+            `Assets: ${res.report.counts.assets} | Vectors: ${res.report.counts.vectors} | Findings: ${res.report.counts.findings}`,
+            '',
+            'Top vectors:',
+            ...res.report.topVectors.map(
+              (v) => `  - [${v.score.toFixed(2)}] ${v.class} @ ${v.target} — ${v.rationale}`,
+            ),
+            '',
+            'Recommended next:',
+            ...res.report.recommendedNext.map((r) => `  - ${r}`),
+          ].join('\n'),
+        )
+        return
+      }
+
+      case 'report':
+      case 'relatorio': {
+        const op = getCurrentOperation()
+        if (!op) {
+          ctx.tui.showError('No active operation.')
+          return
+        }
+        const report = buildReport()
+        const ttps = describeTTPs(report.ttps)
+        ctx.tui.showSystem(
+          [
+            `# ${report.operation.name}`,
+            `Phase: ${report.operation.phase} | Authorized: ${report.operation.authorized}`,
+            `Counts: assets=${report.counts.assets} vectors=${report.counts.vectors} findings=${report.counts.findings}`,
+            '',
+            'Top vectors:',
+            ...report.topVectors.map(
+              (v) => `  - [${v.score.toFixed(2)}] ${v.class} @ ${v.target} — ${v.rationale}`,
+            ),
+            '',
+            'Findings:',
+            ...(report.findings.length
+              ? report.findings.map((f) => `  [${f.severity}] ${f.title}`)
+              : ['  (none)']),
+            '',
+            'TTPs:',
+            ...(ttps.length ? ttps.map((t) => `  - ${t}`) : ['  (none)']),
+            '',
+            'Recommended next:',
+            ...report.recommendedNext.map((r) => `  - ${r}`),
+          ].join('\n'),
+        )
+        return
+      }
+
+      default:
+        ctx.tui.showError(`Unknown subcommand: /offensive ${sub}. Try /offensive help`)
+    }
+  } catch (err) {
+    ctx.tui.showError(err instanceof Error ? err.message : String(err))
+  }
+}
+
+/** Minimal flag parser: --key value, comma-separated lists, remaining tokens in _positional. */
+function parseFlags(args: string[]): {
+  _positional: string[]
+  domains: string[]
+  ips: string[]
+  urls: string[]
+  org?: string
+} {
+  const out = {
+    _positional: [] as string[],
+    domains: [] as string[],
+    ips: [] as string[],
+    urls: [] as string[],
+    org: undefined as string | undefined,
+  }
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]
+    if (a === '--domains') {
+      out.domains = (args[++i] ?? '').split(',').map((x) => x.trim()).filter(Boolean)
+    } else if (a === '--ips') {
+      out.ips = (args[++i] ?? '').split(',').map((x) => x.trim()).filter(Boolean)
+    } else if (a === '--urls') {
+      out.urls = (args[++i] ?? '').split(',').map((x) => x.trim()).filter(Boolean)
+    } else if (a === '--org') {
+      out.org = args[++i]
+    } else {
+      out._positional.push(a)
+    }
+  }
+  return out
 }
 
 export function formatAge(timestamp: number): string {

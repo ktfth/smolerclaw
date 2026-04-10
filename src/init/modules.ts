@@ -20,6 +20,7 @@ import { initAttention } from '../attention'
 import { initPitwall } from '../pitwall'
 import { initDecisionEngine } from '../services/decision-engine'
 import { initDocsEngine } from '../services/docs-engine'
+import { initOffensiveOps } from '../services/offensive/state'
 import { initMonitor } from '../monitor'
 import { initScheduler } from '../scheduler'
 import { initTasks, type Task } from '../tasks'
@@ -58,6 +59,7 @@ export function initCoreModules(
   initProjects(dataDir)
   initPitwall(dataDir)
   initDecisionEngine(dataDir)
+  initOffensiveOps(dataDir)
   initRecommendations(dataDir)
   initNeighborhoods(dataDir)
   initEnergy(dataDir)

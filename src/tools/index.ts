@@ -21,6 +21,7 @@ import {
 import { VAULT_TOOLS } from './vault-tools'
 import { MEMORY_TOOLS } from './memory-tools'
 import { AGENCY_TOOLS } from './agency-tools'
+import { OFFENSIVE_TOOLS } from './offensive-tools'
 import { M365_TOOLS } from '../m365'
 import { GWS_TOOLS } from '../gws'
 import { executeTool as _executeTool } from './execute'
@@ -84,6 +85,7 @@ export function registerWindowsTools(): void {
   TOOLS.push(...DECISION_ENGINE_TOOLS)
   TOOLS.push(...META_LEARNING_TOOLS)
   TOOLS.push(...AGENCY_TOOLS)
+  TOOLS.push(...OFFENSIVE_TOOLS)
   TOOLS.push(...RECOMMENDATION_TOOLS)
   TOOLS.push(...NEIGHBORHOOD_TOOLS)
   TOOLS.push(...ENERGY_TOOLS)
@@ -122,5 +124,6 @@ export {
 export { VAULT_TOOLS } from './vault-tools'
 export { MEMORY_TOOLS } from './memory-tools'
 export { AGENCY_TOOLS } from './agency-tools'
+export { OFFENSIVE_TOOLS } from './offensive-tools'
 export { M365_TOOLS } from '../m365'
 export { GWS_TOOLS } from '../gws'
