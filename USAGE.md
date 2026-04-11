@@ -278,6 +278,19 @@ O RAG indexa memos, materiais, decisoes e sessoes usando TF-IDF + BM25. Indexaca
 
 Tipos: `bug`, `feature`, `test`, `audit`, `incident`
 
+### Consulta de Empresas Brasileiras (OSINT publico)
+
+Lookup de fontes publicas oficiais para apoiar due diligence, cadastro de cliente/fornecedor
+e pesquisa. Fontes: BrasilAPI (CNPJ, CEP) e Registro.br RDAP (dominios .br). Todas as
+consultas sao cacheadas localmente por 24h.
+
+| Comando EN | Comando PT | Descricao | Exemplo |
+|------------|------------|-----------|---------|
+| `/cnpj <cnpj>` | `/empresa <cnpj>` | Ficha da empresa (razao social, CNAE, socios, endereco) | `/cnpj 00.000.000/0001-91` |
+| `/cnpj refresh <cnpj>` | `/empresa refresh <cnpj>` | Forca nova consulta (ignora cache) | `/cnpj refresh 00000000000191` |
+| `/cep <cep>` | `/cep <cep>` | Endereco completo por CEP | `/cep 01311-000` |
+| `/whois-br <dominio>` | `/dominio-br <dominio>` | RDAP/WHOIS publico de dominios .br | `/whois-br registro.br` |
+
 ### Monitor de Processos
 
 | Comando EN | Comando PT | Descricao | Exemplo |
