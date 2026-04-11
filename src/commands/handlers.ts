@@ -1444,6 +1444,110 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
       break
     }
 
+    // ── Brazilian company lookup (OSINT from public registries) ─────
+    // Backed by BrasilAPI (CNPJ, CEP) and Registro.br RDAP (.br domains).
+    // All sources are public, no authentication required. Results cached
+    // locally for 24h.
+
+    case 'cnpj':
+    case 'empresa': {
+      const raw = args[0]
+      if (!raw) {
+        ctx.tui.showSystem('Uso: /cnpj <cnpj>  (ex: /cnpj 00.000.000/0001-00)\n     /cnpj refresh <cnpj>  forca nova consulta')
+        break
+      }
+      const mod = await import('../br-company')
+      const refresh = raw === 'refresh' || raw === '-r'
+      const cnpjArg = refresh ? args[1] : raw
+      if (!cnpjArg) {
+        ctx.tui.showError('Informe o CNPJ. Ex: /cnpj 00.000.000/0001-00')
+        break
+      }
+      if (!mod.normalizeCnpj(cnpjArg)) {
+        ctx.tui.showError('CNPJ invalido. Use 14 digitos (com ou sem formatacao).')
+        break
+      }
+      ctx.tui.disableInput()
+      try {
+        const company = await mod.lookupCnpj(cnpjArg, { refresh })
+        ctx.tui.showSystem(mod.formatCompany(company))
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (msg === 'not_found') {
+          ctx.tui.showError('CNPJ nao encontrado na base da Receita (BrasilAPI).')
+        } else if (msg === 'rate_limited') {
+          ctx.tui.showError('BrasilAPI limitou a taxa de consultas. Tente de novo em alguns segundos.')
+        } else if (msg === 'invalid_cnpj') {
+          ctx.tui.showError('CNPJ invalido.')
+        } else {
+          ctx.tui.showError(`Falha ao consultar CNPJ: ${msg}`)
+        }
+      }
+      ctx.tui.enableInput()
+      break
+    }
+
+    case 'cep': {
+      const raw = args[0]
+      if (!raw) {
+        ctx.tui.showSystem('Uso: /cep <cep>  (ex: /cep 01311-000)')
+        break
+      }
+      const mod = await import('../br-company')
+      if (!mod.normalizeCep(raw)) {
+        ctx.tui.showError('CEP invalido. Use 8 digitos (com ou sem hifen).')
+        break
+      }
+      ctx.tui.disableInput()
+      try {
+        const cep = await mod.lookupCep(raw)
+        ctx.tui.showSystem(mod.formatCepInfo(cep))
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (msg === 'not_found') {
+          ctx.tui.showError('CEP nao encontrado (BrasilAPI).')
+        } else {
+          ctx.tui.showError(`Falha ao consultar CEP: ${msg}`)
+        }
+      }
+      ctx.tui.enableInput()
+      break
+    }
+
+    case 'whois-br':
+    case 'dominio-br':
+    case 'dominiobr': {
+      const raw = args[0]
+      if (!raw) {
+        ctx.tui.showSystem('Uso: /whois-br <dominio.br>  (ex: /whois-br registro.br)')
+        break
+      }
+      const mod = await import('../br-company')
+      const domain = mod.normalizeDomain(raw)
+      if (!domain) {
+        ctx.tui.showError('Dominio invalido.')
+        break
+      }
+      if (!mod.isBrDomain(domain)) {
+        ctx.tui.showError('Este comando consulta apenas dominios .br (Registro.br RDAP).')
+        break
+      }
+      ctx.tui.disableInput()
+      try {
+        const info = await mod.lookupDomain(domain)
+        ctx.tui.showSystem(mod.formatDomain(info))
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (msg === 'not_found') {
+          ctx.tui.showError('Dominio nao encontrado no Registro.br.')
+        } else {
+          ctx.tui.showError(`Falha ao consultar dominio: ${msg}`)
+        }
+      }
+      ctx.tui.enableInput()
+      break
+    }
+
     // ── Email command ──────────────────────────────────────
 
     case 'email':

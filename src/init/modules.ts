@@ -5,6 +5,7 @@ import { initMaterials } from '../materials'
 import { initNews } from '../news'
 import { initFinance } from '../finance'
 import { initFinanceGuard } from '../finance-guard'
+import { initBrCompany } from '../br-company'
 import { initDecisions } from '../decisions'
 import { initPomodoro } from '../pomodoro'
 import { initWorkflows } from '../workflows'
@@ -50,6 +51,7 @@ export function initCoreModules(
   registerSessionManager(sessions)
   initFinance(dataDir)
   initFinanceGuard()
+  initBrCompany(dataDir)
   initDecisions(dataDir)
   initWorkflows(dataDir)
   initMacros(dataDir)
