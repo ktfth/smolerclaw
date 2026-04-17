@@ -2,9 +2,9 @@
 active: true
 iteration: 1
 session_id: 
-max_iterations: 42
+max_iterations: 100
 completion_promise: null
-started_at: "2026-04-03T02:18:13Z"
+started_at: "2026-04-17T02:25:30Z"
 ---
 
-smolerclaw desktop = use no electrobun a ideia é que ele tenha suporte deste modo --complete-promise DONE
+Adicione um sistema de bookmark --complete-promise DONE

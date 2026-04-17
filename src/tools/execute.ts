@@ -12,6 +12,7 @@ import { toolFetchUrl } from './network-tools'
 import { executeVaultTool } from './vault-tools'
 import { executeMemoryTool } from './memory-tools'
 import { executeAgencyTool } from './agency-tools'
+import { executeDockerSecurityTool } from './docker-security-tools'
 import { executeBusinessTool } from './business-tools'
 import { executeM365Tool } from '../m365'
 import { executeGwsTool } from '../gws'
@@ -96,6 +97,10 @@ async function executeToolInternal(
   // Agency tools
   const agencyResult = await executeAgencyTool(name, input)
   if (agencyResult !== null) return agencyResult
+
+  // Docker, Security, FSWatcher, DB tools
+  const dockerSecResult = await executeDockerSecurityTool(name, input)
+  if (dockerSecResult !== null) return dockerSecResult
 
   // M365 tools
   const m365Result = await executeM365Tool(name, input)

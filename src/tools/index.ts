@@ -17,10 +17,12 @@ import {
   PITWALL_TOOLS, BLAST_RADIUS_TOOLS, DECISION_ENGINE_TOOLS,
   NEWSFEED_TOOLS, ARCHIVE_TOOLS, META_LEARNING_TOOLS,
   RECOMMENDATION_TOOLS, NEIGHBORHOOD_TOOLS, ENERGY_TOOLS,
+  BOOKMARK_TOOLS,
 } from './business-tools'
 import { VAULT_TOOLS } from './vault-tools'
 import { MEMORY_TOOLS } from './memory-tools'
 import { AGENCY_TOOLS } from './agency-tools'
+import { DOCKER_SECURITY_TOOLS } from './docker-security-tools'
 import { M365_TOOLS } from '../m365'
 import { GWS_TOOLS } from '../gws'
 import { executeTool as _executeTool } from './execute'
@@ -87,6 +89,8 @@ export function registerWindowsTools(): void {
   TOOLS.push(...RECOMMENDATION_TOOLS)
   TOOLS.push(...NEIGHBORHOOD_TOOLS)
   TOOLS.push(...ENERGY_TOOLS)
+  TOOLS.push(...BOOKMARK_TOOLS)
+  TOOLS.push(...DOCKER_SECURITY_TOOLS)
   TOOLS.push(...M365_TOOLS)
   TOOLS.push(...GWS_TOOLS)
 }
@@ -118,9 +122,11 @@ export {
   PITWALL_TOOLS, BLAST_RADIUS_TOOLS, DECISION_ENGINE_TOOLS,
   NEWSFEED_TOOLS, ARCHIVE_TOOLS, META_LEARNING_TOOLS,
   RECOMMENDATION_TOOLS, NEIGHBORHOOD_TOOLS, ENERGY_TOOLS,
+  BOOKMARK_TOOLS,
 } from './business-tools'
 export { VAULT_TOOLS } from './vault-tools'
 export { MEMORY_TOOLS } from './memory-tools'
 export { AGENCY_TOOLS } from './agency-tools'
+export { DOCKER_SECURITY_TOOLS } from './docker-security-tools'
 export { M365_TOOLS } from '../m365'
 export { GWS_TOOLS } from '../gws'

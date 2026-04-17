@@ -107,6 +107,11 @@ import {
   formatNeighborhoodList, formatNeighborhoodDetail,
   type LayerType,
 } from '../neighborhoods'
+import {
+  saveBookmark, updateBookmark, deleteBookmark, getBookmark,
+  searchBookmarks, listBookmarks, getBookmarkTags, getBookmarksByDomain,
+  formatBookmarkList, formatBookmarkDetail, formatBookmarkTags, formatBookmarkDomains,
+} from '../bookmarks'
 import { parseFuzzyDate } from './helpers'
 
 // ─── Task/Reminder Tools (cross-platform) ──────────────────
@@ -1614,6 +1619,115 @@ export const ENERGY_TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+// ─── Bookmark Tools ──────────────────────────────────────────
+
+export const BOOKMARK_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'save_bookmark',
+    description:
+      'Save a URL/link as a bookmark with title and optional tags/description. ' +
+      'Use when the user says "salva esse link", "bookmark isso", "guarda essa URL", etc.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        url: { type: 'string', description: 'The URL to bookmark' },
+        title: { type: 'string', description: 'Title/name for the bookmark' },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional tags for categorization',
+        },
+        description: {
+          type: 'string',
+          description: 'Optional description or notes. Use #tags for auto-tagging.',
+        },
+      },
+      required: ['url', 'title'],
+    },
+  },
+  {
+    name: 'search_bookmarks',
+    description:
+      'Search bookmarks by keyword, tag (#tag), or domain (@domain). ' +
+      'Use when the user asks "qual era aquele link...", "mostra meus bookmarks de...", etc.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query. Use #tag for tag search, @domain for domain search, or plain text.',
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'list_bookmarks',
+    description:
+      'List all bookmarks, most recent first. ' +
+      'Use when the user says "mostra meus bookmarks", "lista os links salvos", etc.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        limit: {
+          type: 'number',
+          description: 'Max bookmarks to return (default: 20)',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'delete_bookmark',
+    description:
+      'Delete a bookmark by its ID. ' +
+      'Use when the user says "remove esse bookmark", "apaga esse link", etc.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Bookmark ID to delete' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'update_bookmark',
+    description:
+      'Update a bookmark\'s title, URL, tags, or description. ' +
+      'Use when the user says "atualiza esse bookmark", "muda o titulo desse link", etc.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'Bookmark ID to update' },
+        url: { type: 'string', description: 'New URL (optional)' },
+        title: { type: 'string', description: 'New title (optional)' },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'New tags (optional)',
+        },
+        description: { type: 'string', description: 'New description (optional)' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'bookmark_tags',
+    description: 'Show all bookmark tags with counts, or bookmark domains with counts.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        view: {
+          type: 'string',
+          enum: ['tags', 'domains'],
+          description: 'View tags or domains (default: tags)',
+        },
+      },
+      required: [],
+    },
+  },
+]
+
 // ─── Business Tool Execution ─────────────────────────────────
 
 export async function executeBusinessTool(
@@ -1804,6 +1918,49 @@ export async function executeBusinessTool(
       if (!query?.trim()) return formatMemoList(listMemos())
       const results = searchMemos(query)
       return formatMemoList(results)
+    }
+    // Bookmark tools
+    case 'save_bookmark': {
+      const url = input.url as string
+      const title = input.title as string
+      if (!url?.trim() || !title?.trim()) return 'Error: url e title sao obrigatorios.'
+      const bk = saveBookmark(url, title, {
+        tags: input.tags as string[] | undefined,
+        description: input.description as string | undefined,
+      })
+      const tagStr = bk.tags.length > 0 ? ` [${bk.tags.map((t) => '#' + t).join(' ')}]` : ''
+      return `Bookmark salvo: ${bk.title}${tagStr}\n${bk.url}  {${bk.id}}`
+    }
+    case 'search_bookmarks': {
+      const query = input.query as string
+      if (!query?.trim()) return formatBookmarkList(listBookmarks())
+      return formatBookmarkList(searchBookmarks(query))
+    }
+    case 'list_bookmarks': {
+      const limit = (input.limit as number) ?? 20
+      return formatBookmarkList(listBookmarks(limit))
+    }
+    case 'delete_bookmark': {
+      const id = input.id as string
+      if (!id?.trim()) return 'Error: id e obrigatorio.'
+      const deleted = deleteBookmark(id)
+      return deleted ? `Bookmark {${id}} removido.` : `Bookmark {${id}} nao encontrado.`
+    }
+    case 'update_bookmark': {
+      const id = input.id as string
+      if (!id?.trim()) return 'Error: id e obrigatorio.'
+      const updated = updateBookmark(id, {
+        url: input.url as string | undefined,
+        title: input.title as string | undefined,
+        description: input.description as string | undefined,
+        tags: input.tags as string[] | undefined,
+      })
+      if (!updated) return `Bookmark {${id}} nao encontrado.`
+      return `Bookmark atualizado: ${updated.title}\n${updated.url}  {${updated.id}}`
+    }
+    case 'bookmark_tags': {
+      const view = (input.view as string) ?? 'tags'
+      return view === 'domains' ? formatBookmarkDomains() : formatBookmarkTags()
     }
     // Finance tools
     case 'record_transaction': {

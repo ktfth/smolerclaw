@@ -1,4 +1,7 @@
 import { initVault, initShadowBackup, startAutoBackup } from '../vault'
+import { initSQLite } from '../storage/sqlite'
+import { initFSWatcher } from '../fs-watcher'
+import { wireWatcherToSQLite } from '../tools/docker-security-tools'
 import { initPeople } from '../people'
 import { initMemos } from '../memos'
 import { initMaterials } from '../materials'
@@ -17,6 +20,7 @@ import { initRecommendations } from '../recommendations'
 import { initNeighborhoods } from '../neighborhoods'
 import { startMapServer } from '../map-server'
 import { initEnergy } from '../energy'
+import { initBookmarks } from '../bookmarks'
 import { initAttention } from '../attention'
 import { initPitwall } from '../pitwall'
 import { initDecisionEngine } from '../services/decision-engine'
@@ -44,6 +48,9 @@ export function initCoreModules(
   _coreInitialized = true
 
   initVault(dataDir, getConfigPath().replace(/[/\\]config\.json$/, ''))
+  initSQLite(dataDir)
+  initFSWatcher()
+  wireWatcherToSQLite()
   initPeople(dataDir)
   initMemos(dataDir)
   initMaterials(dataDir)
@@ -64,6 +71,7 @@ export function initCoreModules(
   initNeighborhoods(dataDir)
   initEnergy(dataDir)
   initAttention(dataDir)
+  initBookmarks(dataDir)
   startMapServer()
   initTasks(dataDir, () => {}) // no-op notifier for headless modes; TUI overrides later
 }

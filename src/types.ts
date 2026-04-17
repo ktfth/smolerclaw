@@ -248,6 +248,43 @@ export interface PlanningCompletedEvent {
   timestamp: number
 }
 
+// ─── FSWatcher Types ────────────────────────────────────────
+
+/**
+ * File system change event — emitted when FSWatcher detects a change.
+ */
+export interface FSChangedEvent {
+  watchId: string
+  eventType: 'rename' | 'change'
+  filePath: string
+  relativePath: string
+  extension: string
+  timestamp: number
+}
+
+/**
+ * Docker status event — emitted on Docker operations.
+ */
+export interface DockerStatusEvent {
+  action: string
+  containerId?: string
+  containerName?: string
+  status: string
+  timestamp: number
+}
+
+/**
+ * Security audit event — emitted on security scans and findings.
+ */
+export interface SecurityAuditEvent {
+  scanType: string
+  target: string
+  passed: boolean
+  findingsCount: number
+  severity: string
+  timestamp: number
+}
+
 /**
  * Map of event names to their payload types.
  * This enables strict typing for the event bus.
@@ -272,4 +309,8 @@ export interface EventBusEvents {
   // M365 events
   'm365:auth_changed': { status: 'connected' | 'disconnected'; connectedAs: string | null; timestamp: number }
   'm365:data_fetched': { service: string; command: string; duration: number; timestamp: number }
+  // FSWatcher / Docker / Security events
+  'fs:changed': FSChangedEvent
+  'docker:status': DockerStatusEvent
+  'security:audit': SecurityAuditEvent
 }
