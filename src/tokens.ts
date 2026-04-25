@@ -16,6 +16,7 @@ const PRICING: Record<string, { input: number; output: number }> = {
   'claude-sonnet-4-6-20250627': { input: 3.00, output: 15.00 },
   'claude-opus-4-20250514':    { input: 15.00, output: 75.00 },
   'claude-opus-4-6-20250318':  { input: 15.00, output: 75.00 },
+  'codex:codex-mini-latest':   { input: 1.50, output: 6.00 },
 }
 
 // Fallback for unknown models (conservative estimate)
@@ -44,6 +45,7 @@ function findPricing(model: string): { input: number; output: number } {
   if (lower.includes('haiku')) return PRICING['claude-haiku-4-5-20251001']
   if (lower.includes('opus')) return PRICING['claude-opus-4-20250514']
   if (lower.includes('sonnet')) return PRICING['claude-sonnet-4-20250514']
+  if (lower.includes('codex-mini')) return PRICING['codex:codex-mini-latest']
 
   return DEFAULT_PRICING
 }

@@ -18,6 +18,7 @@ interface ChatProvider {
 
 export interface UIModeConfig {
   provider: ChatProvider
+  model: string
   systemPrompt: string
   enableTools: boolean
   sessionManager: SessionManager
@@ -50,6 +51,7 @@ export async function runWebUI(config: UIModeConfig): Promise<void> {
   const server = createWebServer({
     port,
     provider: config.provider,
+    model: config.model,
     systemPrompt: config.systemPrompt,
     enableTools: config.enableTools,
     sessionManager: config.sessionManager,

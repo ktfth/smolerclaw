@@ -8,6 +8,7 @@ import { humanizeError } from './errors'
 import { needsApproval, type ApprovalCallback } from './approval'
 
 export class ClaudeProvider {
+  readonly name = 'anthropic'
   private client: Anthropic
   private approvalMode: ToolApprovalMode
   private approvalCallback: ApprovalCallback | null = null

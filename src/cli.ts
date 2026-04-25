@@ -127,7 +127,7 @@ Commands:
 Options:
   -h, --help           Show this help
   -v, --version        Show version
-  -m, --model <name>   Override model (e.g. claude-sonnet-4-20250514)
+  -m, --model <name>   Override model (e.g. claude-sonnet-4-20250514 or codex:gpt-5.4)
   -s, --session <name> Start with a specific session
   --max-tokens <n>     Override max tokens per response
   --no-tools           Disable tool use for this session
@@ -142,11 +142,13 @@ Examples:
   smolerclaw -p "what is 2+2"      Print answer and exit
   echo "review" | smolerclaw -p     Pipe input, print response
   smolerclaw -m claude-sonnet-4-20250514 -s work
+  smolerclaw -m codex:gpt-5.4 "corrija este bug"
 
 Commands (inside TUI):
   /help     Show commands      /clear    Clear conversation
   /new      New session        /load     Load session
-  /model    Show/set model     /persona  Switch mode
+  /model    Show/set model     /login    Login Claude/Codex
+  /review   Cross-review       /persona  Switch mode
   /briefing Daily briefing     /news     News radar
   /task     Create task        /tasks    List tasks
   /open     Open Windows app   /calendar Outlook calendar

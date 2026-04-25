@@ -8,6 +8,7 @@ import type { Message, ChatEvent } from '../../types'
 import type { UIMessage, UIToolCall, UISession, ChatRequest } from './types'
 import type { SessionManager } from '../../session'
 import { eventBus } from '../../core/event-bus'
+import { estimateCost } from '../../tokens'
 
 /**
  * Generic provider interface matching both ClaudeProvider and OpenAICompatProvider
@@ -15,10 +16,12 @@ import { eventBus } from '../../core/event-bus'
 interface ChatProvider {
   chat(messages: Message[], systemPrompt: string, enableTools?: boolean): AsyncGenerator<ChatEvent>
   setApprovalCallback?(cb: (name: string, input: Record<string, unknown>, riskLevel: string) => Promise<boolean>): void
+  setConversationKey?(key: string): void
 }
 
 export interface ChatServiceConfig {
   provider: ChatProvider
+  model: string
   systemPrompt: string
   enableTools: boolean
   sessionManager: SessionManager
@@ -30,11 +33,13 @@ export class ChatService {
   private systemPrompt: string
   private enableTools: boolean
   private sessionManager: SessionManager
+  private model: string
   private currentSessionName: string | null = null
   private messages: Message[] = []
 
   constructor(config: ChatServiceConfig) {
     this.provider = config.provider
+    this.model = config.model
     this.systemPrompt = config.systemPrompt
     this.enableTools = config.enableTools
     this.sessionManager = config.sessionManager
@@ -61,6 +66,7 @@ export class ChatService {
 
     this.currentSessionName = sessionId
     this.messages = [...session.messages]
+    this.provider.setConversationKey?.(sessionId)
 
     // Keep the shared SessionManager in sync so tools see the correct active session
     this.sessionManager.switchTo(sessionId)
@@ -79,6 +85,7 @@ export class ChatService {
     this.currentSessionName = name
     this.messages = [...session.messages]
     this.sessionManager.switchTo(name)
+    this.provider.setConversationKey?.(name)
 
     return {
       id: session.name,
@@ -95,6 +102,7 @@ export class ChatService {
     const previous = this.currentSessionName
     this.currentSessionName = sessionName
     this.messages = []
+    this.provider.setConversationKey?.(sessionName)
 
     const session = this.sessionManager.createSession(sessionName)
 
@@ -155,6 +163,7 @@ export class ChatService {
     let outputTokens = 0
 
     try {
+      this.provider.setConversationKey?.(this.currentSessionName || 'default')
       for await (const event of this.provider.chat(this.messages, this.systemPrompt, this.enableTools)) {
         switch (event.type) {
           case 'text':
@@ -230,10 +239,7 @@ export class ChatService {
   }
 
   private calculateCost(inputTokens: number, outputTokens: number): number {
-    // Approximate cost in cents (Claude 3.5 Sonnet pricing)
-    const inputCost = (inputTokens / 1_000_000) * 300 // $3/MTok
-    const outputCost = (outputTokens / 1_000_000) * 1500 // $15/MTok
-    return Math.round((inputCost + outputCost) * 100) / 100
+    return estimateCost({ inputTokens, outputTokens }, this.model).totalCostCents
   }
 
   private toUIMessage(msg: Message): UIMessage {

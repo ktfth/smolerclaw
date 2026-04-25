@@ -80,6 +80,7 @@ export class TUI {
     '/help', '/clear', '/commit', '/persona', '/copy', '/fork',
     '/new', '/load', '/sessions', '/delete', '/model', '/export',
     '/cost', '/retry', '/undo', '/search', '/lang', '/config', '/exit',
+    '/login', '/review', '/consult',
     '/briefing', '/news', '/open', '/openfile', '/openurl', '/apps',
     '/sysinfo', '/calendar', '/ask', '/budget', '/plugins',
     '/task', '/tasks', '/done', '/rmtask',
@@ -105,6 +106,7 @@ export class TUI {
     '/anotar', '/ajuda', '/limpar', '/commitar', '/modo', '/copiar',
     '/novo', '/carregar', '/sessoes', '/deletar', '/modelo', '/exportar',
     '/custo', '/repetir', '/desfazer', '/buscar', '/idioma', '/sair',
+    '/revisar', '/consultar',
     '/resumo', '/noticias', '/abrir', '/programas', '/sistema',
     '/agenda', '/calendario', '/perguntar', '/orcamento',
     '/tarefa', '/tarefas', '/feito', '/concluido', '/rmtarefa',
@@ -117,6 +119,11 @@ export class TUI {
     // Model selection
     '/model': ['haiku', 'sonnet', 'sonnet-4.6', 'opus', 'opus-4.6'],
     '/modelo': ['haiku', 'sonnet', 'sonnet-4.6', 'opus', 'opus-4.6'],
+    '/login': ['claude', 'codex'],
+    '/review': ['claude', 'codex'],
+    '/consult': ['claude', 'codex'],
+    '/revisar': ['claude', 'codex'],
+    '/consultar': ['claude', 'codex'],
     // News categories
     '/news': ['business', 'tech', 'finance', 'brazil', 'world', 'security'],
     '/noticias': ['business', 'tech', 'finance', 'brazil', 'world', 'security'],
@@ -180,6 +187,9 @@ export class TUI {
     '/sessions': 'Listar sessoes', '/sessoes': 'Listar sessoes',
     '/delete': 'Deletar sessao', '/deletar': 'Deletar sessao',
     '/model': 'Trocar modelo IA', '/modelo': 'Trocar modelo IA',
+    '/login': 'Login e troca de provider',
+    '/review': 'Revisao cruzada sob demanda',
+    '/consult': 'Consulta de revisao cruzada',
     '/export': 'Exportar conversa', '/exportar': 'Exportar conversa',
     '/cost': 'Ver custo da sessao', '/custo': 'Ver custo da sessao',
     '/retry': 'Repetir ultima mensagem', '/repetir': 'Repetir ultima mensagem',
@@ -198,6 +208,7 @@ export class TUI {
     '/calendar': 'Ver calendario', '/calendario': 'Ver calendario', '/agenda': 'Ver calendario',
     '/ask': 'Perguntar ao modelo', '/perguntar': 'Perguntar ao modelo',
     '/budget': 'Ver orcamento', '/orcamento': 'Ver orcamento',
+    '/revisar': 'Revisao cruzada sob demanda', '/consultar': 'Consulta de revisao cruzada',
     '/plugins': 'Gerenciar plugins',
     '/task': 'Criar tarefa', '/tarefa': 'Criar tarefa',
     '/tasks': 'Listar tarefas', '/tarefas': 'Listar tarefas',
@@ -274,6 +285,7 @@ export class TUI {
     private model: string,
     private sessionName: string,
     private authInfo: string = '',
+    private assistantLabel: string = 'Assistant',
     private dataDir?: string,
   ) {
     this.viewManager = new ViewManager()
@@ -1076,6 +1088,16 @@ export class TUI {
 
   updateModel(m: string): void {
     this.model = m
+    this.renderHeader()
+  }
+
+  updateAuthInfo(info: string): void {
+    this.authInfo = info
+    this.renderHeader()
+  }
+
+  updateAssistantLabel(label: string): void {
+    this.assistantLabel = label
     this.renderHeader()
   }
 
@@ -2193,7 +2215,7 @@ export class TUI {
       })
     } else {
       this.lines.push({
-        text: `${C.ai}${A.bold}  Claude${A.reset}  ${A.dim}${ts}${A.reset}`,
+        text: `${C.ai}${A.bold}  ${this.assistantLabel}${A.reset}  ${A.dim}${ts}${A.reset}`,
       })
     }
   }

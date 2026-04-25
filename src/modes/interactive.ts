@@ -26,7 +26,7 @@ import type { loadPlugins } from '../plugins'
 import type { Message, ToolCall } from '../types'
 
 export async function runInteractive(
-  claude: AnyProvider,
+  provider: AnyProvider,
   sessions: SessionManager,
   config: ReturnType<typeof loadConfig>,
   authHolder: AuthHolder,
@@ -38,9 +38,16 @@ export async function runInteractive(
   initialPrompt?: string,
 ): Promise<void> {
   const tracker = new TokenTracker(config.model)
-  const tui = new TUI(config.model, sessions.session.name, authLabel(authHolder.auth), config.dataDir)
+  const tui = new TUI(
+    config.model,
+    sessions.session.name,
+    authLabel(authHolder.auth),
+    provider.getAssistantLabel(),
+    config.dataDir,
+  )
   let currentPersona = 'default'
   let activeSystemPrompt = activeSystemPromptInit
+  provider.setConversationKey(sessions.session.name)
 
   // Initialize people, task, memo, and material systems
   initAllModules(config.dataDir, tui, sessions)
@@ -55,22 +62,11 @@ export async function runInteractive(
     tui.setPersonaMode('productivity')
   }
 
-  // Start auto-refresh for OAuth token
-  startAutoRefresh(authHolder.auth, {
-    onRefreshed: (fresh) => {
-      authHolder.auth = fresh
-      if ('updateToken' in claude) {
-        (claude as any).updateToken(fresh.token)
-      }
-    },
-    onRefreshFailed: (msg) => {
-      tui.showError(`Auto-refresh: ${msg}`)
-    },
-  })
+  syncProviderState()
 
   // Wire tool approval callback
-  if (config.toolApproval !== 'auto' && claude.setApprovalCallback) {
-    claude.setApprovalCallback(async (toolName, input, riskLevel) => {
+  if (config.toolApproval !== 'auto') {
+    provider.setApprovalCallback(async (toolName, input, riskLevel) => {
       // Show diff preview for edit_file
       if (toolName === 'edit_file' && input.old_text && input.new_text) {
         const diffLines = formatEditDiff(String(input.old_text), String(input.new_text))
@@ -81,7 +77,7 @@ export async function runInteractive(
       const desc = formatApprovalPrompt(toolName, input)
       const approved = await tui.promptApproval(desc)
       if (tui._approveAllRequested) {
-        claude.setAutoApproveAll?.(true)
+        provider.setAutoApproveAll(true)
         tui._approveAllRequested = false
       }
       return approved
@@ -153,7 +149,7 @@ export async function runInteractive(
     activeAbort = new AbortController()
 
     try {
-      for await (const event of claude.chat(sessions.messages, activeSystemPrompt, enableTools)) {
+      for await (const event of provider.chat(sessions.messages, activeSystemPrompt, enableTools)) {
         if (activeAbort.signal.aborted) break
 
         switch (event.type) {
@@ -250,7 +246,8 @@ export async function runInteractive(
   const commandCtx: CommandContext = {
     tui,
     sessions,
-    claude,
+    provider,
+    enableTools,
     config,
     auth: authHolder,
     skills,
@@ -272,6 +269,7 @@ export async function runInteractive(
       timeContext = ctx
       commandCtx.timeContext = ctx
     },
+    syncProviderState,
     handleSubmit,
     cleanup,
   }
@@ -290,7 +288,7 @@ export async function runInteractive(
     onExit: cleanup,
   })
 
-  const authInfo = `Authenticated via Claude ${authHolder.auth.subscriptionType} subscription.`
+  const authInfo = formatStartupAuthInfo(authHolder.auth, provider.getAssistantLabel())
   tui.showSystem(`smolerclaw v${getVersion()} — the micro AI assistant.\nCriado por Aldeia Viva - Impactando Vida (aldeia-viva.com.br)\n${authInfo}\nType /ajuda for commands.`)
 
   // Morning briefing — first run of the day
@@ -339,4 +337,42 @@ export async function runInteractive(
   if (initialPrompt) {
     await handleSubmit(initialPrompt)
   }
+
+  function syncProviderState(): void {
+    tui.updateAssistantLabel(provider.getAssistantLabel())
+    tui.updateAuthInfo(authLabel(authHolder.auth))
+
+    stopAutoRefresh()
+    if (authHolder.auth && provider.supportsAutoRefresh()) {
+      startAutoRefresh(authHolder.auth as AuthResult & { expiresAt: number }, {
+        onRefreshed: (fresh) => {
+          provider.syncAuth(fresh)
+          tui.updateAuthInfo(authLabel(fresh))
+        },
+        onRefreshFailed: (msg) => {
+          tui.showError(`Auto-refresh: ${msg}`)
+        },
+      })
+    }
+  }
+}
+
+function formatStartupAuthInfo(auth: AuthResult | null, assistantLabel: string): string {
+  if (!auth) {
+    return `${assistantLabel} ready.`
+  }
+
+  if (auth.provider === 'anthropic') {
+    return `Authenticated via Claude ${auth.subscriptionType} subscription.`
+  }
+
+  if (auth.provider === 'codex') {
+    return 'Authenticated via Codex CLI login.'
+  }
+
+  if (auth.provider === 'openai') {
+    return 'Authenticated via OPENAI_API_KEY.'
+  }
+
+  return `${assistantLabel} ready (local provider).`
 }

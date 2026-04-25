@@ -1,13 +1,13 @@
 import { loadConfig, saveConfig, getConfigPath } from '../config'
-import { refreshAuth, authLabel, type AuthResult } from '../auth'
+import { refreshAuthForProvider, resolveAuthForProvider, authLabel, type AuthResult } from '../auth'
 import { formatAutoRefreshStatus, updateAutoRefreshAuth } from '../auto-refresh'
 import { loadSkills, buildSystemPrompt, formatSkillList } from '../skills'
 import type { SessionPickerEntry, NewsPickerEntry, DashboardLayout, DashboardPanel } from '../tui'
 import { TUI } from '../tui'
 import { TokenTracker } from '../tokens'
 import { exportToMarkdown } from '../export'
-import { resolveModel, formatModelList, modelDisplayName } from '../models'
-import { parseModelString, formatProviderList } from '../providers'
+import { resolveModel, formatModelList, modelDisplayName, defaultModelForProvider } from '../models'
+import { formatProviderList, assistantNameForProvider, parseModelString, type ProviderType } from '../providers'
 import { gitDiff, gitStatus, gitStageAll, gitCommit, isGitRepo } from '../git'
 import { getPersona, formatPersonaList } from '../personas'
 import { copyToClipboard } from '../clipboard'
@@ -56,15 +56,17 @@ import { handleGwsCommand } from '../gws'
 import { writeFileSync } from 'node:fs'
 import { logger } from '../core/logger'
 import type { SessionManager } from '../session'
-import type { AnyProvider } from '../init/providers'
+import { initProvider, type AnyProvider } from '../init/providers'
 import type { loadPlugins } from '../plugins'
+import { loginWithProvider, type LoginProvider } from '../login'
 
 export interface CommandContext {
   tui: TUI
   sessions: SessionManager
-  claude: AnyProvider
+  provider: AnyProvider
+  enableTools: boolean
   config: ReturnType<typeof loadConfig>
-  auth: { auth: AuthResult }
+  auth: { auth: AuthResult | null }
   skills: ReturnType<typeof loadSkills>
   tracker: TokenTracker
   plugins: ReturnType<typeof loadPlugins>
@@ -75,6 +77,7 @@ export interface CommandContext {
   setCurrentPersona: (name: string) => void
   timeContext: TimeContext | null
   setTimeContext: (ctx: TimeContext | null) => void
+  syncProviderState: () => void
   handleSubmit: (input: string) => Promise<void>
   cleanup: () => void
 }
@@ -104,6 +107,7 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
     case 'nova': {
       const name = args[0] || `s-${Date.now()}`
       ctx.sessions.switchTo(name)
+      ctx.provider.setConversationKey(name)
       ctx.tui.clearMessages()
       ctx.tui.updateSession(name)
       ctx.tui.showSystem(`New session: ${name}`)
@@ -118,6 +122,7 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
         break
       }
       ctx.sessions.switchTo(name)
+      ctx.provider.setConversationKey(name)
       ctx.tui.clearMessages()
       for (const msg of ctx.sessions.messages) {
         if (msg.role === 'user') ctx.tui.addUserMessage(msg.content)
@@ -159,6 +164,7 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
             const wasArchived = archived.some((e) => e.name === target)
             if (wasArchived) ctx.sessions.unarchive(target)
             ctx.sessions.switchTo(target)
+            ctx.provider.setConversationKey(target)
             ctx.tui.clearMessages()
             for (const msg of ctx.sessions.messages) {
               if (msg.role === 'user') ctx.tui.addUserMessage(msg.content)
@@ -277,20 +283,18 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
         ctx.tui.showSystem(formatModelList(ctx.config.model) + '\n\n' + formatProviderList())
         break
       }
-      const { provider, model: modelName } = parseModelString(m)
-      const resolved = provider === 'anthropic' ? resolveModel(modelName) : modelName
-      ctx.config.model = provider === 'anthropic' ? resolved : `${provider}:${resolved}`
-      saveConfig(ctx.config)
-      if (provider === 'anthropic') {
-        ctx.claude.setModel(resolved)
-      } else {
-        // For non-anthropic providers, show info but keep using claude for now
-        // Full provider switch requires restarting the provider instance
-        ctx.tui.showSystem(`Note: ${provider} provider selected. Restart smolerclaw for full provider switch.`)
+      const resolved = resolveModel(m)
+      try {
+        ctx.provider.setModel(resolved)
+        ctx.config.model = resolved
+        saveConfig(ctx.config)
+        ctx.tracker.setModel(resolved)
+        ctx.tui.updateModel(ctx.config.model)
+        ctx.syncProviderState()
+        ctx.tui.showSystem(`Model -> ${ctx.config.model}`)
+      } catch (err) {
+        ctx.tui.showError(`Falha ao trocar modelo: ${err instanceof Error ? err.message : String(err)}`)
       }
-      ctx.tracker.setModel(resolved)
-      ctx.tui.updateModel(ctx.config.model)
-      ctx.tui.showSystem(`Model -> ${ctx.config.model}`)
       break
     }
 
@@ -301,31 +305,60 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
     }
 
     case 'auth':
-      ctx.tui.showSystem(
-        `Auth: subscription (${ctx.auth.auth.subscriptionType})` +
-        `\nExpires: ${new Date(ctx.auth.auth.expiresAt).toLocaleString()}`,
-      )
+      if (!ctx.auth.auth) {
+        ctx.tui.showSystem('Auth: none')
+        break
+      }
+      ctx.tui.showSystem(formatAuthStatus(ctx.auth.auth))
       break
+
+    case 'login': {
+      const rawTarget = args[0]?.toLowerCase()
+      if (rawTarget !== 'claude' && rawTarget !== 'codex') {
+        ctx.tui.showSystem('Uso: /login <claude|codex>')
+        break
+      }
+
+      const provider = rawTarget === 'claude' ? 'anthropic' : 'codex'
+      const targetModel = defaultModelForProvider(provider)
+      ctx.tui.showSystem(`Abrindo login ${assistantNameForProvider(provider)}...`)
+
+      try {
+        await loginWithProvider(provider, true)
+        ctx.provider.setModel(targetModel)
+        ctx.config.model = targetModel
+        saveConfig(ctx.config)
+        ctx.tracker.setModel(targetModel)
+        ctx.auth.auth = resolveAuthForProvider(provider)
+        if (ctx.auth.auth) {
+          ctx.provider.syncAuth(ctx.auth.auth)
+        }
+        ctx.tui.updateModel(ctx.config.model)
+        ctx.syncProviderState()
+        ctx.tui.showSystem(`${assistantNameForProvider(provider)} autenticado e ativo em ${ctx.config.model}`)
+      } catch (err) {
+        ctx.tui.showError(`Falha no login: ${err instanceof Error ? err.message : String(err)}`)
+      }
+      break
+    }
 
     case 'refresh':
     case 'renovar': {
-      ctx.tui.showSystem('Renovando sessao Claude...')
+      const providerType = ctx.provider.getProviderType()
+      ctx.tui.showSystem(`Renovando sessao ${assistantNameForProvider(providerType)}...`)
       try {
-        const proc = Bun.spawn(['claude', '-p', 'Fresh!'], { stdout: 'pipe', stderr: 'pipe' })
-        const timer = setTimeout(() => proc.kill(), 15_000)
-        await proc.exited
-        clearTimeout(timer)
-        // Re-read credentials
-        const freshAuth = refreshAuth()
+        const refreshResult = await performProviderRefresh(providerType)
+        const freshAuth = refreshAuthForProvider(providerType)
         if (freshAuth) {
           ctx.auth.auth = freshAuth
-          if ('updateToken' in ctx.claude) {
-            (ctx.claude as any).updateToken(freshAuth.token)
+          ctx.provider.syncAuth(freshAuth)
+          ctx.tui.updateAuthInfo(authLabel(freshAuth))
+          if (providerType === 'anthropic') {
+            updateAutoRefreshAuth(freshAuth as AuthResult & { expiresAt: number })
           }
-          updateAutoRefreshAuth(freshAuth)
-          ctx.tui.showSystem(`Sessao renovada. Expira: ${new Date(freshAuth.expiresAt).toLocaleString()}`)
+          ctx.tui.showSystem(refreshResult.successMessage(freshAuth))
         } else {
-          ctx.tui.showSystem('claude executado, mas credenciais nao atualizaram. Tente novamente.')
+          ctx.tui.showSystem(refreshResult.failureMessage)
         }
       } catch (err) {
         ctx.tui.showError(`Falha ao renovar: ${err instanceof Error ? err.message : String(err)}`)
@@ -339,6 +372,113 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
       break
     }
 
+    case 'review':
+    case 'revisar':
+    case 'consult':
+    case 'consultar': {
+      const explicitTarget = normalizeReviewTarget(args[0])
+      const reviewerProvider = explicitTarget || getCounterReviewProvider(ctx.provider.getProviderType())
+      if (!reviewerProvider) {
+        ctx.tui.showError('Uso: /review [claude|codex]')
+        break
+      }
+
+      let reviewerAuth: AuthResult | null = null
+      try {
+        reviewerAuth = resolveAuthForProvider(reviewerProvider)
+      } catch {
+        reviewerAuth = null
+      }
+      if (!reviewerAuth) {
+        ctx.tui.showError(`${assistantNameForProvider(reviewerProvider)} nao autenticado. Use /login ${reviewerProvider === 'anthropic' ? 'claude' : 'codex'}.`)
+        break
+      }
+
+      const reviewerModel = defaultModelForProvider(reviewerProvider)
+      const reviewProvider = initProvider({ auth: reviewerAuth }, reviewerModel, ctx.config.maxTokens, ctx.config.toolApproval)
+      wireReviewApproval(reviewProvider, ctx)
+
+      const reviewInput = {
+        role: 'user' as const,
+        content: buildCrossReviewPrompt(ctx),
+        timestamp: Date.now(),
+      }
+
+      ctx.tui.showSystem(`Revisao cruzada por ${assistantNameForProvider(reviewerProvider)}...`)
+      const previousLabel = ctx.provider.getAssistantLabel()
+      ctx.tui.updateAssistantLabel(assistantNameForProvider(reviewerProvider))
+      ctx.tui.startStream()
+
+      let fullText = ''
+      const toolCalls = []
+      let pendingToolInput: Record<string, unknown> = {}
+      let totalInput = 0
+      let totalOutput = 0
+
+      try {
+        for await (const event of reviewProvider.chat([...ctx.sessions.messages, reviewInput], getReviewerSystemPrompt(), ctx.enableTools)) {
+          switch (event.type) {
+            case 'text':
+              ctx.tui.appendStream(event.text)
+              fullText += event.text
+              break
+
+            case 'tool_call':
+              ctx.tui.flushStream()
+              ctx.tui.showToolCall(event.name, event.input)
+              pendingToolInput = event.input as Record<string, unknown>
+              break
+
+            case 'tool_result':
+              ctx.tui.showToolResult(event.name, event.result)
+              toolCalls.push({
+                id: event.id,
+                name: event.name,
+                input: pendingToolInput,
+                result: event.result,
+              })
+              pendingToolInput = {}
+              ctx.tui.resetStreamBuffer()
+              break
+
+            case 'tool_blocked':
+              ctx.tui.showError(event.reason)
+              break
+
+            case 'usage':
+              totalInput += event.inputTokens
+              totalOutput += event.outputTokens
+              break
+
+            case 'error':
+              ctx.tui.showError(event.error)
+              break
+
+            case 'done':
+              break
+          }
+        }
+      } finally {
+        ctx.tui.endStream()
+        ctx.tui.updateAssistantLabel(previousLabel)
+      }
+
+      if (fullText.trim()) {
+        ctx.sessions.addMessage({
+          role: 'assistant',
+          content: `[Cross-review by ${assistantNameForProvider(reviewerProvider)}]\n${fullText}`,
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          usage: totalInput > 0 ? {
+            inputTokens: totalInput,
+            outputTokens: totalOutput,
+            costCents: 0,
+          } : undefined,
+          timestamp: Date.now(),
+        })
+      }
+      break
+    }
+
     case 'config':
       ctx.tui.showSystem(`Config: ${getConfigPath()}`)
       break
@@ -348,7 +488,7 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
       const datePart = new Date().toISOString().split('T')[0]
       const exportPath = args[0] || `smolerclaw-${ctx.sessions.session.name}-${datePart}.md`
       try {
-        const md = exportToMarkdown(ctx.sessions.session)
+        const md = exportToMarkdown(ctx.sessions.session, { assistantName: ctx.provider.getAssistantLabel() })
         writeFileSync(exportPath, md)
         ctx.tui.showSystem(`Exported to: ${exportPath}`)
       } catch (err) {
@@ -399,6 +539,8 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
           '  /delete /deletar /rm   Deletar sessao',
           '  /fork <nome>           Duplicar sessao atual',
           '  /model /modelo         Ver/trocar modelo',
+          '  /login <prov>          Login e troca para claude/codex',
+          '  /review [/prov]        Revisao cruzada sob demanda',
           '  /persona /modo         Trocar modo (business, coder...)',
           '  /skills /habilidades   Listar skills disponiveis',
           '  /export /exportar      Exportar para markdown',
@@ -604,7 +746,7 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
 
         ctx.tui.startStream()
         let commitMsg = ''
-        for await (const event of ctx.claude.chat(
+        for await (const event of ctx.provider.chat(
           [{ role: 'user', content: commitPrompt, timestamp: Date.now() }],
           'You generate git commit messages. Output ONLY the commit message, nothing else.',
           false,
@@ -692,7 +834,7 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
       ctx.tui.startStream()
       let askText = ''
       // Send as isolated message — not saved to session, no tools
-      for await (const event of ctx.claude.chat(
+      for await (const event of ctx.provider.chat(
         [{ role: 'user', content: question, timestamp: Date.now() }],
         ctx.activeSystemPrompt,
         false,
@@ -715,6 +857,7 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
     case 'fork': {
       const forkName = args[0] || `fork-${Date.now()}`
       ctx.sessions.fork(forkName)
+      ctx.provider.setConversationKey(forkName)
       ctx.tui.updateSession(forkName)
       ctx.tui.showSystem(`Forked session -> ${forkName} (${ctx.sessions.messages.length} messages copied)`)
       break
@@ -2506,4 +2649,119 @@ export function formatAge(timestamp: number): string {
   const days = Math.floor(hours / 24)
   if (days > 365) return `${Math.floor(days / 365)}y ago`
   return `${days}d ago`
+}
+
+function normalizeReviewTarget(input?: string): Extract<ProviderType, 'anthropic' | 'codex'> | null {
+  if (!input) return null
+  const lower = input.toLowerCase()
+  if (lower === 'claude' || lower === 'anthropic') return 'anthropic'
+  if (lower === 'codex') return 'codex'
+  return null
+}
+
+function getCounterReviewProvider(current: ProviderType): Extract<ProviderType, 'anthropic' | 'codex'> | null {
+  if (current === 'anthropic') return 'codex'
+  if (current === 'codex') return 'anthropic'
+  return null
+}
+
+function getReviewerSystemPrompt(): string {
+  const reviewer = getPersona('reviewer')
+  return reviewer?.systemPrompt || 'You are a rigorous reviewer focused on bugs, regressions, and missing tests.'
+}
+
+function buildCrossReviewPrompt(ctx: CommandContext): string {
+  const currentProvider = ctx.provider.getProviderType()
+  const transcript = ctx.sessions.messages
+    .slice(-24)
+    .map((msg, index) => {
+      const header = `${index + 1}. ${msg.role.toUpperCase()}`
+      const content = msg.content.trim() || '(sem texto)'
+      const toolLines = (msg.toolCalls || []).map((toolCall) =>
+        `tool ${toolCall.name}(${JSON.stringify(toolCall.input)}) -> ${toolCall.result}`.slice(0, 500),
+      )
+      return [header, content, ...toolLines].join('\n')
+    })
+    .join('\n\n')
+
+  return [
+    `Revise o trabalho produzido nesta sessao.`,
+    `Provider ativo: ${assistantNameForProvider(currentProvider)}.`,
+    `Modelo ativo: ${ctx.config.model}.`,
+    `Sessao: ${ctx.sessions.session.name}.`,
+    ctx.enableTools
+      ? 'Ferramentas estao permitidas. Inspecione arquivos, diff e estado do repositorio antes de concluir quando isso ajudar.'
+      : 'Ferramentas estao desabilitadas. Baseie-se no transcript abaixo.',
+    'Quero um code review objetivo:',
+    '- Findings primeiro, ordenados por severidade.',
+    '- Foque em bugs, regressao comportamental, riscos, seguranca e testes faltando.',
+    '- Se nao houver achados, diga explicitamente que nao encontrou findings e cite riscos residuais.',
+    '',
+    'Transcript recente:',
+    transcript || '(sessao vazia)',
+  ].join('\n')
+}
+
+function wireReviewApproval(reviewProvider: AnyProvider, ctx: CommandContext): void {
+  if (ctx.config.toolApproval === 'auto') return
+
+  reviewProvider.setApprovalCallback(async (toolName, input, riskLevel) => {
+    if (toolName === 'edit_file' && input.old_text && input.new_text) {
+      const diffLines = formatEditDiff(String(input.old_text), String(input.new_text))
+      for (const line of diffLines) {
+        ctx.tui.showSystem(line)
+      }
+    }
+
+    const desc = formatApprovalPrompt(toolName, input)
+    const approved = await ctx.tui.promptApproval(desc)
+    if (ctx.tui._approveAllRequested) {
+      reviewProvider.setAutoApproveAll(true)
+      ctx.tui._approveAllRequested = false
+    }
+    return approved
+  })
+}
+
+function formatAuthStatus(auth: AuthResult): string {
+  const lines = [`Auth: ${auth.provider} (${auth.kind})`, `Source: ${auth.source}`]
+  if (auth.subscriptionType) {
+    lines.push(`Plan: ${auth.subscriptionType}`)
+  }
+  if (auth.expiresAt) {
+    lines.push(`Expires: ${new Date(auth.expiresAt).toLocaleString()}`)
+  }
+  return lines.join('\n')
+}
+
+async function performProviderRefresh(provider: ReturnType<AnyProvider['getProviderType']>): Promise<{
+  failureMessage: string
+  successMessage: (auth: AuthResult) => string
+}> {
+  if (provider === 'anthropic') {
+    const proc = Bun.spawn(['claude', '-p', 'Fresh!'], { stdout: 'pipe', stderr: 'pipe' })
+    const timer = setTimeout(() => proc.kill(), 15_000)
+    await proc.exited
+    clearTimeout(timer)
+    return {
+      failureMessage: 'claude executado, mas credenciais nao atualizaram. Tente novamente.',
+      successMessage: (auth) => `Sessao renovada. Expira: ${new Date(auth.expiresAt || Date.now()).toLocaleString()}`,
+    }
+  }
+
+  if (provider === 'codex') {
+    const proc = Bun.spawn(['codex', 'login', 'status'], { stdout: 'pipe', stderr: 'pipe' })
+    const timer = setTimeout(() => proc.kill(), 15_000)
+    await proc.exited
+    clearTimeout(timer)
+    return {
+      failureMessage: 'Codex login nao pode ser renovado automaticamente. Rode `codex --login` se necessario.',
+      successMessage: () => 'Codex login validado.',
+    }
+  }
+
+  return {
+    failureMessage: 'Este provider nao possui refresh manual.',
+    successMessage: () => 'Provider validado.',
+  }
 }

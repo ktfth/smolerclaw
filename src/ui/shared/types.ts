@@ -40,6 +40,7 @@ export interface UIState {
   messages: UIMessage[]
   isStreaming: boolean
   model: string
+  assistantLabel: string
   systemPrompt: string
   totalCostCents: number
   settings: UISettings

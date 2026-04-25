@@ -13,6 +13,7 @@ import { ChatService } from '../shared/chat-service'
 import type { WSClientMessage, WSServerMessage, UIState, UISettings } from '../shared/types'
 import { t, getTranslations } from '../../i18n'
 import { getMapHtml } from './map-page'
+import { assistantNameForProvider, parseModelString } from '../../providers'
 import {
   listNeighborhoods, getNeighborhood, toGeoJSON, allNeighborhoodsGeoJSON,
 } from '../../neighborhoods'
@@ -23,11 +24,13 @@ import {
 interface ChatProvider {
   chat(messages: Message[], systemPrompt: string, enableTools?: boolean): AsyncGenerator<ChatEvent>
   setApprovalCallback?(cb: (name: string, input: Record<string, unknown>, riskLevel: string) => Promise<boolean>): void
+  setConversationKey?(key: string): void
 }
 
 interface WebServerConfig {
   port: number
   provider: ChatProvider
+  model: string
   systemPrompt: string
   enableTools: boolean
   sessionManager: SessionManager
@@ -60,7 +63,7 @@ export function createWebServer(config: WebServerConfig) {
 
   // Main page — inject current locale translations
   app.get('/', (c) => {
-    return c.html(getIndexHtml(getTranslations()))
+    return c.html(getIndexHtml(getTranslations(), config.model))
   })
 
   // Map page
@@ -94,6 +97,7 @@ export function createWebServer(config: WebServerConfig) {
   function handleWebSocket(ws: WebSocket, clientId: string) {
     const chatService = new ChatService({
       provider: config.provider,
+      model: config.model,
       systemPrompt: config.systemPrompt,
       enableTools: config.enableTools,
       sessionManager: config.sessionManager,
@@ -208,7 +212,8 @@ export function createWebServer(config: WebServerConfig) {
       sessions,
       messages,
       isStreaming: false,
-      model: 'claude-sonnet-4-20250514',
+      model: config.model,
+      assistantLabel: assistantNameForProvider(parseModelString(config.model).provider),
       systemPrompt: config.systemPrompt,
       totalCostCents: messages.reduce((acc, m) => acc + (m.usage?.costCents || 0), 0),
       settings,
@@ -266,8 +271,9 @@ export function createWebServer(config: WebServerConfig) {
   }
 }
 
-function getIndexHtml(translations: Record<string, string>): string {
+function getIndexHtml(translations: Record<string, string>, model: string): string {
   const T = (key: string) => translations[key] || key
+  const assistantLabel = assistantNameForProvider(parseModelString(model).provider)
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -896,8 +902,8 @@ function getIndexHtml(translations: Record<string, string>): string {
     <main class="main">
       <header class="header">
         <div class="model-selector">
-          <span class="model-badge">Claude</span>
-          <span id="model-name">claude-sonnet-4</span>
+          <span class="model-badge" id="model-badge">${assistantLabel}</span>
+          <span id="model-name">${model}</span>
         </div>
         <div class="header-actions">
           <button class="icon-btn" onclick="toggleTheme()" title="${T('web.toggle_theme')}">
@@ -976,6 +982,8 @@ function getIndexHtml(translations: Record<string, string>): string {
       sessions: [],
       currentSession: null,
       isStreaming: false,
+      model: ${JSON.stringify(model)},
+      assistantLabel: ${JSON.stringify(assistantLabel)},
       totalCostCents: 0,
     };
     let currentMessageId = null;
@@ -1030,6 +1038,7 @@ function getIndexHtml(translations: Record<string, string>): string {
 
         case 'state':
           state = { ...state, ...msg.payload };
+          updateModelHeader();
           renderSessions();
           renderMessages();
           updateCost();
@@ -1076,8 +1085,21 @@ function getIndexHtml(translations: Record<string, string>): string {
     }
 
     function calculateCost(inputTokens, outputTokens) {
-      const inputCost = (inputTokens / 1_000_000) * 300;
-      const outputCost = (outputTokens / 1_000_000) * 1500;
+      const model = (state.model || '').toLowerCase();
+      let inputRate = 300;
+      let outputRate = 1500;
+      if (model.includes('haiku')) {
+        inputRate = 100;
+        outputRate = 500;
+      } else if (model.includes('opus')) {
+        inputRate = 1500;
+        outputRate = 7500;
+      } else if (model.includes('codex-mini')) {
+        inputRate = 150;
+        outputRate = 600;
+      }
+      const inputCost = (inputTokens / 1_000_000) * inputRate;
+      const outputCost = (outputTokens / 1_000_000) * outputRate;
       return Math.round((inputCost + outputCost) * 100) / 100;
     }
 
@@ -1111,8 +1133,9 @@ function getIndexHtml(translations: Record<string, string>): string {
 
     function renderMessage(msg) {
       const isUser = msg.role === 'user';
-      const avatar = isUser ? '👤' : 'S';
-      const author = isUser ? __t('web.you') : __t('web.assistant');
+      const assistantAvatar = (state.assistantLabel || 'S').slice(0, 1).toUpperCase();
+      const avatar = isUser ? '👤' : assistantAvatar;
+      const author = isUser ? __t('web.you') : (state.assistantLabel || __t('web.assistant'));
       const time = new Date(msg.timestamp).toLocaleTimeString();
 
       let toolCallsHtml = '';
@@ -1164,8 +1187,8 @@ function getIndexHtml(translations: Record<string, string>): string {
       const streamingHtml = \`
         <div class="message" id="streaming-message">
           <div class="message-header">
-            <div class="avatar assistant">S</div>
-            <span class="message-author">\${__t('web.assistant')}</span>
+            <div class="avatar assistant">\${(state.assistantLabel || 'S').slice(0, 1).toUpperCase()}</div>
+            <span class="message-author">\${state.assistantLabel || __t('web.assistant')}</span>
             <div class="streaming-indicator">
               <span></span><span></span><span></span>
             </div>
@@ -1255,6 +1278,13 @@ function getIndexHtml(translations: Record<string, string>): string {
     function updateCost() {
       const costEl = document.getElementById('total-cost');
       costEl.textContent = '$' + (state.totalCostCents / 100).toFixed(4);
+    }
+
+    function updateModelHeader() {
+      const badge = document.getElementById('model-badge');
+      const name = document.getElementById('model-name');
+      if (badge) badge.textContent = state.assistantLabel || ${JSON.stringify(assistantLabel)};
+      if (name) name.textContent = state.model || ${JSON.stringify(model)};
     }
 
     function scrollToBottom() {
@@ -1378,6 +1408,7 @@ function getIndexHtml(translations: Record<string, string>): string {
 
     // Start
     connect();
+    updateModelHeader();
     document.getElementById('input').addEventListener('input', updateSendButton);
   </script>
 </body>

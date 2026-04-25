@@ -18,8 +18,11 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
     "@googleworkspace/cli": "^0.22.0",
+    "@openai/agents": "0.8.5",
     "@pnp/cli-microsoft365": "^11.6.0",
-    "hono": "^4.6.0"
+    "hono": "^4.6.0",
+    "openai": "6.34.0",
+    "zod": "4"
   },
   "files": [
     "dist",

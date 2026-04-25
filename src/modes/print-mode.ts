@@ -3,7 +3,7 @@ import type { SessionManager } from '../session'
 import type { Message } from '../types'
 
 export async function runPrintMode(
-  claude: AnyProvider,
+  provider: AnyProvider,
   sessions: SessionManager,
   systemPrompt: string,
   enableTools: boolean,
@@ -27,7 +27,7 @@ export async function runPrintMode(
   sessions.addMessage(userMsg)
 
   let fullText = ''
-  for await (const event of claude.chat(sessions.messages, systemPrompt, enableTools)) {
+  for await (const event of provider.chat(sessions.messages, systemPrompt, enableTools)) {
     if (event.type === 'text') {
       process.stdout.write(event.text)
       fullText += event.text

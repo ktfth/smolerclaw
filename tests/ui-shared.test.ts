@@ -34,6 +34,7 @@ function createTestService() {
   return {
     service: new ChatService({
       provider: mockProvider,
+      model: 'claude-haiku-4-5-20251001',
       systemPrompt: 'Test system prompt',
       enableTools: true,
       sessionManager,
@@ -230,6 +231,7 @@ describe('Shared data between CLI and UI', () => {
     // Now create a ChatService pointing at the same SessionManager
     const service = new ChatService({
       provider: createMockProvider(),
+      model: 'claude-haiku-4-5-20251001',
       systemPrompt: 'Test',
       enableTools: true,
       sessionManager,
@@ -249,6 +251,7 @@ describe('Shared data between CLI and UI', () => {
     const sessionManager = new SessionManager(TEST_DATA_DIR)
     const service = new ChatService({
       provider: createMockProvider(),
+      model: 'claude-haiku-4-5-20251001',
       systemPrompt: 'Test',
       enableTools: true,
       sessionManager,

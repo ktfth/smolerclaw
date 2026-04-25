@@ -3,13 +3,14 @@ import type { Session, Message } from './types'
 interface ExportOptions {
   includeToolCalls?: boolean
   includeTimestamps?: boolean
+  assistantName?: string
 }
 
 /**
  * Export a session to a clean markdown document.
  */
 export function exportToMarkdown(session: Session, opts: ExportOptions = {}): string {
-  const { includeToolCalls = true, includeTimestamps = true } = opts
+  const { includeToolCalls = true, includeTimestamps = true, assistantName = 'Assistant' } = opts
   const lines: string[] = []
 
   lines.push(`# smolerclaw session: ${session.name}`)
@@ -29,7 +30,7 @@ export function exportToMarkdown(session: Session, opts: ExportOptions = {}): st
       lines.push(msg.content)
       lines.push('')
     } else {
-      lines.push(`## Claude${ts}`)
+      lines.push(`## ${assistantName}${ts}`)
       lines.push('')
       lines.push(msg.content)
 

@@ -30,6 +30,8 @@ interface AutoRefreshState {
   readonly running: boolean
 }
 
+type ExpiringAuth = AuthResult & { expiresAt: number }
+
 // ─── State ──────────────────────────────────────────────────
 
 const DEFAULT_CHECK_INTERVAL = 60_000    // 1 minute
@@ -42,7 +44,7 @@ let _state: AutoRefreshState = {
   running: false,
 }
 
-let _currentAuth: AuthResult | null = null
+let _currentAuth: ExpiringAuth | null = null
 
 // ─── Core ───────────────────────────────────────────────────
 
@@ -52,7 +54,7 @@ let _currentAuth: AuthResult | null = null
  * and refreshes it proactively.
  */
 export function startAutoRefresh(
-  auth: AuthResult,
+  auth: ExpiringAuth,
   opts: AutoRefreshOptions = {},
 ): void {
   // Stop any existing timer
@@ -101,7 +103,7 @@ export function stopAutoRefresh(): void {
 /**
  * Update the current auth reference (e.g. after a manual /refresh).
  */
-export function updateAutoRefreshAuth(auth: AuthResult): void {
+export function updateAutoRefreshAuth(auth: ExpiringAuth): void {
   _currentAuth = auth
 }
 
@@ -190,9 +192,9 @@ function checkAndRefresh(
   try {
     // First try a simple re-read — Claude Code may have already rotated the token
     const reread = refreshAuth()
-    if (reread && reread.expiresAt > _currentAuth.expiresAt) {
+    if (reread && reread.expiresAt !== null && reread.expiresAt > _currentAuth.expiresAt) {
       // Token was already rotated externally — just adopt it
-      applyRefresh(reread, now, opts)
+      applyRefresh(reread as ExpiringAuth, now, opts)
       return
     }
 
@@ -212,7 +214,7 @@ function checkAndRefresh(
 }
 
 function applyRefresh(
-  fresh: AuthResult,
+  fresh: ExpiringAuth,
   now: number,
   opts: AutoRefreshOptions,
 ): void {
@@ -254,8 +256,8 @@ function spawnTokenRotation(
       clearTimeout(timer)
       // Re-read after claude has rotated the token
       const fresh = refreshAuth()
-      if (fresh && fresh.expiresAt > now) {
-        applyRefresh(fresh, Date.now(), opts)
+      if (fresh && fresh.expiresAt !== null && fresh.expiresAt > now) {
+        applyRefresh(fresh as ExpiringAuth, Date.now(), opts)
       } else {
         const msg = 'Falha ao renovar token — claude nao rotacionou credenciais'
         opts.onRefreshFailed?.(msg)

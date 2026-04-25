@@ -4,7 +4,7 @@
 
 # smolerclaw
 
-A micro AI assistant built on top of Claude, designed for Windows.
+A micro AI assistant for Windows with Claude Code and Codex support.
 One binary, zero config, full TUI.
 
 ---
@@ -12,8 +12,10 @@ One binary, zero config, full TUI.
 ## Quick Start
 
 ```bash
-# 1. Have Claude Code installed with a Pro/Max subscription
-#    (credentials auto-detected from ~/.claude/.credentials.json)
+# 1. Authenticate with one of the supported local CLIs:
+#    - Claude Code (auto-detected from ~/.claude/.credentials.json)
+#    - Codex CLI (auto-detected from ~/.codex/auth.json)
+#    - On interactive startup, smolerclaw can prompt you to pick Claude or Codex for the session
 
 # 2. Run
 bun run start
@@ -57,7 +59,7 @@ smolerclaw is a terminal AI assistant that lives on your Windows machine. It can
 - **PowerShell scripting** — execute .ps1 scripts with safety guards (blocks Defender/System32/destructive ops)
 - **Clipboard OCR** — read text or extract text from images via Windows.Media.Ocr
 - **Screen awareness** — map foreground window and all visible windows
-- **Session refresh** — renew Claude Code auth token without leaving the TUI
+- **Session refresh** — validate/renew supported local auth without leaving the TUI
 - **Auto-refresh** — proactive OAuth token monitoring and renewal before expiration
 - **Finance verification** — amount limits, duplicate detection, daily spending alerts
 - **Plugin system** — install plugins from GitHub with `/plugin install owner/repo`, supports JSON and TypeScript plugins with lifecycle hooks
@@ -86,7 +88,8 @@ smolerclaw -p "question"    # Print mode (non-interactive)
 /open excel    Launch app            /calendar      Outlook events
 /investigar    List investigations   /memo #tag     Save a note
 /email         Draft email           /pomodoro      Focus timer
-/model sonnet  Switch model          /export        Save to markdown
+/model sonnet  Switch model          /login codex   Login + switch provider
+/review        Cross-review          /export        Save to markdown
 /indexar       Build RAG index       /memoria <q>   Search local memory
 /projeto auto  Set active project    /projetos      List all projects
 /sessao start  Start work timer      /sessao stop   Stop work timer
@@ -102,7 +105,7 @@ smolerclaw -p "question"    # Print mode (non-interactive)
 
 ## Auth
 
-Claude Code subscription (auto-detected from `~/.claude/.credentials.json`). Token is automatically renewed via auto-refresh. Use `/refresh` for manual renewal or `/auto-refresh` to check status.
+Claude Code subscription (auto-detected from `~/.claude/.credentials.json`) or Codex CLI login (auto-detected from `~/.codex/auth.json`). Interactive startup can ask whether the session should use Claude or Codex. OpenAI models now run through the OpenAI Agents SDK and can use `OPENAI_API_KEY` or a Codex-provided API key when available. Claude tokens are automatically renewed via auto-refresh. Use `/login <claude|codex>` to re-authenticate and switch provider, `/refresh` for manual validation/renewal, or `/auto-refresh` to check Claude auto-refresh status.
 
 ## Requirements
 
@@ -117,7 +120,7 @@ MIT
 
 # smolerclaw (PT-BR)
 
-Um micro assistente de IA construido em cima do Claude, feito para Windows.
+Um micro assistente de IA para Windows com suporte a Claude Code e Codex.
 Um binario, zero configuracao, TUI completa.
 
 ---
@@ -125,8 +128,10 @@ Um binario, zero configuracao, TUI completa.
 ## Inicio Rapido
 
 ```bash
-# 1. Tenha o Claude Code instalado com assinatura Pro/Max
-#    (credenciais detectadas automaticamente de ~/.claude/.credentials.json)
+# 1. Autentique um dos CLIs suportados:
+#    - Claude Code (credenciais em ~/.claude/.credentials.json)
+#    - Codex CLI (credenciais em ~/.codex/auth.json)
+#    - Na abertura interativa, o smolerclaw pode perguntar se a sessao vai usar Claude ou Codex
 
 # 2. Rode
 bun run start
@@ -170,7 +175,7 @@ smolerclaw e um assistente de IA no terminal que vive na sua maquina Windows. El
 - **Scripts PowerShell** — executar .ps1 com safety guards (bloqueia Defender/System32/ops destrutivas)
 - **OCR de clipboard** — ler texto ou extrair texto de imagens via Windows.Media.Ocr
 - **Consciencia de tela** — mapear janela em foco e todas as janelas visiveis
-- **Renovacao de sessao** — renovar token de autenticacao Claude Code sem sair da TUI
+- **Renovacao de sessao** — validar/renovar autenticacao local suportada sem sair da TUI
 - **Auto-refresh** — monitoramento proativo de token OAuth com renovacao automatica antes da expiracao
 - **Verificacao financeira** — limites de valor, deteccao de duplicatas, alertas de gasto diario
 - **Sistema de plugins** — instalar plugins do GitHub com `/plugin install owner/repo`, suporte a plugins JSON e TypeScript com lifecycle hooks
@@ -199,7 +204,8 @@ smolerclaw -p "pergunta"    # Modo print (nao-interativo)
 /abrir excel   Abrir app             /calendario    Eventos Outlook
 /investigar    Listar investigacoes  /memo #tag     Salvar anotacao
 /email         Rascunho de email     /foco          Timer Pomodoro
-/modelo sonnet Trocar modelo         /exportar      Salvar em markdown
+/modelo sonnet Trocar modelo         /login codex   Login + troca provider
+/review        Revisao cruzada       /exportar      Salvar em markdown
 /indexar       Construir indice RAG  /memoria <q>   Buscar na memoria
 /projeto auto  Definir projeto ativo /projetos      Listar projetos
 /sessao start  Iniciar timer         /sessao stop   Parar timer
@@ -215,7 +221,7 @@ smolerclaw -p "pergunta"    # Modo print (nao-interativo)
 
 ## Autenticacao
 
-Assinatura Claude Code (detectada automaticamente de `~/.claude/.credentials.json`). O token e renovado automaticamente via auto-refresh. Use `/refresh` para renovacao manual ou `/auto-refresh` para ver o status.
+Assinatura Claude Code (detectada automaticamente de `~/.claude/.credentials.json`) ou login do Codex CLI (detectado automaticamente de `~/.codex/auth.json`). Na abertura interativa, o app pode perguntar se a sessao deve usar Claude ou Codex. Modelos OpenAI agora usam o OpenAI Agents SDK e podem reutilizar `OPENAI_API_KEY` ou uma chave provida pelo login do Codex quando disponivel. O token do Claude e renovado automaticamente via auto-refresh. Use `/login <claude|codex>` para autenticar e trocar o provider, `/refresh` para validacao/renovacao manual ou `/auto-refresh` para ver o status do Claude.
 
 ## Requisitos
 

@@ -79,12 +79,14 @@ smolerclaw desktop
 
 ## Autenticacao
 
-Usa a assinatura Claude Code, detectada automaticamente de `~/.claude/.credentials.json`.
+Usa Claude Code (detectado automaticamente de `~/.claude/.credentials.json`) ou Codex CLI (detectado automaticamente de `~/.codex/auth.json`). Na abertura da TUI, quando nao ha `--model` nem prompt inicial, o app pode perguntar se a sessao vai usar Claude ou Codex. Modelos `openai:*` usam OpenAI Agents SDK.
 
 | Comando | Descricao |
 |---------|-----------|
-| `/auth` | Ver status da autenticacao (tipo, expiracao) |
-| `/refresh` ou `/renovar` | Renovar token OAuth (executa `claude -p 'Fresh!'`) |
+| `/auth` | Ver status da autenticacao atual (provider, tipo, expiracao) |
+| `/login <claude|codex>` | Autenticar e trocar a sessao para Claude ou Codex |
+| `/refresh` ou `/renovar` | Renovar/validar autenticacao do provider atual |
+| `/review [claude|codex]` | Rodar revisao cruzada sob demanda com o provider oposto |
 
 ---
 
@@ -97,8 +99,10 @@ Usa a assinatura Claude Code, detectada automaticamente de `~/.claude/.credentia
 | `sonnet-4.6` | Claude Sonnet 4.6 | Equilibrado | 200K |
 | `opus` | Claude Opus 4 | Poderoso | 200K |
 | `opus-4.6` | Claude Opus 4.6 | Poderoso | 200K |
+| `codex` | Codex GPT-5.4 | Poderoso | 200K |
+| `codex-mini` | Codex Mini Latest | Rapido | 200K |
 
-Suporte multi-provider: `openai:gpt-4o`, `ollama:llama3`
+Suporte multi-provider: `codex:gpt-5.4`, `openai:gpt-4o`, `ollama:llama3`
 
 ---
 
@@ -137,6 +141,8 @@ Suporte multi-provider: `openai:gpt-4o`, `ollama:llama3`
 |------------|------------|-----------|---------|
 | `/model` | `/modelo` | Ver modelo atual + listar disponiveis | `/model` |
 | `/model <alias>` | `/modelo <alias>` | Trocar modelo | `/model sonnet` |
+| `/login <prov>` | — | Login e troca para `claude` ou `codex` | `/login codex` |
+| `/review [prov]` | `/revisar [prov]` | Revisao cruzada com Claude ou Codex | `/review` |
 | `/persona <nome>` | `/modo <nome>` | Trocar persona/skill | `/modo business` |
 | `/skills` | `/habilidades` | Listar skills disponiveis | `/skills` |
 | `/lang <idioma>` | `/idioma <idioma>` | Definir idioma (pt, en, auto) | `/lang pt` |

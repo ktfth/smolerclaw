@@ -19,6 +19,12 @@ describe('estimateCost', () => {
     expect(cost.inputCostCents).toBeCloseTo(100, 0) // matches haiku pattern
   })
 
+  test('codex mini pricing', () => {
+    const cost = estimateCost({ inputTokens: 1_000_000, outputTokens: 1_000_000 }, 'codex:codex-mini-latest')
+    expect(cost.inputCostCents).toBeCloseTo(150, 0)
+    expect(cost.outputCostCents).toBeCloseTo(600, 0)
+  })
+
   test('fallback pricing for completely unknown model', () => {
     const cost = estimateCost({ inputTokens: 1_000_000, outputTokens: 0 }, 'gpt-5-ultra')
     expect(cost.inputCostCents).toBeCloseTo(300, 0) // defaults to sonnet-level

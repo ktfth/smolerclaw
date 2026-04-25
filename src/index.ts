@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { parseArgs, printHelp, getVersion } from './cli'
 import { loadConfig } from './config'
-import { resolveAuth } from './auth'
+import { resolveAuthForModel } from './auth'
 import { resolveModel } from './models'
 import { initProvider, type AuthHolder } from './init/providers'
 import { initSession } from './init/session'
@@ -10,6 +10,7 @@ import { runInteractive } from './modes/interactive'
 import { runWebUI } from './modes/ui-mode'
 import { initI18n } from './i18n'
 import { initCoreModules } from './init/modules'
+import { promptStartupProviderSelection } from './login'
 
 async function main(): Promise<void> {
   const cliArgs = parseArgs(process.argv.slice(2))
@@ -30,9 +31,21 @@ async function main(): Promise<void> {
   if (cliArgs.model) config.model = resolveModel(cliArgs.model)
   if (cliArgs.maxTokens) config.maxTokens = cliArgs.maxTokens
 
+  const isInteractiveTui =
+    !cliArgs.print &&
+    cliArgs.uiMode === 'tui' &&
+    process.stdin.isTTY &&
+    process.stdout.isTTY &&
+    !cliArgs.model &&
+    !cliArgs.prompt
+
+  if (isInteractiveTui) {
+    config.model = resolveModel(await promptStartupProviderSelection(config.model) || config.model)
+  }
+
   let authResult
   try {
-    authResult = resolveAuth()
+    authResult = resolveAuthForModel(config.model)
   } catch (err) {
     console.error('smolerclaw:', err instanceof Error ? err.message : err)
     process.exit(1)
@@ -42,7 +55,7 @@ async function main(): Promise<void> {
   const authHolder: AuthHolder = { auth: authResult }
 
   // Initialize provider based on model string
-  const claude = initProvider(authHolder, config.model, config.maxTokens, config.toolApproval)
+  const provider = initProvider(authHolder, config.model, config.maxTokens, config.toolApproval)
 
   // Initialize session, skills, plugins
   const {
@@ -62,7 +75,8 @@ async function main(): Promise<void> {
   // ── Web UI mode ─────────────────────────────────────────
   if (cliArgs.uiMode === 'web') {
     await runWebUI({
-      provider: claude,
+      provider,
+      model: config.model,
       systemPrompt,
       enableTools,
       sessionManager: sessions,
@@ -75,12 +89,12 @@ async function main(): Promise<void> {
   const isPiped = !process.stdin.isTTY
 
   if (cliArgs.print || isPiped) {
-    await runPrintMode(claude, sessions, systemPrompt, enableTools, cliArgs.prompt, isPiped)
+    await runPrintMode(provider, sessions, systemPrompt, enableTools, cliArgs.prompt, isPiped)
     process.exit(0)
   }
 
   // ── Interactive TUI mode ─────────────────────────────────
-  await runInteractive(claude, sessions, config, authHolder, skills, systemPrompt, activeSystemPrompt, enableTools, plugins, cliArgs.prompt)
+  await runInteractive(provider, sessions, config, authHolder, skills, systemPrompt, activeSystemPrompt, enableTools, plugins, cliArgs.prompt)
 }
 
 main().catch((err) => {
