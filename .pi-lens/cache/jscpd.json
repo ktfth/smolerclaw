@@ -1,0 +1,512 @@
+{
+  "success": true,
+  "clones": [
+    {
+      "fileA": "src\\utils\\windows-executor.ts",
+      "startA": 395,
+      "fileB": "src\\utils\\windows-executor.ts",
+      "startB": 240,
+      "lines": 8,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\utils\\windows-executor.ts",
+      "startA": 411,
+      "fileB": "src\\utils\\windows-executor.ts",
+      "startB": 268,
+      "lines": 8,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\utils\\windows-executor.ts",
+      "startA": 418,
+      "fileB": "src\\utils\\windows-executor.ts",
+      "startB": 274,
+      "lines": 14,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\utils\\windows-executor.ts",
+      "startA": 489,
+      "fileB": "src\\utils\\windows-executor.ts",
+      "startB": 397,
+      "lines": 13,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\utils\\windows-executor.ts",
+      "startA": 501,
+      "fileB": "src\\utils\\windows-executor.ts",
+      "startB": 407,
+      "lines": 13,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\utils\\windows-executor.ts",
+      "startA": 521,
+      "fileB": "src\\utils\\windows-executor.ts",
+      "startB": 441,
+      "lines": 13,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\tools\\search-tools.ts",
+      "startA": 101,
+      "fileB": "src\\tools\\search-tools.ts",
+      "startB": 12,
+      "lines": 9,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\tools\\file-tools.ts",
+      "startA": 55,
+      "fileB": "src\\tools\\file-tools.ts",
+      "startB": 41,
+      "lines": 7,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\tools\\file-tools.ts",
+      "startA": 55,
+      "fileB": "src\\tools\\file-tools.ts",
+      "startB": 11,
+      "lines": 9,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\tools\\execute.ts",
+      "startA": 62,
+      "fileB": "src\\tools\\execute.ts",
+      "startB": 23,
+      "lines": 8,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\storage\\sqlite.ts",
+      "startA": 428,
+      "fileB": "src\\storage\\sqlite.ts",
+      "startB": 356,
+      "lines": 9,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\storage\\sqlite.ts",
+      "startA": 501,
+      "fileB": "src\\storage\\sqlite.ts",
+      "startB": 424,
+      "lines": 13,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\services\\agency-engine.ts",
+      "startA": 563,
+      "fileB": "src\\services\\agency-engine.ts",
+      "startB": 505,
+      "lines": 13,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\modes\\ui-mode.ts",
+      "startA": 11,
+      "fileB": "src\\ui\\shared\\chat-service.ts",
+      "startB": 13,
+      "lines": 7,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\m365\\executor.ts",
+      "startA": 259,
+      "fileB": "src\\m365\\executor.ts",
+      "startB": 247,
+      "lines": 11,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\m365\\commands.ts",
+      "startA": 123,
+      "fileB": "src\\m365\\tools.ts",
+      "startB": 185,
+      "lines": 7,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\tools.ts",
+      "startA": 43,
+      "fileB": "src\\m365\\tools.ts",
+      "startB": 48,
+      "lines": 9,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\tools.ts",
+      "startA": 148,
+      "fileB": "src\\m365\\tools.ts",
+      "startB": 181,
+      "lines": 10,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\tools.ts",
+      "startA": 164,
+      "fileB": "src\\m365\\tools.ts",
+      "startB": 198,
+      "lines": 6,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\gmail.ts",
+      "startA": 131,
+      "fileB": "src\\gws\\gmail.ts",
+      "startB": 97,
+      "lines": 6,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\executor.ts",
+      "startA": 130,
+      "fileB": "src\\m365\\executor.ts",
+      "startB": 130,
+      "lines": 20,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\executor.ts",
+      "startA": 169,
+      "fileB": "src\\m365\\executor.ts",
+      "startB": 171,
+      "lines": 17,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\executor.ts",
+      "startA": 185,
+      "fileB": "src\\m365\\executor.ts",
+      "startB": 187,
+      "lines": 23,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\executor.ts",
+      "startA": 232,
+      "fileB": "src\\m365\\executor.ts",
+      "startB": 246,
+      "lines": 12,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\executor.ts",
+      "startA": 244,
+      "fileB": "src\\m365\\executor.ts",
+      "startB": 258,
+      "lines": 28,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\drive.ts",
+      "startA": 94,
+      "fileB": "src\\gws\\drive.ts",
+      "startB": 53,
+      "lines": 28,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\composite.ts",
+      "startA": 141,
+      "fileB": "src\\m365\\outlook.ts",
+      "startB": 233,
+      "lines": 8,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\commands.ts",
+      "startA": 114,
+      "fileB": "src\\m365\\commands.ts",
+      "startB": 113,
+      "lines": 17,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\commands.ts",
+      "startA": 129,
+      "fileB": "src\\m365\\commands.ts",
+      "startB": 128,
+      "lines": 13,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\commands.ts",
+      "startA": 176,
+      "fileB": "src\\m365\\commands.ts",
+      "startB": 166,
+      "lines": 8,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\commands.ts",
+      "startA": 300,
+      "fileB": "src\\m365\\commands.ts",
+      "startB": 377,
+      "lines": 16,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\calendar.ts",
+      "startA": 114,
+      "fileB": "src\\m365\\outlook.ts",
+      "startB": 232,
+      "lines": 10,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\cache.ts",
+      "startA": 20,
+      "fileB": "src\\m365\\cache.ts",
+      "startB": 20,
+      "lines": 15,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\cache.ts",
+      "startA": 52,
+      "fileB": "src\\m365\\cache.ts",
+      "startB": 64,
+      "lines": 15,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\gws\\cache.ts",
+      "startA": 74,
+      "fileB": "src\\m365\\cache.ts",
+      "startB": 87,
+      "lines": 12,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\core\\event-bus.ts",
+      "startA": 90,
+      "fileB": "src\\core\\event-bus.ts",
+      "startB": 64,
+      "lines": 10,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\core\\event-bus.ts",
+      "startA": 210,
+      "fileB": "src\\core\\event-bus.ts",
+      "startB": 163,
+      "lines": 15,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\windows.ts",
+      "startA": 402,
+      "fileB": "src\\windows.ts",
+      "startB": 314,
+      "lines": 6,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\session.ts",
+      "startA": 166,
+      "fileB": "src\\session.ts",
+      "startB": 74,
+      "lines": 13,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\scheduler.ts",
+      "startA": 305,
+      "fileB": "src\\scheduler.ts",
+      "startB": 295,
+      "lines": 7,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\scheduler.ts",
+      "startA": 321,
+      "fileB": "src\\scheduler.ts",
+      "startB": 296,
+      "lines": 6,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\scheduler.ts",
+      "startA": 665,
+      "fileB": "src\\tasks.ts",
+      "startB": 258,
+      "lines": 12,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\projects.ts",
+      "startA": 390,
+      "fileB": "src\\vault.ts",
+      "startB": 489,
+      "lines": 14,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\plugins.ts",
+      "startA": 88,
+      "fileB": "src\\tools\\command-tools.ts",
+      "startB": 12,
+      "lines": 10,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\plugin-system.ts",
+      "startA": 362,
+      "fileB": "src\\plugin-system.ts",
+      "startB": 103,
+      "lines": 18,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\plugin-system.ts",
+      "startA": 492,
+      "fileB": "src\\plugin-system.ts",
+      "startB": 361,
+      "lines": 11,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\plugin-system.ts",
+      "startA": 512,
+      "fileB": "src\\plugin-system.ts",
+      "startB": 381,
+      "lines": 12,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\pitwall.ts",
+      "startA": 337,
+      "fileB": "src\\pitwall.ts",
+      "startB": 304,
+      "lines": 15,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\openai-agents-provider.ts",
+      "startA": 54,
+      "fileB": "src\\openai-provider.ts",
+      "startB": 38,
+      "lines": 19,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\openai-agents-provider.ts",
+      "startA": 258,
+      "fileB": "src\\openai-agents-provider.ts",
+      "startB": 234,
+      "lines": 6,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\openai-agents-provider.ts",
+      "startA": 263,
+      "fileB": "src\\openai-agents-provider.ts",
+      "startB": 239,
+      "lines": 6,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\news.ts",
+      "startA": 173,
+      "fileB": "src\\news.ts",
+      "startB": 158,
+      "lines": 7,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\neighborhoods.ts",
+      "startA": 495,
+      "fileB": "src\\neighborhoods.ts",
+      "startB": 474,
+      "lines": 8,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\neighborhoods.ts",
+      "startA": 502,
+      "fileB": "src\\neighborhoods.ts",
+      "startB": 484,
+      "lines": 12,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\macros.ts",
+      "startA": 466,
+      "fileB": "src\\workflows.ts",
+      "startB": 363,
+      "lines": 17,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\macros.ts",
+      "startA": 523,
+      "fileB": "src\\macros.ts",
+      "startB": 514,
+      "lines": 8,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\git.ts",
+      "startA": 11,
+      "fileB": "src\\vault.ts",
+      "startB": 493,
+      "lines": 10,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\context-window.ts",
+      "startA": 224,
+      "fileB": "src\\context-window.ts",
+      "startB": 80,
+      "lines": 9,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\codex-provider.ts",
+      "startA": 53,
+      "fileB": "src\\openai-provider.ts",
+      "startB": 38,
+      "lines": 28,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\claude.ts",
+      "startA": 36,
+      "fileB": "src\\openai-provider.ts",
+      "startB": 38,
+      "lines": 24,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\bookmarks.ts",
+      "startA": 199,
+      "fileB": "src\\memos.ts",
+      "startB": 142,
+      "lines": 11,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\attention.ts",
+      "startA": 232,
+      "fileB": "src\\attention.ts",
+      "startB": 220,
+      "lines": 7,
+      "tokens": 0
+    },
+    {
+      "fileA": "src\\attention.ts",
+      "startA": 314,
+      "fileB": "src\\attention.ts",
+      "startB": 292,
+      "lines": 7,
+      "tokens": 0
+    }
+  ],
+  "duplicatedLines": 700,
+  "totalLines": 36659,
+  "percentage": 1.91
+}

@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "files": {
+    "tests\\bookmarks.test.ts": {
+      "latest": {
+        "commit": "a3777b8",
+        "timestamp": "2026-04-27T01:06:31.209Z",
+        "mi": 26,
+        "cognitive": 3,
+        "nesting": 3,
+        "lines": 318,
+        "maxCyclomatic": 1,
+        "entropy": 5.76
+      },
+      "history": [
+        {
+          "commit": "a3777b8",
+          "timestamp": "2026-04-27T01:06:31.209Z",
+          "mi": 26,
+          "cognitive": 3,
+          "nesting": 3,
+          "lines": 318,
+          "maxCyclomatic": 1,
+          "entropy": 5.76
+        }
+      ],
+      "trend": "stable"
+    },
+    "src\\bookmarks.ts": {
+      "latest": {
+        "commit": "a3777b8",
+        "timestamp": "2026-04-27T01:06:34.246Z",
+        "mi": 32.4,
+        "cognitive": 57,
+        "nesting": 4,
+        "lines": 236,
+        "maxCyclomatic": 12,
+        "entropy": 6.62
+      },
+      "history": [
+        {
+          "commit": "a3777b8",
+          "timestamp": "2026-04-27T01:06:34.246Z",
+          "mi": 32.4,
+          "cognitive": 57,
+          "nesting": 4,
+          "lines": 236,
+          "maxCyclomatic": 12,
+          "entropy": 6.62
+        }
+      ],
+      "trend": "stable"
+    }
+  },
+  "capturedAt": "2026-04-27T01:06:39.262Z"
+}
