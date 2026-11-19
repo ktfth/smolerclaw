@@ -22,7 +22,9 @@ import {
   showToast,
   executePowerShell,
   psDoubleQuoteEscape,
+  psSingleQuoteEscape,
 } from './utils/windows-executor'
+import { selfCommand } from './engine/self-command'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -71,15 +73,21 @@ const TASK_PREFIX = 'Smolerclaw_'
  * Initialize the scheduler module. Must be called once at startup.
  * @param dataDir Directory to store scheduler.json
  * @param onNotify Callback for notifications (optional)
+ * @param options.sync Recreate missing Windows tasks (default true). Headless
+ *   one-shot invocations pass false to avoid querying schtasks on every run.
  */
-export function initScheduler(dataDir: string, onNotify?: SchedulerCallback): void {
+export function initScheduler(
+  dataDir: string,
+  onNotify?: SchedulerCallback,
+  options: { sync?: boolean } = {},
+): void {
   _dataDir = dataDir
   _onNotify = onNotify ?? null
   if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true })
   load()
 
   // Sync jobs with Windows Task Scheduler on startup
-  if (IS_WINDOWS) {
+  if (IS_WINDOWS && options.sync !== false) {
     syncScheduledJobs().catch(() => {})
   }
 }
@@ -515,12 +523,41 @@ $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
  * Delete the toast script for a job.
  */
 function deleteToastScript(jobId: string): void {
-  const scriptPath = join(getScriptsDir(), `toast_${jobId}.ps1`)
-  try {
-    if (existsSync(scriptPath)) unlinkSync(scriptPath)
-  } catch {
-    // Best effort
+  for (const prefix of ['toast', 'workflow']) {
+    const scriptPath = join(getScriptsDir(), `${prefix}_${jobId}.ps1`)
+    try {
+      if (existsSync(scriptPath)) unlinkSync(scriptPath)
+    } catch {
+      // Best effort
+    }
   }
+}
+
+/**
+ * Create a PowerShell script that runs a workflow through the deterministic
+ * engine (`smolerclaw workflow <name>`), appending output to a per-job log.
+ */
+function createWorkflowScript(jobId: string, workflowName: string): string {
+  const scriptPath = join(getScriptsDir(), `workflow_${jobId}.ps1`)
+  const logDir = join(_dataDir, 'logs')
+  if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true })
+  const logPath = join(logDir, `workflow_${jobId}.log`)
+  const quote = (s: string) => `'${psSingleQuoteEscape(s)}'`
+  const invocation = [...selfCommand(), 'workflow', workflowName].map(quote).join(' ')
+
+  const script = `# Workflow runner for smolerclaw
+# Job ID: ${jobId}
+# Generated: ${new Date().toISOString()}
+
+"[$(Get-Date -Format o)] start" | Out-File -FilePath ${quote(logPath)} -Append -Encoding utf8
+& ${invocation} *>> ${quote(logPath)}
+"[$(Get-Date -Format o)] exit $LASTEXITCODE" | Out-File -FilePath ${quote(logPath)} -Append -Encoding utf8
+exit $LASTEXITCODE
+`
+
+  const utf8Bom = Buffer.from([0xEF, 0xBB, 0xBF])
+  writeFileSync(scriptPath, Buffer.concat([utf8Bom, Buffer.from(script, 'utf-8')]))
+  return scriptPath
 }
 
 /**
@@ -536,8 +573,8 @@ function buildTaskCommand(job: ScheduledJob): string {
     // Execute a command directly
     return job.target
   } else {
-    // Workflow — create a script for the notification
-    const scriptPath = createToastScript(job.id, 'smolerclaw', `Workflow: ${job.target}`)
+    // Workflow — run it headless through the deterministic engine
+    const scriptPath = createWorkflowScript(job.id, job.target)
     return `powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${scriptPath}"`
   }
 }

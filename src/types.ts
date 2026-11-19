@@ -45,7 +45,7 @@ export interface Material {
   updatedAt: string
 }
 
-export interface TinyClawConfig {
+export interface SmolerclawConfig {
   model: string
   maxTokens: number
   maxHistory: number

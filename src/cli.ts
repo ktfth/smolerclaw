@@ -124,10 +124,18 @@ Commands:
   (none)               Interactive TUI mode (default)
   ui                   Launch web-based UI (browser)
 
+Deterministic engine (no model, no credentials):
+  tools [--json]               List the tool catalog
+  run <tool> [json|-] [--json] Invoke one tool directly (exit 0/1/2/3)
+  workflow <name>              Run a saved workflow
+  mcp                          Serve tools over MCP stdio (for Claude Code)
+
+  Policy env: SMOLERCLAW_READONLY=1, SMOLERCLAW_ALLOW=a,b, SMOLERCLAW_DENY=a,b
+
 Options:
   -h, --help           Show this help
   -v, --version        Show version
-  -m, --model <name>   Override model (e.g. claude-sonnet-4-20250514 or codex:gpt-5.4)
+  -m, --model <name>   Override model (e.g. claude-sonnet-5-5 or codex:gpt-5.4)
   -s, --session <name> Start with a specific session
   --max-tokens <n>     Override max tokens per response
   --no-tools           Disable tool use for this session
@@ -141,7 +149,7 @@ Examples:
   smolerclaw "explain this error"   Launch TUI with initial prompt
   smolerclaw -p "what is 2+2"      Print answer and exit
   echo "review" | smolerclaw -p     Pipe input, print response
-  smolerclaw -m claude-sonnet-4-20250514 -s work
+  smolerclaw -m claude-sonnet-5-5 -s work
   smolerclaw -m codex:gpt-5.4 "corrija este bug"
 
 Commands (inside TUI):

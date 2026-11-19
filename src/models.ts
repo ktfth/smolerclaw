@@ -12,44 +12,54 @@ export interface ModelInfo {
   provider: ProviderType
 }
 
+// Anthropic IDs follow the official model catalog (aliases, no date suffix,
+// except Haiku 4.5 whose dated ID is kept for configs that already store it).
 export const MODELS: ModelInfo[] = [
   {
-    id: 'claude-haiku-4-5-20251001',
+    id: 'claude-haiku-5-5',
     alias: 'haiku',
+    name: 'Claude Haiku 5.5',
+    contextWindow: 1_000_000,
+    tier: 'fast',
+    provider: 'anthropic',
+  },
+  {
+    id: 'claude-haiku-4-5-20251001',
+    alias: 'haiku-4.5',
     name: 'Claude Haiku 4.5',
     contextWindow: 200_000,
     tier: 'fast',
     provider: 'anthropic',
   },
   {
-    id: 'claude-sonnet-4-20250514',
+    id: 'claude-sonnet-5-5',
     alias: 'sonnet',
-    name: 'Claude Sonnet 4',
-    contextWindow: 200_000,
+    name: 'Claude Sonnet 5.5',
+    contextWindow: 1_000_000,
     tier: 'balanced',
     provider: 'anthropic',
   },
   {
-    id: 'claude-sonnet-4-6-20250627',
+    id: 'claude-sonnet-4-6',
     alias: 'sonnet-4.6',
     name: 'Claude Sonnet 4.6',
-    contextWindow: 200_000,
+    contextWindow: 1_000_000,
     tier: 'balanced',
     provider: 'anthropic',
   },
   {
-    id: 'claude-opus-4-20250514',
+    id: 'claude-opus-5-5',
     alias: 'opus',
-    name: 'Claude Opus 4',
-    contextWindow: 200_000,
+    name: 'Claude Opus 5.5',
+    contextWindow: 1_000_000,
     tier: 'powerful',
     provider: 'anthropic',
   },
   {
-    id: 'claude-opus-4-6-20250318',
-    alias: 'opus-4.6',
-    name: 'Claude Opus 4.6',
-    contextWindow: 200_000,
+    id: 'claude-fable-5-1',
+    alias: 'fable',
+    name: 'Claude Fable 5.1',
+    contextWindow: 1_000_000,
     tier: 'powerful',
     provider: 'anthropic',
   },
@@ -127,7 +137,7 @@ export function formatModelList(currentModel: string): string {
 export function defaultModelForProvider(provider: ProviderType): string {
   switch (provider) {
     case 'anthropic':
-      return 'claude-sonnet-4-20250514'
+      return 'claude-sonnet-5-5'
     case 'codex':
       return 'codex:gpt-5.4'
     case 'openai':

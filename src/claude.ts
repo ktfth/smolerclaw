@@ -121,8 +121,9 @@ export class ClaudeProvider {
             return this.client.messages.stream({
               model: this.model,
               max_tokens: this.maxTokens,
-              system,
-              messages: convo,
+              // Tools render before system, so this breakpoint caches both.
+              system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+              messages: withTailCacheBreakpoint(convo),
               ...(tools?.length ? { tools } : {}),
             })
           },
@@ -213,6 +214,25 @@ export class ClaudeProvider {
 
     yield { type: 'error', error: `Stopped after ${MAX_TOOL_ROUNDS} tool rounds to prevent runaway execution.` }
   }
+}
+
+/**
+ * Return a copy of the conversation with a cache breakpoint on the last block,
+ * so each tool round reads the previous rounds from cache. The input is not
+ * mutated; the moving marker never invalidates earlier cached prefixes.
+ */
+export function withTailCacheBreakpoint(messages: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
+  if (messages.length === 0) return messages
+  const last = messages[messages.length - 1]
+  const blocks: Anthropic.ContentBlockParam[] = typeof last.content === 'string'
+    ? [{ type: 'text', text: last.content }]
+    : [...last.content]
+  if (blocks.length === 0) return messages
+  const tail = blocks[blocks.length - 1]
+  if (tail.type === 'thinking' || tail.type === 'redacted_thinking') return messages
+  if (tail.type === 'text' && tail.text.length === 0) return messages
+  blocks[blocks.length - 1] = { ...tail, cache_control: { type: 'ephemeral' } } as Anthropic.ContentBlockParam
+  return [...messages.slice(0, -1), { ...last, content: blocks }]
 }
 
 function toApiMessages(messages: Message[]): Anthropic.MessageParam[] {

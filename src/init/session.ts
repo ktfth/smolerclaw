@@ -1,10 +1,9 @@
 import { SessionManager } from '../session'
 import { loadSkills, buildSystemPrompt } from '../skills'
 import { buildMaterialsContext } from '../materials'
-import { registerWindowsTools, registerPlugins, TOOLS } from '../tools'
-import { loadPlugins, pluginsToTools, getPluginDir } from '../plugins'
-import { initPluginSystem, getPluginTools } from '../plugin-system'
-import { getConfigDir, type loadConfig } from '../config'
+import type { loadPlugins } from '../plugins'
+import type { loadConfig } from '../config'
+import { registerToolCatalog } from './tools'
 
 export interface SessionSetup {
   sessions: SessionManager
@@ -29,27 +28,7 @@ export async function initSession(
   const systemPrompt = buildSystemPrompt(config.systemPrompt, skills, config.language)
   const enableTools = !cliNoTools
 
-  // Register Windows/business tools
-  registerWindowsTools()
-
-  // Load plugins (legacy JSON)
-  const pluginDir = getPluginDir(getConfigDir())
-  const plugins = loadPlugins(pluginDir)
-  if (plugins.length > 0) {
-    registerPlugins(plugins)
-    TOOLS.push(...pluginsToTools(plugins))
-  }
-
-  // Initialize enhanced plugin system (JSON + script plugins)
-  await initPluginSystem(pluginDir, config.dataDir)
-  const enhancedTools = getPluginTools()
-  // Add script plugin tools that aren't already registered from JSON plugins
-  const existingNames = new Set(TOOLS.map((t) => t.name))
-  for (const tool of enhancedTools) {
-    if (!existingNames.has(tool.name)) {
-      TOOLS.push(tool)
-    }
-  }
+  const plugins = await registerToolCatalog(config.dataDir)
 
   // Append materials context to system prompt so the AI knows about saved reference materials
   const materialsCtx = buildMaterialsContext()

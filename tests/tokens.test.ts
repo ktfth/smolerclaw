@@ -16,7 +16,16 @@ describe('estimateCost', () => {
 
   test('pattern matching for unknown model IDs', () => {
     const cost = estimateCost({ inputTokens: 1_000_000, outputTokens: 0 }, 'claude-haiku-future-version')
-    expect(cost.inputCostCents).toBeCloseTo(100, 0) // matches haiku pattern
+    expect(cost.inputCostCents).toBeCloseTo(10, 0) // matches current haiku pattern ($0.10)
+  })
+
+  test('current model pricing', () => {
+    const sonnet = estimateCost({ inputTokens: 1_000_000, outputTokens: 1_000_000 }, 'claude-sonnet-5-5')
+    expect(sonnet.inputCostCents).toBeCloseTo(200, 0)
+    expect(sonnet.outputCostCents).toBeCloseTo(1000, 0)
+    const opus = estimateCost({ inputTokens: 1_000_000, outputTokens: 1_000_000 }, 'claude-opus-5-5')
+    expect(opus.inputCostCents).toBeCloseTo(400, 0)
+    expect(opus.outputCostCents).toBeCloseTo(2000, 0)
   })
 
   test('codex mini pricing', () => {

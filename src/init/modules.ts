@@ -18,7 +18,6 @@ import { initMemory } from '../memory'
 import { initProjects } from '../projects'
 import { initRecommendations } from '../recommendations'
 import { initNeighborhoods } from '../neighborhoods'
-import { startMapServer } from '../map-server'
 import { initEnergy } from '../energy'
 import { initBookmarks } from '../bookmarks'
 import { initAttention } from '../attention'
@@ -72,7 +71,8 @@ export function initCoreModules(
   initEnergy(dataDir)
   initAttention(dataDir)
   initBookmarks(dataDir)
-  startMapServer()
+  // Headless modes need scheduler storage too; Windows task sync stays TUI-only.
+  initScheduler(dataDir, undefined, { sync: false })
   initTasks(dataDir, () => {}) // no-op notifier for headless modes; TUI overrides later
 }
 

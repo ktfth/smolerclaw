@@ -10,12 +10,16 @@ export interface CostEstimate {
 }
 
 // Pricing per 1M tokens in USD (as of 2025)
+// USD per million tokens. Haiku 5.5 uses its <=100K-prompt tier.
 const PRICING: Record<string, { input: number; output: number }> = {
+  'claude-haiku-5-5':          { input: 0.10, output: 0.50 },
   'claude-haiku-4-5-20251001': { input: 1.00, output: 5.00 },
+  'claude-sonnet-5-5':         { input: 2.00, output: 10.00 },
+  'claude-sonnet-4-6':         { input: 3.00, output: 15.00 },
   'claude-sonnet-4-20250514':  { input: 3.00, output: 15.00 },
-  'claude-sonnet-4-6-20250627': { input: 3.00, output: 15.00 },
+  'claude-opus-5-5':           { input: 4.00, output: 20.00 },
   'claude-opus-4-20250514':    { input: 15.00, output: 75.00 },
-  'claude-opus-4-6-20250318':  { input: 15.00, output: 75.00 },
+  'claude-fable-5-1':          { input: 10.00, output: 50.00 },
   'codex:codex-mini-latest':   { input: 1.50, output: 6.00 },
 }
 
@@ -42,9 +46,10 @@ function findPricing(model: string): { input: number; output: number } {
 
   // Pattern match (e.g., "claude-haiku" matches "claude-haiku-4-5-*")
   const lower = model.toLowerCase()
-  if (lower.includes('haiku')) return PRICING['claude-haiku-4-5-20251001']
-  if (lower.includes('opus')) return PRICING['claude-opus-4-20250514']
-  if (lower.includes('sonnet')) return PRICING['claude-sonnet-4-20250514']
+  if (lower.includes('haiku')) return PRICING['claude-haiku-5-5']
+  if (lower.includes('opus')) return PRICING['claude-opus-5-5']
+  if (lower.includes('sonnet')) return PRICING['claude-sonnet-5-5']
+  if (lower.includes('fable')) return PRICING['claude-fable-5-1']
   if (lower.includes('codex-mini')) return PRICING['codex:codex-mini-latest']
 
   return DEFAULT_PRICING

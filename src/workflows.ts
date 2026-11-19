@@ -161,6 +161,16 @@ export function getWorkflow(nameOrId: string): Workflow | null {
   )
 }
 
+/** Exact lookup (id or case-insensitive full name) for unattended runs. */
+export function getWorkflowExact(nameOrId: string): Workflow | null {
+  const lower = nameOrId.toLowerCase().trim()
+  return (
+    _workflows.find((w) => w.id === nameOrId) ||
+    _workflows.find((w) => w.name.toLowerCase() === lower) ||
+    null
+  )
+}
+
 export function listWorkflows(tag?: string): Workflow[] {
   let result = [..._workflows]
   if (tag) {
@@ -267,18 +277,34 @@ export async function runWorkflow(
   nameOrId: string,
   onStep?: (msg: string) => void,
 ): Promise<string> {
-  const workflow = getWorkflow(nameOrId)
+  return (await runWorkflowOutcome(nameOrId, onStep)).text
+}
+
+export interface WorkflowOutcome {
+  ok: boolean
+  text: string
+}
+
+/**
+ * Run a workflow and report success structurally (for exit codes).
+ * Uses exact lookup: an unattended run must never pick a similarly named workflow.
+ */
+export async function runWorkflowOutcome(
+  nameOrId: string,
+  onStep?: (msg: string) => void,
+): Promise<WorkflowOutcome> {
+  const workflow = getWorkflowExact(nameOrId)
   if (!workflow) {
     const available = _workflows.map((w) => w.name).join(', ')
-    return `Workflow nao encontrado: "${nameOrId}". Disponiveis: ${available}`
+    return { ok: false, text: `Workflow nao encontrado: "${nameOrId}". Disponiveis: ${available}` }
   }
 
   if (!workflow.enabled) {
-    return `Workflow "${workflow.name}" esta desativado.`
+    return { ok: false, text: `Workflow "${workflow.name}" esta desativado.` }
   }
 
   const result = await executeSteps(workflow.name, workflow.steps, onStep)
-  return formatRunResult(result)
+  return { ok: result.success, text: formatRunResult(result) }
 }
 
 async function executeSteps(

@@ -3,9 +3,11 @@ import { resolveModel, modelDisplayName, defaultModelForProvider } from '../src/
 
 describe('resolveModel', () => {
   test('resolves aliases', () => {
-    expect(resolveModel('haiku')).toBe('claude-haiku-4-5-20251001')
-    expect(resolveModel('sonnet')).toBe('claude-sonnet-4-20250514')
-    expect(resolveModel('opus')).toBe('claude-opus-4-20250514')
+    expect(resolveModel('haiku')).toBe('claude-haiku-5-5')
+    expect(resolveModel('haiku-4.5')).toBe('claude-haiku-4-5-20251001')
+    expect(resolveModel('sonnet')).toBe('claude-sonnet-5-5')
+    expect(resolveModel('opus')).toBe('claude-opus-5-5')
+    expect(resolveModel('fable')).toBe('claude-fable-5-1')
     expect(resolveModel('codex')).toBe('codex:gpt-5.4')
   })
 
@@ -19,8 +21,8 @@ describe('resolveModel', () => {
   })
 
   test('is case-insensitive for aliases', () => {
-    expect(resolveModel('Haiku')).toBe('claude-haiku-4-5-20251001')
-    expect(resolveModel('SONNET')).toBe('claude-sonnet-4-20250514')
+    expect(resolveModel('Haiku')).toBe('claude-haiku-5-5')
+    expect(resolveModel('SONNET')).toBe('claude-sonnet-5-5')
   })
 })
 
@@ -37,7 +39,7 @@ describe('modelDisplayName', () => {
 
 describe('defaultModelForProvider', () => {
   test('returns the expected defaults', () => {
-    expect(defaultModelForProvider('anthropic')).toBe('claude-sonnet-4-20250514')
+    expect(defaultModelForProvider('anthropic')).toBe('claude-sonnet-5-5')
     expect(defaultModelForProvider('codex')).toBe('codex:gpt-5.4')
     expect(defaultModelForProvider('openai')).toBe('openai:gpt-5.4')
     expect(defaultModelForProvider('ollama')).toBe('ollama:llama3')

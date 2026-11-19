@@ -101,6 +101,9 @@ export function createWebServer(config: WebServerConfig) {
       systemPrompt: config.systemPrompt,
       enableTools: config.enableTools,
       sessionManager: config.sessionManager,
+      // The web client has no approval round-trip yet. When the configured
+      // toolApproval mode asks for confirmation, deny instead of silently
+      // approving, so the policy means the same thing in every UI.
       onApprovalRequired: async (name, input, riskLevel) => {
         send(ws, {
           type: 'tool_approval_required',
@@ -111,7 +114,7 @@ export function createWebServer(config: WebServerConfig) {
             riskLevel: riskLevel as 'safe' | 'moderate' | 'high',
           },
         })
-        return true
+        return false
       },
     })
 

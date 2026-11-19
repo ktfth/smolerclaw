@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, copyFileSync } from '
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { IS_WINDOWS } from './platform'
-import type { TinyClawConfig } from './types'
+import type { SmolerclawConfig } from './types'
 import { atomicWriteFile } from './vault'
 
 const HOME = homedir()
@@ -18,7 +18,7 @@ const DATA_DIR = IS_WINDOWS
 
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json')
 
-const DEFAULTS: TinyClawConfig = {
+const DEFAULTS: SmolerclawConfig = {
   model: 'claude-haiku-4-5-20251001',
   maxTokens: 4096,
   maxHistory: 50,
@@ -34,7 +34,7 @@ function ensureDir(dir: string): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 }
 
-export function loadConfig(): TinyClawConfig {
+export function loadConfig(): SmolerclawConfig {
   ensureDir(CONFIG_DIR)
   ensureDir(DATA_DIR)
   ensureDir(join(DATA_DIR, 'sessions'))
@@ -60,7 +60,7 @@ export function loadConfig(): TinyClawConfig {
   return validateConfig({ ...DEFAULTS, ...raw })
 }
 
-function validateConfig(config: Record<string, unknown>): TinyClawConfig {
+function validateConfig(config: Record<string, unknown>): SmolerclawConfig {
   const validated = { ...DEFAULTS }
 
   if (typeof config.model === 'string' && config.model.trim()) {
@@ -81,9 +81,9 @@ function validateConfig(config: Record<string, unknown>): TinyClawConfig {
   if (typeof config.dataDir === 'string' && config.dataDir.trim()) {
     validated.dataDir = config.dataDir
   }
-  const validModes: Array<TinyClawConfig['toolApproval']> = ['auto', 'confirm-writes', 'confirm-all']
-  if (typeof config.toolApproval === 'string' && validModes.includes(config.toolApproval as TinyClawConfig['toolApproval'])) {
-    validated.toolApproval = config.toolApproval as TinyClawConfig['toolApproval']
+  const validModes: Array<SmolerclawConfig['toolApproval']> = ['auto', 'confirm-writes', 'confirm-all']
+  if (typeof config.toolApproval === 'string' && validModes.includes(config.toolApproval as SmolerclawConfig['toolApproval'])) {
+    validated.toolApproval = config.toolApproval as SmolerclawConfig['toolApproval']
   }
   if (typeof config.language === 'string') {
     validated.language = config.language
@@ -95,7 +95,7 @@ function validateConfig(config: Record<string, unknown>): TinyClawConfig {
   return validated
 }
 
-export function saveConfig(config: TinyClawConfig): void {
+export function saveConfig(config: SmolerclawConfig): void {
   ensureDir(CONFIG_DIR)
   atomicWriteFile(CONFIG_FILE, JSON.stringify(config, null, 2))
 }

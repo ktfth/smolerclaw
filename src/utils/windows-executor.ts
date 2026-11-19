@@ -675,14 +675,17 @@ function xmlEncode(s: string): string {
 
 /**
  * Escape a string for embedding in a PowerShell single-quoted string.
+ * PowerShell also ends single-quoted strings at the typographic quotes
+ * U+2018..U+201B, so those are doubled as well.
  */
 export function psSingleQuoteEscape(s: string): string {
-  return s.replace(/'/g, "''")
+  return s.replace(/['\u2018\u2019\u201A\u201B]/g, (q) => q + q)
 }
 
 /**
  * Escape a string for embedding in a PowerShell double-quoted string.
+ * Typographic double quotes U+201C..U+201E also delimit, so they are doubled.
  */
 export function psDoubleQuoteEscape(s: string): string {
-  return s.replace(/"/g, '""').replace(/`/g, '``').replace(/\$/g, '`$')
+  return s.replace(/["\u201C\u201D\u201E]/g, (q) => q + q).replace(/`/g, '``').replace(/\$/g, '`$')
 }

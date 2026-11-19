@@ -11,9 +11,17 @@ import { runWebUI } from './modes/ui-mode'
 import { initI18n } from './i18n'
 import { initCoreModules } from './init/modules'
 import { promptStartupProviderSelection } from './login'
+import { isEngineCommand, runEngineMode } from './modes/engine-mode'
 
 async function main(): Promise<void> {
-  const cliArgs = parseArgs(process.argv.slice(2))
+  const argv = process.argv.slice(2)
+
+  // ── Deterministic engine: no model, no credentials ───────
+  if (isEngineCommand(argv[0])) {
+    process.exit(await runEngineMode(argv))
+  }
+
+  const cliArgs = parseArgs(argv)
 
   // ── Help / Version ───────────────────────────────────────
   if (cliArgs.help) {

@@ -92,25 +92,9 @@ export const WINDOWS_TOOLS: Anthropic.Tool[] = [
 
 // ─── Windows Agent Tools (Windows-only) ─────────────────
 
+// execute_powershell_script is intentionally not exposed: tool-safety classifies it
+// as dangerous, so every call would be blocked while its schema still cost tokens.
 export const AGENT_TOOLS: Anthropic.Tool[] = [
-  {
-    name: 'execute_powershell_script',
-    description:
-      'Execute a PowerShell script on the local machine. The script runs in a temp .ps1 file with -ExecutionPolicy Bypass (scoped). ' +
-      'Safety guards block dangerous operations (Defender, System32, formatting). ' +
-      'Returns stdout, stderr, exit code, and duration. ' +
-      'Use for: automation, system queries, batch operations, registry reads, scheduled tasks.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        script: {
-          type: 'string',
-          description: 'The PowerShell script to execute. Multi-line supported.',
-        },
-      },
-      required: ['script'],
-    },
-  },
   {
     name: 'analyze_screen_context',
     description:

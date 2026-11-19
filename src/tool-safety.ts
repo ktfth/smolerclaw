@@ -147,9 +147,36 @@ const MODERATE_COMMANDS = [
 ]
 
 /**
+ * Tools verified to only read state (no writes, sends or side effects).
+ * Anything not listed here or below defaults to `moderate`.
+ */
+const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  // listings
+  'list_archived_sessions', 'list_bookmarks', 'list_catalog', 'list_incidents',
+  'list_investigations', 'list_materials', 'list_neighborhoods', 'list_people',
+  'list_projects', 'list_scheduled_jobs', 'list_tasks', 'list_tradeoff_analyses',
+  'gws_list_emails', 'gws_list_events', 'gws_list_files',
+  // lookups
+  'get_calendar_events', 'get_current_plan', 'get_neighborhood', 'get_news',
+  'get_people_dashboard', 'get_recommendations', 'get_regional_news',
+  'get_running_apps', 'get_system_info', 'get_tradeoff_adr', 'get_usage_insights',
+  'find_person_info', 'gws_read_email', 'gws_briefing', 'investigation_report',
+  // searches
+  'search_bookmarks', 'search_content', 'search_decisions', 'search_materials',
+  'search_memos', 'search_neighborhoods', 'gws_search_files',
+  // status and summaries
+  'attention_status', 'check_plan_status', 'db_status', 'docker_containers',
+  'docker_status', 'fs_watch_history', 'fs_watch_status', 'investigation_status',
+  'pitwall_status', 'vault_status', 'bookmark_tags', 'content_stats',
+  'energy_profile', 'explain_optimal_usage', 'financial_summary', 'security_audit_log',
+])
+
+/**
  * Assess risk level of a tool call.
  */
 export function assessToolRisk(name: string, input: Record<string, unknown>): ToolRisk {
+  if (READ_ONLY_TOOLS.has(name)) return { level: 'safe' }
+
   switch (name) {
     case 'read_file':
     case 'list_directory':

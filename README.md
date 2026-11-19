@@ -74,10 +74,37 @@ smolerclaw is a terminal AI assistant that lives on your Windows machine. It can
 ```bash
 smolerclaw                  # Interactive TUI (default)
 smolerclaw ui               # Web UI at http://localhost:3847
-smolerclaw desktop          # Desktop app (Electrobun)
 smolerclaw ui --port 8080   # Custom port
 smolerclaw -p "question"    # Print mode (non-interactive)
 ```
+
+## Deterministic engine
+
+The engine runs tools without any model in the loop and needs no credentials. Every call goes through the same fixed pipeline: catalog lookup → JSON-schema validation → static policy → execution → audit.
+
+```bash
+smolerclaw tools [--json]                       # List the tool catalog
+smolerclaw run create_task '{"title":"Pay rent"}' # Invoke one tool directly
+echo '{"query":"rent"}' | smolerclaw run search_memos -   # Input from stdin
+smolerclaw run list_tasks --json                # Structured result
+smolerclaw workflow iniciar-dia                 # Run a saved workflow
+smolerclaw mcp                                  # Serve tools over MCP (stdio)
+```
+
+- **Exit codes:** `0` ok, `1` tool error, `2` invalid input or unknown tool, `3` denied by policy.
+- **Policy:** dangerous operations are always denied. `SMOLERCLAW_READONLY=1` denies anything that is not a verified read. `SMOLERCLAW_ALLOW=a,b` and `SMOLERCLAW_DENY=a,b` restrict the catalog.
+- **Audit:** one JSONL file per day under `<dataDir>/audit/`. Records store a SHA-256 of the canonical input, never the raw input.
+- **Scheduled workflows:** jobs with the `workflow` action run `smolerclaw workflow <name>` headless and append output to `<dataDir>/logs/`.
+
+### Use with Claude Code
+
+Claude Code becomes the agent and smolerclaw supplies the tools:
+
+```bash
+claude mcp add smolerclaw -- smolerclaw mcp
+```
+
+Combine with `SMOLERCLAW_READONLY=1` for unattended runs that must not change anything.
 
 ## TUI Commands
 
@@ -190,10 +217,37 @@ smolerclaw e um assistente de IA no terminal que vive na sua maquina Windows. El
 ```bash
 smolerclaw                  # TUI interativa (padrao)
 smolerclaw ui               # Interface Web em http://localhost:3847
-smolerclaw desktop          # App Desktop (Electrobun)
 smolerclaw ui --port 8080   # Porta customizada
 smolerclaw -p "pergunta"    # Modo print (nao-interativo)
 ```
+
+## Motor determinístico
+
+O motor executa tools sem nenhum modelo no circuito e não precisa de credenciais. Toda chamada passa pelo mesmo pipeline fixo: busca no catálogo → validação por JSON Schema → política estática → execução → auditoria.
+
+```bash
+smolerclaw tools [--json]                          # Lista o catálogo de tools
+smolerclaw run create_task '{"title":"Pagar aluguel"}' # Invoca um tool direto
+echo '{"query":"aluguel"}' | smolerclaw run search_memos -   # Entrada via stdin
+smolerclaw run list_tasks --json                   # Resultado estruturado
+smolerclaw workflow iniciar-dia                    # Roda um workflow salvo
+smolerclaw mcp                                     # Serve os tools via MCP (stdio)
+```
+
+- **Códigos de saída:** `0` ok, `1` erro do tool, `2` entrada inválida ou tool desconhecido, `3` negado pela política.
+- **Política:** operações perigosas são sempre negadas. `SMOLERCLAW_READONLY=1` nega tudo que não for leitura verificada. `SMOLERCLAW_ALLOW=a,b` e `SMOLERCLAW_DENY=a,b` restringem o catálogo.
+- **Auditoria:** um arquivo JSONL por dia em `<dataDir>/audit/`. Os registros guardam o SHA-256 da entrada canônica, nunca a entrada bruta.
+- **Workflows agendados:** jobs com ação `workflow` rodam `smolerclaw workflow <nome>` sem interface e gravam a saída em `<dataDir>/logs/`.
+
+### Uso com o Claude Code
+
+O Claude Code vira o agente e o smolerclaw fornece os tools:
+
+```bash
+claude mcp add smolerclaw -- smolerclaw mcp
+```
+
+Combine com `SMOLERCLAW_READONLY=1` para execuções desassistidas que não podem alterar nada.
 
 ## Comandos na TUI
 
