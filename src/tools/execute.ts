@@ -1,126 +1,71 @@
 /**
- * executeTool() dispatch function — routes tool calls to the appropriate handler.
+ * Tool dispatch. Every entry returns a ToolResult; string-returning handlers
+ * (workstation primitives, integrations, plugins) go through fromLegacyText.
  */
 import { UndoStack } from '../undo'
 import { type Plugin, executePlugin } from '../plugins'
 import { executePluginTool } from '../plugin-system'
-import { observeEvent } from '../services/docs-engine'
+import { fail, fromLegacyText, type CatalogEntry, type ToolResult } from '../core/result'
 import { toolReadFile, toolWriteFile, toolEditFile } from './file-tools'
 import { toolSearchFiles, toolFindFiles, toolListDirectory } from './search-tools'
 import { toolRunCommand } from './command-tools'
 import { toolFetchUrl } from './network-tools'
-import { executeVaultTool } from './vault-tools'
-import { executeMemoryTool } from './memory-tools'
-import { executeAgencyTool } from './agency-tools'
-import { executeDockerSecurityTool } from './docker-security-tools'
-import { executeBusinessTool } from './business-tools'
-import { executeM365Tool } from '../m365'
-import { executeGwsTool } from '../gws'
+import { INTEGRATION_TOOLS } from './integrations'
+import { WORKSTATION_SCHEMAS } from './schemas'
+import { DOMAIN_TOOLS } from './domain'
 
-/**
- * Execute a tool and observe the execution for meta-learning.
- */
-export async function executeTool(
-  name: string,
-  input: Record<string, unknown>,
-  undoStack: UndoStack,
-  plugins: Plugin[],
-  sessionManager: { archive: (n: string) => boolean; archiveAll: () => string[]; unarchive: (n: string) => boolean; listArchived: () => string[]; getArchivedInfo: (n: string) => { messageCount: number; updated: number } | null } | null,
-): Promise<string> {
-  const startTime = performance.now()
+type LegacyRunner = (input: Record<string, unknown>) => string | Promise<string>
 
-  try {
-    const result = await executeToolInternal(name, input, undoStack, plugins, sessionManager)
+const WORKSTATION_READS: ReadonlySet<string> = new Set(['read_file', 'search_files', 'find_files', 'list_directory'])
 
-    // Observe tool execution for meta-learning (non-blocking)
-    setImmediate(() => {
-      observeEvent({
-        type: 'tool:executed',
-        name,
-        input,
-        durationMs: Math.round(performance.now() - startTime),
-        success: !result.startsWith('Error:'),
-      })
-    })
-
-    return result
-  } catch (err) {
-    // Observe failed execution
-    setImmediate(() => {
-      observeEvent({
-        type: 'tool:executed',
-        name,
-        input,
-        durationMs: Math.round(performance.now() - startTime),
-        success: false,
-      })
-    })
-    return `Error: ${err instanceof Error ? err.message : String(err)}`
-  }
+function legacy(schemas: readonly CatalogEntry['schema'][], runner: (name: string) => LegacyRunner): CatalogEntry[] {
+  return schemas.map((schema) => ({
+    schema,
+    readOnly: WORKSTATION_READS.has(schema.name),
+    run: async (input) => fromLegacyText(await runner(schema.name)({ ...input })),
+  }))
 }
 
-async function executeToolInternal(
+/**
+ * Agent primitives (files, shell, HTTP). Only the built-in chat loop gets
+ * these: an external agent such as Claude Code already has its own, and
+ * exposing a second, differently-policed shell over MCP is pure attack surface.
+ */
+export function workstationTools(undoStack: UndoStack): CatalogEntry[] {
+  const runners: Record<string, LegacyRunner> = {
+    read_file: (i) => toolReadFile(i),
+    write_file: (i) => toolWriteFile(i, undoStack),
+    edit_file: (i) => toolEditFile(i, undoStack),
+    search_files: (i) => toolSearchFiles(i),
+    find_files: (i) => toolFindFiles(i),
+    list_directory: (i) => toolListDirectory(i),
+    run_command: (i) => toolRunCommand(i),
+    fetch_url: (i) => toolFetchUrl(i),
+  }
+  return legacy(WORKSTATION_SCHEMAS, (name) => runners[name])
+}
+
+export const ENGINE_TOOLS: readonly CatalogEntry[] = [...DOMAIN_TOOLS, ...INTEGRATION_TOOLS]
+
+/** Resolve and run a tool. Never throws: handler exceptions become failures. */
+export async function dispatchTool(
+  entries: ReadonlyMap<string, CatalogEntry>,
   name: string,
   input: Record<string, unknown>,
-  undoStack: UndoStack,
-  plugins: Plugin[],
-  sessionManager: { archive: (n: string) => boolean; archiveAll: () => string[]; unarchive: (n: string) => boolean; listArchived: () => string[]; getArchivedInfo: (n: string) => { messageCount: number; updated: number } | null } | null,
-): Promise<string> {
-  // Core file tools
-  switch (name) {
-    case 'read_file':
-      return toolReadFile(input)
-    case 'write_file':
-      return toolWriteFile(input, undoStack)
-    case 'edit_file':
-      return toolEditFile(input, undoStack)
-    case 'search_files':
-      return await toolSearchFiles(input)
-    case 'find_files':
-      return await toolFindFiles(input)
-    case 'list_directory':
-      return toolListDirectory(input)
-    case 'run_command':
-      return await toolRunCommand(input)
-    case 'fetch_url':
-      return await toolFetchUrl(input)
+  plugins: readonly Plugin[],
+): Promise<ToolResult> {
+  try {
+    const entry = entries.get(name)
+    if (entry) return await entry.run(input)
+
+    const pluginResult = await executePluginTool(name, input)
+    if (pluginResult !== null) return fromLegacyText(pluginResult)
+
+    const plugin = plugins.find((p) => p.name === name)
+    if (plugin) return fromLegacyText(await executePlugin(plugin, input))
+
+    return fail(`unknown tool "${name}"`)
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : String(err))
   }
-
-  // Vault tools
-  const vaultResult = await executeVaultTool(name, input)
-  if (vaultResult !== null) return vaultResult
-
-  // Memory tools
-  const memResult = executeMemoryTool(name, input)
-  if (memResult !== null) return memResult
-
-  // Agency tools
-  const agencyResult = await executeAgencyTool(name, input)
-  if (agencyResult !== null) return agencyResult
-
-  // Docker, Security, FSWatcher, DB tools
-  const dockerSecResult = await executeDockerSecurityTool(name, input)
-  if (dockerSecResult !== null) return dockerSecResult
-
-  // M365 tools
-  const m365Result = await executeM365Tool(name, input)
-  if (m365Result !== null) return m365Result
-
-  // GWS tools
-  const gwsResult = await executeGwsTool(name, input)
-  if (gwsResult !== null) return gwsResult
-
-  // Business tools (all the rest)
-  const bizResult = await executeBusinessTool(name, input, sessionManager)
-  if (bizResult !== null) return bizResult
-
-  // Check enhanced plugin system first (supports both JSON and script plugins)
-  const pluginResult = await executePluginTool(name, input)
-  if (pluginResult !== null) return pluginResult
-
-  // Fallback: legacy JSON plugins passed as parameter
-  const plugin = plugins.find((p) => p.name === name)
-  if (plugin) return await executePlugin(plugin, input)
-
-  return `Error: unknown tool "${name}"`
 }

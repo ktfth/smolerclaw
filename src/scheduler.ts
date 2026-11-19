@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from '
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { IS_WINDOWS } from './platform'
+import { ok, fail, type ToolResult } from './core/result'
 import { atomicWriteFile } from './vault'
 import {
   executeSchtasks,
@@ -221,14 +222,14 @@ export function getJob(idOrName: string): ScheduledJob | null {
 /**
  * Run a job immediately (for testing).
  */
-export async function runJobNow(idOrName: string): Promise<string> {
+export async function runJobNow(idOrName: string): Promise<ToolResult> {
   const job = findJob(idOrName)
-  if (!job) return 'Agendamento nao encontrado.'
+  if (!job) return fail(`Agendamento não encontrado: "${idOrName}"`)
 
   if (IS_WINDOWS) {
     const result = await executeSchtasks('Run', job.taskName)
     if (result.exitCode !== 0) {
-      return `Erro ao executar: ${result.stderr}`
+      return fail(`Erro ao executar: ${result.stderr}`)
     }
   }
 
@@ -240,7 +241,7 @@ export async function runJobNow(idOrName: string): Promise<string> {
   )
   save()
 
-  return `Agendamento "${job.name}" executado.`
+  return ok(`Agendamento "${job.name}" executado.`, job)
 }
 
 /**
@@ -478,6 +479,11 @@ function getScriptsDir(): string {
  * Create a PowerShell script file for toast notification.
  * This avoids encoding issues with special characters when passing inline commands.
  */
+/** Escape text for an XML text node (the toast template is parsed as XML). */
+function xmlEscape(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;')
+}
+
 function createToastScript(jobId: string, title: string, body: string): string {
   const scriptsDir = getScriptsDir()
   const scriptPath = join(scriptsDir, `toast_${jobId}.ps1`)
@@ -490,8 +496,8 @@ function createToastScript(jobId: string, title: string, body: string): string {
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
 [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
 
-$title = '${title.replace(/'/g, "''")}'
-$body = '${body.replace(/'/g, "''")}'
+$title = '${psSingleQuoteEscape(xmlEscape(title))}'
+$body = '${psSingleQuoteEscape(xmlEscape(body))}'
 
 $template = @"
 <toast>

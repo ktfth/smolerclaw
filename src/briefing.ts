@@ -1,5 +1,5 @@
 /**
- * Daily briefing — morning summary combining calendar, system, and news.
+ * Daily briefing — morning summary combining calendar, system, and workload.
  * Includes Time & Load Balancer for persona-aware context routing.
  */
 import { logger } from './core/logger'
@@ -7,7 +7,6 @@ import { logger } from './core/logger'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getDateTimeInfo, getOutlookEvents, getSystemInfo } from './windows'
-import { fetchNews } from './news'
 import { IS_WINDOWS } from './platform'
 import { listProjects, getGitSummary, type Project } from './projects'
 
@@ -308,7 +307,7 @@ Depois: descanso merecido.`
 }
 
 /**
- * Generate a daily briefing with date, calendar, system, and top news.
+ * Generate a daily briefing with date, calendar, system, and workload.
  * Now includes Time & Load Balancer persona awareness.
  */
 export async function generateBriefing(dataDir?: string): Promise<string> {
@@ -345,12 +344,8 @@ export async function generateBriefing(dataDir?: string): Promise<string> {
 
   // Calendar (Windows only, non-blocking)
   if (IS_WINDOWS) {
-    try {
-      const events = await getOutlookEvents()
-      sections.push(`\n--- Agenda ---\n${events}`)
-    } catch {
-      sections.push('\n--- Agenda ---\nOutlook nao disponivel.')
-    }
+    const events = await getOutlookEvents()
+    sections.push(`\n--- Agenda ---\n${events.text}`)
   }
 
   // System status
@@ -361,15 +356,6 @@ export async function generateBriefing(dataDir?: string): Promise<string> {
     } catch (err) {
       logger.debug('System info unavailable for briefing', { error: err })
     }
-  }
-
-  // Top news — reduced for weekends to encourage relaxation
-  const newsLimit = context?.persona === 'sharpen_or_relax' ? 2 : 3
-  try {
-    const news = await fetchNews(['finance', 'business', 'tech'], newsLimit)
-    sections.push(`\n${news}`)
-  } catch {
-    sections.push('\n--- Noticias ---\nFalha ao carregar noticias.')
   }
 
   sections.push('\n======================')

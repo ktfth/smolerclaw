@@ -1,14 +1,12 @@
 /**
- * All TOOLS[] schema definitions.
- * The base TOOLS array contains core tools (read_file, write_file, edit_file, search_files,
- * find_files, list_directory, run_command, fetch_url).
- * Additional tool schemas are in their respective modules and registered at runtime.
+ * Workstation primitives (files, shell, HTTP) for the built-in chat loop.
+ * Not part of the engine catalog: external agents bring their own.
  */
 import type Anthropic from '@anthropic-ai/sdk'
 
 // ─── Core Tool Definitions ────────────────────────────────────
 
-export const TOOLS: Anthropic.Tool[] = [
+export const WORKSTATION_SCHEMAS: Anthropic.Tool[] = [
   {
     name: 'read_file',
     description:

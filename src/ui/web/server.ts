@@ -12,11 +12,7 @@ import type { SessionManager } from '../../session'
 import { ChatService } from '../shared/chat-service'
 import type { WSClientMessage, WSServerMessage, UIState, UISettings } from '../shared/types'
 import { t, getTranslations } from '../../i18n'
-import { getMapHtml } from './map-page'
 import { assistantNameForProvider, parseModelString } from '../../providers'
-import {
-  listNeighborhoods, getNeighborhood, toGeoJSON, allNeighborhoodsGeoJSON,
-} from '../../neighborhoods'
 
 /**
  * Generic provider interface matching both ClaudeProvider and OpenAICompatProvider
@@ -66,32 +62,8 @@ export function createWebServer(config: WebServerConfig) {
     return c.html(getIndexHtml(getTranslations(), config.model))
   })
 
-  // Map page
-  app.get('/map', (c) => c.html(getMapHtml()))
-
   // API routes
   app.get('/api/health', (c) => c.json({ status: 'ok' }))
-
-  // Neighborhood API
-  app.get('/api/neighborhoods', (c) => {
-    return c.json(listNeighborhoods())
-  })
-
-  app.get('/api/neighborhoods/:id', (c) => {
-    const hood = getNeighborhood(c.req.param('id'))
-    if (!hood) return c.json({ error: 'Not found' }, 404)
-    return c.json(hood)
-  })
-
-  app.get('/api/neighborhoods/:id/geojson', (c) => {
-    const hood = getNeighborhood(c.req.param('id'))
-    if (!hood) return c.json({ error: 'Not found' }, 404)
-    return c.json(toGeoJSON(hood))
-  })
-
-  app.get('/api/neighborhoods/all/geojson', (c) => {
-    return c.json(allNeighborhoodsGeoJSON())
-  })
 
   // WebSocket handler for Bun.serve
   function handleWebSocket(ws: WebSocket, clientId: string) {

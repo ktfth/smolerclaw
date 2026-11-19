@@ -81,12 +81,11 @@ export class TUI {
     '/new', '/load', '/sessions', '/delete', '/model', '/export',
     '/cost', '/retry', '/undo', '/search', '/lang', '/config', '/exit',
     '/login', '/review', '/consult',
-    '/briefing', '/news', '/open', '/openfile', '/openurl', '/apps',
+    '/briefing', '/open', '/openfile', '/openurl', '/apps',
     '/sysinfo', '/calendar', '/ask', '/budget', '/plugins',
     '/task', '/tasks', '/done', '/rmtask',
     '/people', '/team', '/family', '/person', '/addperson',
     '/delegate', '/delegations', '/followups', '/dashboard', '/contacts',
-    '/investigar', '/investigate', '/investigacoes',
     '/monitor', '/vigiar',
     '/workflow', '/fluxo',
     '/macro', '/macros', '/atalho', '/atalhos',
@@ -95,11 +94,8 @@ export class TUI {
     '/decisions', '/decisoes',
     '/email', '/rascunho',
     '/memo', '/memos', '/note', '/notas', '/tags', '/memotags', '/rmmemo', '/rmnota',
-    '/index', '/indexar', '/reindex', '/memory', '/memoria',
     '/clipboard', '/area', '/tela', '/screen', '/ps1',
     '/refresh', '/renovar', '/vault', '/backup',
-    '/feeds', '/fontes', '/addfeed', '/novafonte', '/rmfeed', '/rmfonte',
-    '/disablefeed', '/desativarfonte', '/enablefeed', '/ativarfonte',
     '/projeto', '/project', '/projetos', '/projects', '/sessao', '/session',
     '/relatorio', '/report', '/oportunidades', '/opportunities',
     // Portugues
@@ -107,7 +103,7 @@ export class TUI {
     '/novo', '/carregar', '/sessoes', '/deletar', '/modelo', '/exportar',
     '/custo', '/repetir', '/desfazer', '/buscar', '/idioma', '/sair',
     '/revisar', '/consultar',
-    '/resumo', '/noticias', '/abrir', '/programas', '/sistema',
+    '/resumo', '/abrir', '/programas', '/sistema',
     '/agenda', '/calendario', '/perguntar', '/orcamento',
     '/tarefa', '/tarefas', '/feito', '/concluido', '/rmtarefa',
     '/pessoas', '/equipe', '/familia', '/pessoa', '/novapessoa', '/addpessoa',
@@ -124,9 +120,6 @@ export class TUI {
     '/consult': ['claude', 'codex'],
     '/revisar': ['claude', 'codex'],
     '/consultar': ['claude', 'codex'],
-    // News categories
-    '/news': ['business', 'tech', 'finance', 'brazil', 'world', 'security'],
-    '/noticias': ['business', 'tech', 'finance', 'brazil', 'world', 'security'],
     // App launcher
     '/open': ['excel', 'word', 'powerpoint', 'outlook', 'onenote', 'teams', 'edge', 'chrome', 'firefox', 'calculator', 'notepad', 'terminal', 'explorer', 'vscode', 'cursor', 'paint', 'snip', 'settings', 'taskmanager'],
     '/abrir': ['excel', 'word', 'powerpoint', 'outlook', 'onenote', 'teams', 'edge', 'chrome', 'firefox', 'calculator', 'notepad', 'terminal', 'explorer', 'vscode', 'cursor', 'paint', 'snip', 'settings', 'taskmanager'],
@@ -148,9 +141,6 @@ export class TUI {
     // People groups
     '/people': ['equipe', 'familia', 'contato'],
     '/pessoas': ['equipe', 'familia', 'contato'],
-    // Investigation types
-    '/investigar': ['bug', 'feature', 'test', 'audit', 'incident'],
-    '/investigate': ['bug', 'feature', 'test', 'audit', 'incident'],
     // Finance
     '/entrada': [],
     '/saida': [],
@@ -199,7 +189,6 @@ export class TUI {
     '/config': 'Configuracoes',
     '/exit': 'Sair do aplicativo', '/sair': 'Sair do aplicativo',
     '/briefing': 'Resumo diario', '/resumo': 'Resumo diario',
-    '/news': 'Feed de noticias', '/noticias': 'Feed de noticias',
     '/open': 'Abrir aplicativo', '/abrir': 'Abrir aplicativo',
     '/openfile': 'Abrir arquivo',
     '/openurl': 'Abrir URL',
@@ -224,8 +213,6 @@ export class TUI {
     '/followups': 'Ver follow-ups',
     '/dashboard': 'Painel visual', '/painel': 'Painel visual',
     '/contacts': 'Ver contatos', '/contatos': 'Ver contatos',
-    '/investigar': 'Iniciar investigacao', '/investigate': 'Start investigation',
-    '/investigacoes': 'Ver investigacoes',
     '/monitor': 'Monitorar recurso', '/vigiar': 'Monitorar recurso',
     '/workflow': 'Gerenciar workflows', '/fluxo': 'Gerenciar workflows',
     '/macro': 'Gerenciar macros', '/macros': 'Listar macros',
@@ -240,19 +227,11 @@ export class TUI {
     '/note': 'Criar nota', '/notas': 'Listar notas', '/anotar': 'Criar nota',
     '/tags': 'Ver tags', '/memotags': 'Tags de memos',
     '/rmmemo': 'Remover memo', '/rmnota': 'Remover nota',
-    '/index': 'Indexar conteudo', '/indexar': 'Indexar conteudo',
-    '/reindex': 'Reindexar tudo',
-    '/memory': 'Ver memoria', '/memoria': 'Ver memoria',
     '/clipboard': 'Ver clipboard', '/area': 'Ver area de transferencia',
     '/tela': 'Capturar tela', '/screen': 'Capturar tela',
     '/ps1': 'Customizar prompt',
     '/refresh': 'Atualizar dados', '/renovar': 'Atualizar dados',
     '/vault': 'Gerenciar vault', '/backup': 'Fazer backup',
-    '/feeds': 'Ver feeds RSS', '/fontes': 'Ver fontes RSS',
-    '/addfeed': 'Adicionar feed', '/novafonte': 'Adicionar fonte',
-    '/rmfeed': 'Remover feed', '/rmfonte': 'Remover fonte',
-    '/disablefeed': 'Desativar feed', '/desativarfonte': 'Desativar fonte',
-    '/enablefeed': 'Ativar feed', '/ativarfonte': 'Ativar fonte',
     '/projeto': 'Ver projeto', '/project': 'Ver projeto',
     '/projetos': 'Listar projetos', '/projects': 'Listar projetos',
     '/sessao': 'Sessao de trabalho', '/session': 'Work session',
@@ -807,234 +786,6 @@ export class TUI {
             return
           }
           // Printable char in filter
-          if (key.length === 1 && key >= ' ') {
-            filter += key
-            cursor = 0
-            renderPicker()
-            return
-          }
-        }
-      }
-
-      process.stdin.on('data', handler)
-      renderPicker()
-    })
-  }
-
-  // ── News Picker ────────────────────────────────────────────
-
-  /**
-   * Interactive news picker. Navigate with W/S or arrows.
-   * - Enter: open in browser
-   * - Ctrl+Enter: fetch and read content in assistant
-   * Returns NewsPickerResult or null if cancelled.
-   */
-  promptNewsPicker(
-    items: NewsPickerEntry[],
-  ): Promise<NewsPickerResult | null> {
-    if (items.length === 0) {
-      this.showSystem('Nenhuma noticia encontrada.')
-      return Promise.resolve(null)
-    }
-
-    return new Promise<NewsPickerResult | null>((resolve) => {
-      this.pickerActive = true
-      let cursor = 0
-      let filter = ''
-      let filterMode = false
-      let categoryFilter = ''
-
-      const categories = [...new Set(items.map((i) => i.category))].sort()
-
-      const filtered = (): NewsPickerEntry[] => {
-        let result = categoryFilter
-          ? items.filter((i) => i.category === categoryFilter)
-          : items
-        if (filter) {
-          const q = filter.toLowerCase()
-          result = result.filter((i) =>
-            i.title.toLowerCase().includes(q) || i.source.toLowerCase().includes(q),
-          )
-        }
-        return result
-      }
-
-      const categoryLabel = (cat: string): string => {
-        const labels: Record<string, string> = {
-          business: 'Negocios', tech: 'Tecnologia', finance: 'Financas',
-          brazil: 'Brasil', world: 'Mundo', security: 'Ciberseguranca',
-        }
-        return labels[cat] || cat
-      }
-
-      const renderPicker = (): void => {
-        const headerH = 2
-        const footerH = 2
-        const avail = this.height - headerH - footerH
-
-        const list = filtered()
-        if (cursor >= list.length) cursor = Math.max(0, list.length - 1)
-
-        const titleLines = 2
-        const hintLines = 2
-        const listAvail = avail - titleLines - hintLines
-        const maxVisible = Math.max(1, listAvail)
-
-        let scrollStart = 0
-        if (list.length > maxVisible) {
-          scrollStart = Math.max(0, cursor - Math.floor(maxVisible / 2))
-          scrollStart = Math.min(scrollStart, list.length - maxVisible)
-        }
-        const visibleItems = list.slice(scrollStart, scrollStart + maxVisible)
-
-        w(A.hide)
-        // Title
-        w(A.to(headerH + 1, 1))
-        w(A.clearLine)
-        if (filterMode) {
-          w(`  ${C.heading}${A.bold}Noticias${A.reset}  ${A.dim}filtro: ${filter}█${A.reset}`)
-        } else {
-          const catLabel = categoryFilter ? categoryLabel(categoryFilter) : 'Todas'
-          w(`  ${C.heading}${A.bold}Noticias${A.reset}  ${A.dim}(${list.length}) ${catLabel}${A.reset}`)
-        }
-        w(A.to(headerH + 2, 1))
-        w(A.clearLine)
-
-        // List
-        for (let i = 0; i < maxVisible; i++) {
-          const row = headerH + titleLines + i + 1
-          w(A.to(row, 1))
-          w(A.clearLine)
-          if (i >= visibleItems.length) continue
-
-          const entry = visibleItems[i]
-          const isSelected = (scrollStart + i) === cursor
-          const time = entry.time ? `[${entry.time}]` : '       '
-          const maxTitleW = this.width - 30
-          const title = entry.title.length > maxTitleW
-            ? entry.title.slice(0, maxTitleW - 1) + '\u2026'
-            : entry.title
-
-          if (isSelected) {
-            w(`  ${C.prompt}${A.bold}› ${time} ${title}${A.reset} ${A.dim}(${entry.source})${A.reset}`)
-          } else {
-            w(`    ${A.dim}${time}${A.reset} ${C.sys}${title}${A.reset} ${A.dim}(${entry.source})${A.reset}`)
-          }
-        }
-
-        // Clear remaining
-        for (let i = visibleItems.length; i < maxVisible; i++) {
-          const row = headerH + titleLines + i + 1
-          w(A.to(row, 1))
-          w(A.clearLine)
-        }
-
-        // Scroll indicator
-        const indicatorRow = headerH + titleLines + maxVisible + 1
-        w(A.to(indicatorRow, 1))
-        w(A.clearLine)
-        if (list.length > maxVisible) {
-          const pct = Math.round(((cursor + 1) / list.length) * 100)
-          w(`  ${A.dim}${scrollStart > 0 ? '\u2191' : ' '} ${pct}% ${scrollStart + maxVisible < list.length ? '\u2193' : ' '}${A.reset}`)
-        }
-
-        // Hints
-        const hintRow = this.height - footerH
-        w(A.to(hintRow, 1))
-        w(A.clearLine)
-        w(`  ${A.dim}↑↓ navegar  Enter abrir  Ctrl+Enter ler aqui  Esc cancelar  / filtrar  Tab categoria${A.reset}`)
-      }
-
-      const cleanup = (result: NewsPickerResult | null): void => {
-        this.pickerActive = false
-        process.stdin.removeListener('data', handler)
-        this.renderAll()
-        resolve(result)
-      }
-
-      const handler = (data: Buffer): void => {
-        const key = data.toString('utf-8')
-        const list = filtered()
-
-        // Esc (bare escape, not part of sequence)
-        if (key === '\x1b' && data.length === 1) {
-          if (filterMode) {
-            filterMode = false
-            filter = ''
-            renderPicker()
-          } else {
-            cleanup(null)
-          }
-          return
-        }
-
-        // Ctrl+C
-        if (key === '\x03') {
-          cleanup(null)
-          return
-        }
-
-        // Ctrl+Enter (Ctrl+J = \x0a or some terminals send \x1b\r or similar)
-        // Common Ctrl+Enter sequences: \x0a (Ctrl+J), \x1b\r, \x1bOM
-        if (key === '\x0a' || key === '\x1b\r' || key === '\x1bOM') {
-          if (list.length > 0 && cursor < list.length) {
-            cleanup({ action: 'read', link: list[cursor].link })
-          }
-          return
-        }
-
-        // Regular Enter — open in browser
-        if (key === '\r' || key === '\n') {
-          if (list.length > 0 && cursor < list.length) {
-            cleanup({ action: 'open', link: list[cursor].link })
-          }
-          return
-        }
-
-        // Arrow keys + W/S navigation
-        if (key === '\x1b[A' || (key === 'w' && !filterMode)) {
-          if (cursor > 0) { cursor--; renderPicker() }
-          return
-        }
-        if (key === '\x1b[B' || (key === 's' && !filterMode)) {
-          if (cursor < list.length - 1) { cursor++; renderPicker() }
-          return
-        }
-
-        // Tab — cycle category filter
-        if (key === '\t') {
-          if (!categoryFilter) {
-            categoryFilter = categories[0] || ''
-          } else {
-            const idx = categories.indexOf(categoryFilter)
-            categoryFilter = idx < categories.length - 1 ? categories[idx + 1] : ''
-          }
-          cursor = 0
-          renderPicker()
-          return
-        }
-
-        // '/' — toggle filter mode
-        if (key === '/' && !filterMode) {
-          filterMode = true
-          filter = ''
-          renderPicker()
-          return
-        }
-
-        // Filter mode typing
-        if (filterMode) {
-          if (key === '\x7f' || key === '\b') {
-            if (filter.length > 0) {
-              filter = filter.slice(0, -1)
-              cursor = 0
-              renderPicker()
-            } else {
-              filterMode = false
-              renderPicker()
-            }
-            return
-          }
           if (key.length === 1 && key >= ' ') {
             filter += key
             cursor = 0
@@ -1917,7 +1668,7 @@ export class TUI {
   // ── Input Handling ──────────────────────────────────────
 
   private onKey(data: Buffer): void {
-    // Suppress main input while a picker (sessions/news) is active
+    // Suppress main input while the session picker is active
     if (this.pickerActive) return
 
     const key = data.toString('utf-8')
@@ -2310,20 +2061,6 @@ export type SessionPickerResult =
   | { action: 'delete'; name: string; isArchived?: boolean }
   | { action: 'archive'; name: string }
   | { action: 'unarchive'; name: string }
-
-// ─── News Picker Types ───────────────────────────────────
-
-export interface NewsPickerEntry {
-  title: string
-  link: string
-  source: string
-  category: string
-  time: string    // formatted time string e.g. "21:30"
-}
-
-export type NewsPickerResult =
-  | { action: 'open'; link: string }    // Enter: open in browser
-  | { action: 'read'; link: string }    // Ctrl+Enter: fetch and read content
 
 function formatPickerAge(timestamp: number): string {
   const diff = Date.now() - timestamp

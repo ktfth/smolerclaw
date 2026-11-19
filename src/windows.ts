@@ -8,6 +8,7 @@
  */
 
 import { IS_WINDOWS } from './platform'
+import { ok, fail, type ToolResult } from './core/result'
 import {
   executePowerShell,
   executePowerShellAsFile,
@@ -264,19 +265,23 @@ export async function getDateTimeInfo(): Promise<string> {
  *      Windows Calendar API (WinRT AppointmentManager) which works with
  *      any calendar provider: new Outlook, Windows Calendar, Google, etc.
  */
-export async function getOutlookEvents(): Promise<string> {
-  if (!IS_WINDOWS) return 'Outlook integration only available on Windows.'
+export async function getOutlookEvents(): Promise<ToolResult> {
+  if (!IS_WINDOWS) return fail('Outlook integration only available on Windows.')
 
-  // --- Strategy 1: Classic Outlook COM ---
-  const comResult = await tryOutlookCOM()
-  if (comResult.success) return comResult.data
+  try {
+    // --- Strategy 1: Classic Outlook COM ---
+    const comResult = await tryOutlookCOM()
+    if (comResult.success) return ok(comResult.data)
 
-  // --- Strategy 2: WinRT Calendar API (new Outlook / Windows Calendar) ---
-  const winrtResult = await tryWinRTCalendar()
-  if (winrtResult.success) return winrtResult.data
+    // --- Strategy 2: WinRT Calendar API (new Outlook / Windows Calendar) ---
+    const winrtResult = await tryWinRTCalendar()
+    if (winrtResult.success) return ok(winrtResult.data)
 
-  // Both failed — return the most informative error
-  return winrtResult.data || comResult.data || 'Calendario nao disponivel.'
+    // Both failed — return the most informative error
+    return fail(winrtResult.data || comResult.data || 'Calendário não disponível.')
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : String(err))
+  }
 }
 
 async function tryOutlookCOM(): Promise<{ success: boolean; data: string }> {

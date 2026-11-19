@@ -1,132 +1,57 @@
 /**
- * Tool module barrel — re-exports everything to maintain backward compatibility.
+ * Tool catalog and dispatch.
  *
- * All consumers that import from './tools' will continue to work exactly the same
- * since this file preserves the original API surface.
+ * Two views over one registry:
+ *  - TOOLS: everything the built-in chat loop may call (workstation
+ *    primitives + personal-management catalog + plugins).
+ *  - engineCatalog(): what the deterministic engine exposes over CLI/MCP
+ *    (personal-management catalog; plugins only when allow-listed).
  */
+import type Anthropic from '@anthropic-ai/sdk'
 import type { Plugin } from '../plugins'
 import { UndoStack } from '../undo'
-import { IS_WINDOWS } from '../platform'
-import { TOOLS } from './schemas'
-import {
-  WINDOWS_TOOLS, AGENT_TOOLS, NOTIFICATION_TOOLS, NEWS_TOOL,
-} from './windows-tools'
-import {
-  TASK_TOOLS, SCHEDULER_TOOLS, PEOPLE_TOOLS, MEMO_TOOLS, EMAIL_TOOL,
-  TIER2_TOOLS, INVESTIGATE_TOOLS, MATERIAL_TOOLS, PROJECT_TOOLS,
-  PITWALL_TOOLS, BLAST_RADIUS_TOOLS, DECISION_ENGINE_TOOLS,
-  NEWSFEED_TOOLS, ARCHIVE_TOOLS, META_LEARNING_TOOLS,
-  RECOMMENDATION_TOOLS, NEIGHBORHOOD_TOOLS, ENERGY_TOOLS,
-  BOOKMARK_TOOLS,
-} from './business-tools'
-import { VAULT_TOOLS } from './vault-tools'
-import { MEMORY_TOOLS } from './memory-tools'
-import { AGENCY_TOOLS } from './agency-tools'
-import { DOCKER_SECURITY_TOOLS } from './docker-security-tools'
-import { M365_TOOLS } from '../m365'
-import { GWS_TOOLS } from '../gws'
-import { executeTool as _executeTool } from './execute'
+import { toChatText, type CatalogEntry, type ToolResult } from '../core/result'
+import { dispatchTool, workstationTools, ENGINE_TOOLS } from './execute'
 
-// ─── Global shared state ─────────────────────────────────────
-
-// Global undo stack shared across tool calls
+// Global undo stack shared across file-editing tool calls
 export const undoStack = new UndoStack()
 
-// Registered plugins (set from index.ts at startup)
+const WORKSTATION = workstationTools(undoStack)
+const WORKSTATION_NAMES: ReadonlySet<string> = new Set(WORKSTATION.map((t) => t.schema.name))
+const ENTRIES: ReadonlyMap<string, CatalogEntry> = new Map(
+  [...WORKSTATION, ...ENGINE_TOOLS].map((t) => [t.schema.name, t]),
+)
+
+/**
+ * Schemas offered to the chat model. Mutable on purpose: plugin tools are
+ * appended at startup by registerToolCatalog.
+ */
+export const TOOLS: Anthropic.Tool[] = [...WORKSTATION, ...ENGINE_TOOLS].map((t) => t.schema)
+
+// Registered legacy JSON plugins (set at startup)
 let _plugins: Plugin[] = []
 export function registerPlugins(plugins: Plugin[]): void {
   _plugins = plugins
 }
 
-// SessionManager reference for archive tools
-let _sessionManager: {
-  archive: (n: string) => boolean
-  archiveAll: () => string[]
-  unarchive: (n: string) => boolean
-  listArchived: () => string[]
-  getArchivedInfo: (n: string) => { messageCount: number; updated: number } | null
-} | null = null
-
-export function registerSessionManager(sm: typeof _sessionManager): void {
-  _sessionManager = sm
-}
-
-let _windowsToolsRegistered = false
-
-/** Register Windows tools and task tools. Idempotent. */
-export function registerWindowsTools(): void {
-  if (_windowsToolsRegistered) return
-  _windowsToolsRegistered = true
-
-  if (IS_WINDOWS) {
-    TOOLS.push(...WINDOWS_TOOLS)
-    TOOLS.push(...AGENT_TOOLS)
-    TOOLS.push(...NOTIFICATION_TOOLS)
-  } else {
-    // Add get_news on all platforms (it's network-only)
-    TOOLS.push(NEWS_TOOL)
-  }
-
-  // Task, people, memo, and email tools are cross-platform
-  TOOLS.push(...TASK_TOOLS)
-  TOOLS.push(...SCHEDULER_TOOLS)
-  TOOLS.push(...PEOPLE_TOOLS)
-  TOOLS.push(...MEMO_TOOLS)
-  TOOLS.push(EMAIL_TOOL)
-  TOOLS.push(...TIER2_TOOLS)
-  TOOLS.push(...INVESTIGATE_TOOLS)
-  TOOLS.push(...MATERIAL_TOOLS)
-  TOOLS.push(...MEMORY_TOOLS)
-  TOOLS.push(...NEWSFEED_TOOLS)
-  TOOLS.push(...VAULT_TOOLS)
-  TOOLS.push(...PROJECT_TOOLS)
-  TOOLS.push(...PITWALL_TOOLS)
-  TOOLS.push(...BLAST_RADIUS_TOOLS)
-  TOOLS.push(...ARCHIVE_TOOLS)
-  TOOLS.push(...DECISION_ENGINE_TOOLS)
-  TOOLS.push(...META_LEARNING_TOOLS)
-  TOOLS.push(...AGENCY_TOOLS)
-  TOOLS.push(...RECOMMENDATION_TOOLS)
-  TOOLS.push(...NEIGHBORHOOD_TOOLS)
-  TOOLS.push(...ENERGY_TOOLS)
-  TOOLS.push(...BOOKMARK_TOOLS)
-  TOOLS.push(...DOCKER_SECURITY_TOOLS)
-  TOOLS.push(...M365_TOOLS)
-  TOOLS.push(...GWS_TOOLS)
-}
-
-// ─── executeTool wrapper (preserves original signature) ──────
+const ENGINE_NAMES: ReadonlySet<string> = new Set(ENGINE_TOOLS.map((t) => t.schema.name))
 
 /**
- * Execute a tool by name. This wrapper captures the shared state (undoStack, plugins,
- * sessionManager) and delegates to the modular execute.ts dispatcher.
+ * Engine view: the personal-management catalog. Plugin tools run arbitrary
+ * commands, so they are included only when named in `allowedPlugins`.
  */
-export async function executeTool(
-  name: string,
-  input: Record<string, unknown>,
-): Promise<string> {
-  return _executeTool(name, input, undoStack, _plugins, _sessionManager)
+export function engineCatalog(allowedPlugins: ReadonlySet<string> = new Set()): Anthropic.Tool[] {
+  return TOOLS.filter((t) => ENGINE_NAMES.has(t.name) || (!WORKSTATION_NAMES.has(t.name) && allowedPlugins.has(t.name)))
 }
 
-// ─── Re-exports ──────────────────────────────────────────────
+/** Run a tool and return its structured outcome. */
+export function executeToolResult(name: string, input: Record<string, unknown>): Promise<ToolResult> {
+  return dispatchTool(ENTRIES, name, input, _plugins)
+}
 
-export { TOOLS } from './schemas'
+/** Chat-loop entry point: failures are rendered with the "Error:" prefix. */
+export async function executeTool(name: string, input: Record<string, unknown>): Promise<string> {
+  return toChatText(await executeToolResult(name, input))
+}
 
-// Schema arrays (for consumers that reference them directly)
-export {
-  WINDOWS_TOOLS, AGENT_TOOLS, NOTIFICATION_TOOLS, NEWS_TOOL,
-} from './windows-tools'
-export {
-  TASK_TOOLS, SCHEDULER_TOOLS, PEOPLE_TOOLS, MEMO_TOOLS, EMAIL_TOOL,
-  TIER2_TOOLS, INVESTIGATE_TOOLS, MATERIAL_TOOLS, PROJECT_TOOLS,
-  PITWALL_TOOLS, BLAST_RADIUS_TOOLS, DECISION_ENGINE_TOOLS,
-  NEWSFEED_TOOLS, ARCHIVE_TOOLS, META_LEARNING_TOOLS,
-  RECOMMENDATION_TOOLS, NEIGHBORHOOD_TOOLS, ENERGY_TOOLS,
-  BOOKMARK_TOOLS,
-} from './business-tools'
-export { VAULT_TOOLS } from './vault-tools'
-export { MEMORY_TOOLS } from './memory-tools'
-export { AGENCY_TOOLS } from './agency-tools'
-export { DOCKER_SECURITY_TOOLS } from './docker-security-tools'
-export { M365_TOOLS } from '../m365'
-export { GWS_TOOLS } from '../gws'
+export { DOMAIN_TOOLS } from './domain'

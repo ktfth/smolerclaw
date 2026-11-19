@@ -243,7 +243,6 @@ export class ViewManager {
     tasks: string[]
     followUps: string[]
     calendar: string[]
-    news: string[]
     projectSummary?: string[]
   }): DashboardLayout {
     const panels: DashboardPanel[] = [
@@ -261,11 +260,6 @@ export class ViewManager {
         id: 'calendar',
         title: 'Agenda',
         content: data.calendar.length > 0 ? data.calendar : ['Sem eventos hoje'],
-      },
-      {
-        id: 'news',
-        title: 'Noticias',
-        content: data.news.length > 0 ? data.news : ['Sem noticias recentes'],
       },
     ]
 

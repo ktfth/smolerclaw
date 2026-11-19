@@ -19,6 +19,7 @@ import { join, dirname, basename, relative } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { eventBus } from './core/event-bus'
 import type { FileSavedEvent, TaskCompletedEvent } from './types'
+import { ok, fail, type ToolResult } from './core/result'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -69,9 +70,6 @@ const TRACKED_FILES = [
   'work-sessions.json',
   'opportunities.json',
   'workflows.json',
-  'news-feeds.json',
-  'pitwall-baselines.json',
-  'rag/rag-index.json',
 ]
 
 // ─── Singleton State ────────────────────────────────────────
@@ -332,8 +330,8 @@ export function formatVaultStatus(status: VaultStatus): string {
  * Initialize the shadow backup repository.
  * Creates a local git repo in dataDir/.backup/ with a .gitignore.
  */
-export async function initShadowBackup(): Promise<string> {
-  if (!_dataDir) return 'Error: vault not initialized.'
+export async function initShadowBackup(): Promise<ToolResult> {
+  if (!_dataDir) return fail('vault not initialized.')
 
   if (!existsSync(_backupDir)) mkdirSync(_backupDir, { recursive: true })
 
@@ -355,14 +353,14 @@ export async function initShadowBackup(): Promise<string> {
   // Init git repo if not exists
   if (!existsSync(join(_backupDir, '.git'))) {
     const init = await gitCmd(['git', 'init', '-b', BACKUP_BRANCH], _backupDir)
-    if (!init.ok) return `Error: git init failed: ${init.stderr}`
+    if (!init.ok) return fail(`git init failed: ${init.stderr}`)
 
     await gitCmd(['git', 'config', 'user.email', 'vault@smolerclaw.local'], _backupDir)
     await gitCmd(['git', 'config', 'user.name', 'smolerclaw-vault'], _backupDir)
   }
 
   _backupEnabled = true
-  return 'Shadow backup inicializado.'
+  return ok('Shadow backup inicializado.')
 }
 
 /**
@@ -370,8 +368,8 @@ export async function initShadowBackup(): Promise<string> {
  * Runs in background, non-blocking.
  * Emits 'task:completed' event on completion.
  */
-export async function performBackup(message?: string): Promise<string> {
-  if (!_backupEnabled) return 'Backup nao ativado. Use vault_init_backup primeiro.'
+export async function performBackup(message?: string): Promise<ToolResult> {
+  if (!_backupEnabled) return fail('Backup não ativado. Use vault_init_backup primeiro.')
 
   const startTime = Date.now()
 
@@ -407,7 +405,7 @@ export async function performBackup(message?: string): Promise<string> {
         timestamp: Date.now(),
       }
       eventBus.emit('task:completed', event)
-      return 'Nenhuma mudanca para backup.'
+      return ok('Nenhuma mudança para backup.')
     }
 
     const commitMsg = message || `backup ${new Date().toISOString().slice(0, 19)}`
@@ -422,7 +420,7 @@ export async function performBackup(message?: string): Promise<string> {
         timestamp: Date.now(),
       }
       eventBus.emit('task:completed', errorEvent)
-      return `Backup commit falhou: ${commit.stderr}`
+      return fail(`Backup commit falhou: ${commit.stderr}`)
     }
 
     _lastBackup = new Date().toISOString()
@@ -438,7 +436,7 @@ export async function performBackup(message?: string): Promise<string> {
     }
     eventBus.emit('task:completed', successEvent)
 
-    return `Backup concluido: ${commitMsg}`
+    return ok(`Backup concluído: ${commitMsg}`)
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err)
     // Emit failure event
@@ -451,26 +449,26 @@ export async function performBackup(message?: string): Promise<string> {
       timestamp: Date.now(),
     }
     eventBus.emit('task:completed', failEvent)
-    return `Backup falhou: ${errorMsg}`
+    return fail(`Backup falhou: ${errorMsg}`)
   }
 }
 
 /**
  * Push backup to a configured remote (if set).
  */
-export async function syncBackupToRemote(): Promise<string> {
-  if (!_backupEnabled) return 'Backup nao ativado.'
+export async function syncBackupToRemote(): Promise<ToolResult> {
+  if (!_backupEnabled) return fail('Backup não ativado.')
 
   // Check if remote is configured
   const remote = await gitCmd(['git', 'remote', '-v'], _backupDir)
   if (!remote.stdout.trim()) {
-    return 'Nenhum remote configurado. Use: git -C <backup-dir> remote add origin <url>'
+    return fail('Nenhum remote configurado. Use: git -C <backup-dir> remote add origin <url>')
   }
 
   const push = await gitCmd(['git', 'push', '-u', 'origin', BACKUP_BRANCH], _backupDir)
-  if (!push.ok) return `Push falhou: ${push.stderr}`
+  if (!push.ok) return fail(`Push falhou: ${push.stderr}`)
 
-  return 'Sync concluido — dados enviados para o remote.'
+  return ok('Sync concluído — dados enviados para o remote.')
 }
 
 function readLastBackupTime(): string | null {

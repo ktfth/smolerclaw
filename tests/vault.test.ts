@@ -208,7 +208,8 @@ describe('Vault — Shadow Backup', () => {
 
   test('initShadowBackup creates git repo', async () => {
     const result = await initShadowBackup()
-    expect(result).toContain('inicializado')
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('inicializado')
     expect(existsSync(join(getBackupDir(), '.git'))).toBe(true)
     expect(existsSync(join(getBackupDir(), '.gitignore'))).toBe(true)
   })
@@ -228,7 +229,8 @@ describe('Vault — Shadow Backup', () => {
     atomicWriteFile(join(TEST_DIR, 'tasks.json'), JSON.stringify([]))
 
     const result = await performBackup('test backup')
-    expect(result).toContain('Backup concluido')
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('Backup concluído')
   })
 
   test('performBackup reports no changes', async () => {
@@ -240,12 +242,14 @@ describe('Vault — Shadow Backup', () => {
 
     // Second backup with no changes
     const result = await performBackup('second')
-    expect(result).toContain('Nenhuma mudanca')
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('Nenhuma mudança')
   })
 
   test('performBackup fails gracefully without init', async () => {
     const result = await performBackup()
-    expect(result).toContain('nao ativado')
+    expect(result.ok).toBe(false)
+    expect(result.text).toContain('não ativado')
   })
 
   test('vault status reflects backup state after init', async () => {

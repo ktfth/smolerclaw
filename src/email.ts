@@ -4,6 +4,8 @@
  */
 
 import { IS_WINDOWS } from './platform'
+import { psSingleQuoteEscape } from './utils/windows-executor'
+import { ok, fail, type ToolResult } from './core/result'
 
 export interface EmailDraft {
   to: string
@@ -16,7 +18,7 @@ export interface EmailDraft {
  * Open an email draft in the default mail client.
  * On Windows, tries Outlook COM first, then falls back to mailto:.
  */
-export async function openEmailDraft(draft: EmailDraft): Promise<string> {
+export async function openEmailDraft(draft: EmailDraft): Promise<ToolResult> {
   if (IS_WINDOWS) {
     return openInOutlook(draft)
   }
@@ -27,12 +29,13 @@ export async function openEmailDraft(draft: EmailDraft): Promise<string> {
  * Open draft via Outlook COM (Windows only).
  * Creates a new mail item with fields pre-filled.
  */
-async function openInOutlook(draft: EmailDraft): Promise<string> {
-  // Escape single quotes for PowerShell
-  const to = draft.to.replace(/'/g, "''")
-  const subject = draft.subject.replace(/'/g, "''")
-  const body = draft.body.replace(/'/g, "''").replace(/\n/g, '`n')
-  const cc = draft.cc?.replace(/'/g, "''") || ''
+async function openInOutlook(draft: EmailDraft): Promise<ToolResult> {
+  // Single-quoted PowerShell literals: escaping covers ASCII and typographic
+  // quotes, and real newlines are kept as-is (single quotes span lines).
+  const to = psSingleQuoteEscape(draft.to)
+  const subject = psSingleQuoteEscape(draft.subject)
+  const body = psSingleQuoteEscape(draft.body)
+  const cc = draft.cc ? psSingleQuoteEscape(draft.cc) : ''
 
   const cmd = [
     'try {',
@@ -69,7 +72,7 @@ async function openInOutlook(draft: EmailDraft): Promise<string> {
       return openMailto(draft)
     }
 
-    return result || 'Email aberto no Outlook.'
+    return ok(result || 'Email aberto no Outlook.')
   } catch {
     return openMailto(draft)
   }
@@ -78,7 +81,7 @@ async function openInOutlook(draft: EmailDraft): Promise<string> {
 /**
  * Open draft via mailto: URI (cross-platform fallback).
  */
-async function openMailto(draft: EmailDraft): Promise<string> {
+async function openMailto(draft: EmailDraft): Promise<ToolResult> {
   const params: string[] = []
   if (draft.subject) params.push(`subject=${encodeURIComponent(draft.subject)}`)
   if (draft.body) params.push(`body=${encodeURIComponent(draft.body)}`)
@@ -88,7 +91,7 @@ async function openMailto(draft: EmailDraft): Promise<string> {
 
   try {
     const openCmd = IS_WINDOWS
-      ? ['powershell', '-NoProfile', '-NonInteractive', '-Command', `Start-Process '${mailto}'`]
+      ? ['powershell', '-NoProfile', '-NonInteractive', '-Command', `Start-Process '${psSingleQuoteEscape(mailto)}'`]
       : ['xdg-open', mailto]
 
     const proc = Bun.spawn(openCmd, { stdout: 'pipe', stderr: 'pipe' })
@@ -100,9 +103,9 @@ async function openMailto(draft: EmailDraft): Promise<string> {
     await proc.exited
     clearTimeout(timer)
 
-    return 'Email aberto no cliente de email padrao.'
+    return ok('Email aberto no cliente de email padrão.')
   } catch (err) {
-    return `Error: ${err instanceof Error ? err.message : String(err)}`
+    return fail(err instanceof Error ? err.message : String(err))
   }
 }
 

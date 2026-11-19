@@ -13,6 +13,13 @@ import { join, basename } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { atomicWriteFile } from './vault'
 
+/**
+ * git with repo-controlled program hooks disabled: project paths come from tool
+ * input, so a repo's config (fsmonitor, pager, external diff) must not run code.
+ * Subcommands also pass --no-ext-diff.
+ */
+const SAFE_GIT = ['git', '-c', 'core.fsmonitor=false', '-c', 'core.pager=cat', '--no-pager'] as const
+
 // ─── Types ──────────────────────────────────────────────────
 
 export interface Project {
@@ -309,7 +316,7 @@ export async function getGitSummary(
   try {
     // Get commit count, authors, and messages
     const logResult = await gitExec(
-      ['git', 'log', `--since=${since}`, '--format=%an|||%s', '--no-merges'],
+      [...SAFE_GIT, 'log', '--no-ext-diff', `--since=${since}`, '--format=%an|||%s', '--no-merges'],
       projectPath,
     )
 
@@ -331,13 +338,13 @@ export async function getGitSummary(
 
     // Get diffstat
     const statResult = await gitExec(
-      ['git', 'diff', '--stat', `--since=${since}`, 'HEAD'],
+      [...SAFE_GIT, 'diff', '--no-ext-diff', '--stat', `--since=${since}`, 'HEAD'],
       projectPath,
     )
 
     // Get shortstat for numbers
     const shortResult = await gitExec(
-      ['git', 'log', `--since=${since}`, '--shortstat', '--format=', '--no-merges'],
+      [...SAFE_GIT, 'log', '--no-ext-diff', `--since=${since}`, '--shortstat', '--format=', '--no-merges'],
       projectPath,
     )
 
@@ -358,7 +365,7 @@ export async function getGitSummary(
 
     // Get top changed files
     const nameResult = await gitExec(
-      ['git', 'log', `--since=${since}`, '--name-only', '--format=', '--no-merges'],
+      [...SAFE_GIT, 'log', '--no-ext-diff', `--since=${since}`, '--name-only', '--format=', '--no-merges'],
       projectPath,
     )
 

@@ -7,6 +7,7 @@ import type { AuditRecord } from '../src/engine/audit'
 import { exitCodeFor, isEngineCommand, splitEngineArgs } from '../src/modes/engine-mode'
 import { selfCommand } from '../src/engine/self-command'
 import { assessToolRisk } from '../src/tool-safety'
+import { ok, fail, type ToolResult } from '../src/core/result'
 
 const CATALOG: CatalogTool[] = [
   {
@@ -33,7 +34,7 @@ function fixedClock(): () => Date {
 
 function buildEngine(
   policy: EnginePolicy = DEFAULT_POLICY,
-  execute: (name: string) => Promise<string> = async (n) => `ran ${n}`,
+  execute: (name: string) => Promise<ToolResult> = async (n) => ok(`ran ${n}`),
 ) {
   const records: AuditRecord[] = []
   const calls: string[] = []
@@ -118,6 +119,8 @@ describe('tool-safety read-only classification', () => {
     expect(assessToolRisk('search_memos', {}).level).toBe('safe')
     expect(assessToolRisk('check_energy', {}).level).toBe('moderate')
     expect(assessToolRisk('create_task', {}).level).toBe('moderate')
+    expect(assessToolRisk('create_task', {}).reason).toBe('changes state: create_task')
+    expect(assessToolRisk('gws_list_emails', {}).level).toBe('safe')
   })
 })
 
@@ -167,14 +170,21 @@ describe('engine pipeline', () => {
   })
 
   test('tool errors and throws become ok=false', async () => {
-    const failing = buildEngine(DEFAULT_POLICY, async () => 'Error: boom')
-    expect((await failing.engine.invoke('list_tasks', {})).ok).toBe(false)
+    const failing = buildEngine(DEFAULT_POLICY, async () => fail('Pessoa não encontrada'))
+    const failed = await failing.engine.invoke('list_tasks', {})
+    expect(failed.ok).toBe(false)
+    expect(failed.output).toBe('Error: Pessoa não encontrada')
     const throwing = buildEngine(DEFAULT_POLICY, async () => {
       throw new Error('kaput')
     })
     const result = await throwing.engine.invoke('list_tasks', {})
     expect(result.ok).toBe(false)
     expect(result.output).toBe('Error: kaput')
+  })
+
+  test('passes structured data through on success only', async () => {
+    const { engine } = buildEngine(DEFAULT_POLICY, async () => ok('2 tarefas', [{ id: 'a' }, { id: 'b' }]))
+    expect((await engine.invoke('list_tasks', {})).data).toEqual([{ id: 'a' }, { id: 'b' }])
   })
 
   test('same input yields the same result and hash', async () => {
@@ -187,7 +197,7 @@ describe('engine pipeline', () => {
   test('listTools is sorted, deduplicated and respects lists', () => {
     const engine = createEngine({
       catalog: () => [CATALOG[2], CATALOG[0], CATALOG[0], CATALOG[1]],
-      execute: async () => '',
+      execute: async () => ok(''),
       policy: { ...DEFAULT_POLICY, deny: ['run_command'] },
       audit: { write: () => {} },
     })

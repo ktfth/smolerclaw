@@ -2,7 +2,7 @@ import { loadConfig, saveConfig, getConfigPath } from '../config'
 import { refreshAuthForProvider, resolveAuthForProvider, authLabel, type AuthResult } from '../auth'
 import { formatAutoRefreshStatus, updateAutoRefreshAuth } from '../auto-refresh'
 import { loadSkills, buildSystemPrompt, formatSkillList } from '../skills'
-import type { SessionPickerEntry, NewsPickerEntry, DashboardLayout, DashboardPanel } from '../tui'
+import type { SessionPickerEntry, DashboardLayout, DashboardPanel } from '../tui'
 import { TUI } from '../tui'
 import { TokenTracker } from '../tokens'
 import { exportToMarkdown } from '../export'
@@ -15,7 +15,6 @@ import { undoStack } from '../tools'
 import { formatPluginList } from '../plugins'
 import { formatPluginRegistry, disablePlugin, enablePlugin, getPlugin, installPlugin, uninstallPlugin, listInstalledPlugins } from '../plugin-system'
 import { formatApprovalPrompt, formatEditDiff } from '../approval'
-import { fetchNews, fetchNewsItems, fetchNewsContent, getNewsCategories, addNewsFeed, removeNewsFeed, disableNewsFeed, enableNewsFeed, listNewsFeeds, type NewsCategory, type NewsItem } from '../news'
 import { generateBriefing, getTimeContext, type TimeContext } from '../briefing'
 import { stopTasks, addTask, completeTask, removeTask, listTasks, formatTaskList, parseTime, type Task } from '../tasks'
 import { addPerson, findPerson, listPeople, logInteraction, delegateTask, getDelegations, getPendingFollowUps, markFollowUpDone, formatPeopleList, formatPersonDetail, formatDelegationList, formatFollowUps, generatePeopleDashboard, type PersonGroup } from '../people'
@@ -37,14 +36,9 @@ import { searchDecisions, listDecisions, formatDecisionList } from '../decisions
 import { runWorkflow, listWorkflows, getWorkflow, deleteWorkflow, updateWorkflow, formatWorkflowList, formatWorkflowDetail } from '../workflows'
 import { runMacro, listMacros, listAllMacros, getMacro, createMacro, deleteMacro, updateMacro, formatMacroList, formatMacroDetail, getMacroNames, type MacroAction } from '../macros'
 import { startMonitor, stopMonitor, listMonitors, stopAllMonitors } from '../monitor'
-import { buildIndex, queryMemory, getIndexStats, formatQueryResults } from '../memory'
 import { getVaultStatus, formatVaultStatus, initShadowBackup, performBackup, syncBackupToRemote, startAutoBackup, stopAutoBackup } from '../vault'
 import { executePowerShellScript, analyzeScreenContext, readClipboardContent } from '../windows-agent'
 import { openApp, openFile, openUrl, getRunningApps, getSystemInfo, getDateTimeInfo, getOutlookEvents, getKnownApps } from '../windows'
-import { runSelfReflection } from '../services/docs-engine'
-import { getEnergyState, formatEnergyState, getProfile, type EnergyLevel } from '../energy'
-import { getAttentionStats, formatAttentionStatus, getFocusMode } from '../attention'
-import { listNeighborhoods } from '../neighborhoods'
 import {
   setActiveProject, getActiveProject, autoDetectProject,
   listProjects, getProject, startSession, endSession, getOpenSession,
@@ -55,10 +49,17 @@ import { handleM365Command } from '../m365'
 import { handleGwsCommand } from '../gws'
 import { writeFileSync } from 'node:fs'
 import { logger } from '../core/logger'
+import type { ToolResult } from '../core/result'
 import type { SessionManager } from '../session'
 import { initProvider, type AnyProvider } from '../init/providers'
 import type { loadPlugins } from '../plugins'
 import { loginWithProvider, type LoginProvider } from '../login'
+
+/** Show a structured tool outcome: failures render as errors. */
+function showResult(tui: TUI, result: ToolResult): void {
+  if (result.ok) tui.showSystem(result.text)
+  else tui.showError(result.text)
+}
 
 export interface CommandContext {
   tui: TUI
@@ -558,12 +559,6 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
           '',
           'Negocios / Business:',
           '  /briefing /resumo      Briefing diario',
-          '  /news /noticias        Radar de noticias (ex: /news tech)',
-          '  /feeds /fontes         Listar fontes RSS (built-in + custom)',
-          '  /addfeed /novafonte    Adicionar fonte RSS custom',
-          '  /rmfeed /rmfonte       Remover fonte custom',
-          '  /disablefeed           Desativar fonte built-in',
-          '  /enablefeed            Reativar fonte',
           '  /open /abrir           Abrir app Windows (ex: /open excel)',
           '  /openfile /abrirarquivo Abrir arquivo com app padrao',
           '  /openurl <url>         Abrir URL no navegador',
@@ -582,7 +577,7 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
           '  /delegations /delegacoes Listar delegacoes',
           '  /followups              Follow-ups pendentes',
           '  /dashboard /painel      Painel geral de pessoas',
-          '  /verificar /status      Energia, foco e Lokaliza',
+          '  /verificar /status      Painel de tarefas',
           '  /chat                   Modo chat com pessoa cadastrada',
           '',
           'Monitor:',
@@ -657,20 +652,11 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
           '  /matcats /categorias  Listar categorias',
           '  /rmmat /rmmaterial    Remover material',
           '',
-          'Memoria RAG / Local Search:',
-          '  /index /indexar      Construir/atualizar indice RAG',
-          '  /reindex             Reconstruir indice do zero',
-          '  /memory /memoria     Buscar na memoria local (ou ver status)',
-          '',
           'Arquivo / Archive:',
           '  /archive /arquivar    Arquivar sessao (ex: /archive minha-sessao)',
           '  /archive all          Arquivar todas exceto a atual',
           '  /archived /arquivadas Listar sessoes arquivadas',
           '  /unarchive /restaurar Restaurar sessao arquivada',
-          '',
-          'Investigacao / Investigation:',
-          '  /investigar /investigate  Listar investigacoes',
-          '  /investigar <busca>       Buscar por palavra-chave',
           '',
           'Empresas BR / Brazil OSINT (BrasilAPI + Registro.br):',
           '  /cnpj /empresa <cnpj>     Ficha publica de empresa',
@@ -709,9 +695,6 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
           'Integracoes / Integrations:',
           '  /m365                Microsoft 365 (Outlook, Calendar, Teams)',
           '  /gws                 Google Workspace (Gmail, Calendar, Drive)',
-          '',
-          'Meta-Learning:',
-          '  /reflect /reflexao /aprender   Analisa uso e gera insights',
           '',
           'Tab completes commands. Use \\ at end of line for multi-line.',
           '',
@@ -1032,137 +1015,6 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
       break
     }
 
-    case 'news':
-    case 'noticias': {
-      const category = args[0] as NewsCategory | undefined
-      if (category) {
-        ctx.tui.showSystem(`Buscando noticias (${category})...`)
-      } else {
-        ctx.tui.showSystem('Buscando noticias...')
-      }
-      ctx.tui.disableInput()
-      try {
-        const { items, errors } = await fetchNewsItems(category ? [category] : undefined)
-        if (items.length === 0) {
-          ctx.tui.showSystem(errors.length > 0
-            ? `Nenhuma noticia encontrada.\nFalhas: ${errors.join(', ')}`
-            : 'Nenhuma noticia encontrada.')
-          ctx.tui.enableInput()
-          break
-        }
-
-        const pickerEntries: NewsPickerEntry[] = items.map((item: NewsItem) => ({
-          title: item.title,
-          link: item.link,
-          source: item.source,
-          category: item.category,
-          time: item.pubDate
-            ? item.pubDate.toLocaleTimeString('pt-BR', {
-                hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo',
-              })
-            : '',
-        }))
-
-        const result = await ctx.tui.promptNewsPicker(pickerEntries)
-        if (result) {
-          if (result.action === 'open') {
-            // Open in browser
-            const { openUrl } = await import('../windows')
-            openUrl(result.link)
-            ctx.tui.showSystem(`Abrindo: ${result.link}`)
-          } else if (result.action === 'read') {
-            // Fetch and display content
-            ctx.tui.showSystem(`Buscando conteudo...`)
-            const content = await fetchNewsContent(result.link)
-            if (typeof content === 'string') {
-              ctx.tui.showError(content)
-            } else {
-              // Send content to assistant for summarization
-              const newsContext = `Noticia: ${content.title}\nFonte: ${result.link}\n\n${content.content}`
-              const prompt = `Por favor, resuma esta noticia de forma objetiva e destaque os pontos principais:\n\n${newsContext}`
-              ctx.tui.enableInput()
-              ctx.handleSubmit(prompt)
-              return
-            }
-          }
-        }
-      } catch (err) {
-        ctx.tui.showError(`Falha ao buscar noticias: ${err instanceof Error ? err.message : String(err)}`)
-      }
-      ctx.tui.enableInput()
-      break
-    }
-
-    case 'feeds':
-    case 'fontes': {
-      ctx.tui.showSystem(listNewsFeeds())
-      break
-    }
-
-    case 'addfeed':
-    case 'novafonte': {
-      // Usage: /addfeed <name> <url> <category>
-      if (args.length < 3) {
-        ctx.tui.showError('Uso: /addfeed <nome> <url> <categoria>\nEx: /addfeed "Ars Technica" https://feeds.arstechnica.com/arstechnica/index tech')
-        break
-      }
-      const feedName = args[0]
-      const feedUrl = args[1]
-      const feedCat = args[2]
-      const result = addNewsFeed(feedName, feedUrl, feedCat)
-      if (typeof result === 'string') {
-        ctx.tui.showError(result)
-      } else {
-        ctx.tui.showSystem(`Fonte adicionada: ${result.name} (${result.category}) — ${result.url}`)
-      }
-      break
-    }
-
-    case 'rmfeed':
-    case 'rmfonte': {
-      const ref = args.join(' ')
-      if (!ref) {
-        ctx.tui.showError('Uso: /rmfeed <nome ou url>')
-        break
-      }
-      if (removeNewsFeed(ref)) {
-        ctx.tui.showSystem(`Fonte removida: ${ref}`)
-      } else {
-        ctx.tui.showError(`Fonte custom nao encontrada: "${ref}". Para desativar uma built-in, use /disablefeed.`)
-      }
-      break
-    }
-
-    case 'disablefeed':
-    case 'desativarfonte': {
-      const ref = args.join(' ')
-      if (!ref) {
-        ctx.tui.showError('Uso: /disablefeed <nome ou url>')
-        break
-      }
-      if (disableNewsFeed(ref)) {
-        ctx.tui.showSystem(`Fonte desativada: ${ref}`)
-      } else {
-        ctx.tui.showError(`Fonte built-in nao encontrada ou ja desativada: "${ref}"`)
-      }
-      break
-    }
-
-    case 'enablefeed':
-    case 'ativarfonte': {
-      const ref = args.join(' ')
-      if (!ref) {
-        ctx.tui.showError('Uso: /enablefeed <nome ou url>')
-        break
-      }
-      if (enableNewsFeed(ref)) {
-        ctx.tui.showSystem(`Fonte reativada: ${ref}`)
-      } else {
-        ctx.tui.showError(`Fonte built-in nao encontrada ou nao esta desativada: "${ref}"`)
-      }
-      break
-    }
-
     case 'open':
     case 'abrir': {
       const appName = args.join(' ')
@@ -1465,7 +1317,7 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
           ctx.tui.showSystem('Uso: /agendar executar <id ou nome>')
           break
         }
-        ctx.tui.showSystem(await runJobNow(args[1]))
+        showResult(ctx.tui, await runJobNow(args[1]))
         break
       }
 
@@ -1639,22 +1491,6 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
       break
     }
 
-    // ── Investigation commands ─────────────────────────────
-
-    case 'investigar':
-    case 'investigate':
-    case 'investigacoes': {
-      const query = args.join(' ')
-      if (query) {
-        const { searchInvestigations, formatInvestigationList } = await import('../investigate')
-        ctx.tui.showSystem(formatInvestigationList(searchInvestigations(query)))
-      } else {
-        const { listInvestigations, formatInvestigationList } = await import('../investigate')
-        ctx.tui.showSystem(formatInvestigationList(listInvestigations()))
-      }
-      break
-    }
-
     // ── Brazilian company lookup (OSINT from public registries) ─────
     // Backed by BrasilAPI (CNPJ, CEP) and Registro.br RDAP (.br domains).
     // All sources are public, no authentication required. Results cached
@@ -1788,7 +1624,7 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
       ctx.tui.disableInput()
       try {
         const result = await openEmailDraft(draft)
-        ctx.tui.showSystem(result)
+        showResult(ctx.tui, result)
       } catch (err) {
         ctx.tui.showError(`Email: ${err instanceof Error ? err.message : String(err)}`)
       }
@@ -1920,54 +1756,6 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
       break
     }
 
-    // ── Meta-Learning commands ──────────────────────────────
-
-    case 'reflect':
-    case 'reflexao':
-    case 'aprender': {
-      ctx.tui.showSystem('Executando reflexao de uso...')
-      ctx.tui.disableInput()
-      try {
-        const result = await runSelfReflection()
-        ctx.tui.showSystem(result.summary)
-      } catch (err) {
-        ctx.tui.showError(`Reflexao falhou: ${err instanceof Error ? err.message : String(err)}`)
-      }
-      ctx.tui.enableInput()
-      break
-    }
-
-    // ── Memory/RAG commands ────────────────────────────────
-
-    case 'indexar':
-    case 'index':
-    case 'reindex': {
-      ctx.tui.showSystem('Indexando memoria local...')
-      const stats = buildIndex()
-      ctx.tui.showSystem(
-        `Indexacao concluida: ${stats.indexed} fonte(s) indexada(s), ${stats.skipped} sem alteracao. Total: ${stats.total} chunks.`,
-      )
-      break
-    }
-
-    case 'memoria':
-    case 'memory': {
-      const query = args.join(' ')
-      if (query) {
-        const results = queryMemory(query)
-        ctx.tui.showSystem(formatQueryResults(results))
-      } else {
-        const stats = getIndexStats()
-        const builtStr = stats.builtAt
-          ? new Date(stats.builtAt).toLocaleString('pt-BR')
-          : 'nunca'
-        ctx.tui.showSystem(
-          `Memory RAG Index:\n  Chunks: ${stats.chunks}\n  Fontes: ${stats.sources}\n  Ultima indexacao: ${builtStr}`,
-        )
-      }
-      break
-    }
-
     // ── Vault commands ────────────────────────────────────
 
     case 'vault': {
@@ -1978,14 +1766,14 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
         ctx.tui.showSystem('Realizando backup...')
         const msg = args.slice(1).join(' ') || undefined
         const result = await performBackup(msg)
-        ctx.tui.showSystem(result)
+        showResult(ctx.tui, result)
       } else if (sub === 'sync' || sub === 'push') {
         ctx.tui.showSystem('Sincronizando com remote...')
         const result = await syncBackupToRemote()
-        ctx.tui.showSystem(result)
+        showResult(ctx.tui, result)
       } else if (sub === 'init') {
         const result = await initShadowBackup()
-        ctx.tui.showSystem(result)
+        showResult(ctx.tui, result)
         startAutoBackup(30)
         ctx.tui.showSystem('Auto-backup ativado (a cada 30 minutos).')
       } else {
@@ -1997,7 +1785,7 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
     case 'backup': {
       ctx.tui.showSystem('Realizando backup...')
       const result = await performBackup()
-      ctx.tui.showSystem(result)
+      showResult(ctx.tui, result)
       break
     }
 
@@ -2250,73 +2038,6 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
     case 'status': {
       const statusPanels: DashboardPanel[] = []
 
-      // Energy panel
-      const energy = getEnergyState()
-      const levelIcons: Record<EnergyLevel, string> = { alto: '🟢', medio: '🟡', baixo: '🟠', critico: '🔴' }
-      const phaseLabels: Record<string, string> = {
-        aquecimento: 'Aquecimento', pico: 'Pico', sustentado: 'Sustentado',
-        declinio: 'Declinio', esgotado: 'Esgotado',
-      }
-      statusPanels.push({
-        id: 'energy',
-        title: `${levelIcons[energy.level]} Energia: ${energy.score}/100`,
-        content: [
-          `Fase: ${phaseLabels[energy.phase] ?? energy.phase}`,
-          `Sessao: ${energy.sessionDurationMin} min`,
-          `Streak: ${energy.currentStreak} min sem pausa`,
-          `Pausas: ${energy.breaksTaken}`,
-          `Interacoes: ${energy.interactionCount}`,
-          '',
-          energy.suggestion,
-        ],
-      })
-
-      // Focus / Attention panel
-      const attention = getAttentionStats()
-      const focusLabels: Record<string, string> = {
-        desligado: 'Desligado', leve: 'Leve', profundo: 'Profundo', nao_perturbe: 'Nao Perturbe',
-      }
-      statusPanels.push({
-        id: 'attention',
-        title: `Foco: ${focusLabels[attention.focusMode] ?? attention.focusMode}`,
-        content: [
-          `Pendentes: ${attention.pending}`,
-          `Bloqueadas hoje: ${attention.blockedToday}`,
-          `Total hoje: ${attention.totalToday}`,
-        ],
-      })
-
-      // Optimal hours panel
-      const profile = getProfile()
-      if (profile.totalSessions >= 3) {
-        statusPanels.push({
-          id: 'profile',
-          title: 'Perfil de Energia',
-          content: [
-            `Melhores horarios: ${profile.bestHours.map((h) => `${h}h`).join(', ')}`,
-            `Sessao media: ${profile.avgSessionMin} min`,
-            `Intervalo entre pausas: ${profile.avgBreakInterval} min`,
-            `Total sessoes: ${profile.totalSessions}`,
-          ],
-        })
-      }
-
-      // Lokaliza panel
-      const hoods = listNeighborhoods()
-      if (hoods.length > 0) {
-        const totalPois = hoods.reduce((acc, h) => acc + h.pois.length, 0)
-        const totalLayers = hoods.reduce((acc, h) => acc + h.layers.length, 0)
-        statusPanels.push({
-          id: 'lokaliza',
-          title: `Lokaliza (${hoods.length} bairros)`,
-          content: [
-            `POIs: ${totalPois} | Camadas: ${totalLayers}`,
-            ...hoods.slice(0, 5).map((h) => `• ${h.name} — ${h.city}/${h.state}`),
-            ...(hoods.length > 5 ? [`... +${hoods.length - 5} mais`] : []),
-          ],
-        })
-      }
-
       // Tasks summary panel
       const statusTasks = listTasks()
       const doneTasks = listTasks(true).filter((t) => t.done)
@@ -2476,7 +2197,7 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
 
 /**
  * Generate dashboard layout data for morning briefing.
- * Returns panels for tasks, follow-ups, calendar, and news.
+ * Returns panels for tasks, follow-ups, calendar, and projects.
  */
 export async function generateDashboardBriefing(dataDir?: string): Promise<DashboardLayout> {
   const panels: DashboardPanel[] = []
@@ -2556,16 +2277,9 @@ export async function generateDashboardBriefing(dataDir?: string): Promise<Dashb
   // Calendar panel (Windows only)
   try {
     const events = await getOutlookEvents()
-    const eventLines = events.split('\n').filter((l) => l.trim()).slice(0, 6)
+    const eventLines = events.text.split('\n').filter((l) => l.trim()).slice(0, 6)
 
-    // Check if the response is a real event list or a fallback/error message
-    const isError = eventLines.length === 1 && (
-      eventLines[0].startsWith('Outlook nao disponivel') ||
-      eventLines[0].startsWith('Outlook timeout') ||
-      eventLines[0].startsWith('Outlook integration only')
-    )
-
-    if (isError) {
+    if (!events.ok) {
       // Show the error so the user knows what happened
       panels.push({
         id: 'calendar',
@@ -2598,22 +2312,6 @@ export async function generateDashboardBriefing(dataDir?: string): Promise<Dashb
       title: 'Projetos',
       content: projectLines,
     })
-  }
-
-  // News panel (limited)
-  try {
-    const news = await fetchNews(['finance', 'business', 'tech'], 2)
-    const newsLines = news.split('\n').filter((l) => l.trim()).slice(0, 6)
-
-    if (newsLines.length > 0) {
-      panels.push({
-        id: 'news',
-        title: 'Noticias',
-        content: newsLines,
-      })
-    }
-  } catch (err) {
-    logger.debug('News fetch failed for dashboard', { error: err })
   }
 
   // If no panels, add a simple greeting panel

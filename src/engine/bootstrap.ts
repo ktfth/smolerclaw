@@ -1,8 +1,8 @@
 import { join } from 'node:path'
 import { loadConfig } from '../config'
 import { initI18n } from '../i18n'
-import { SessionManager } from '../session'
-import { TOOLS, executeTool } from '../tools'
+import { engineCatalog, executeToolResult } from '../tools'
+import { READ_ONLY_TOOL_NAMES } from '../tools/read-only'
 import { registerToolCatalog } from '../init/tools'
 import { initCoreModules } from '../init/modules'
 import { createEngine, type Engine } from './engine'
@@ -15,7 +15,7 @@ export interface EngineRuntime {
 }
 
 /**
- * Boot the engine with real data modules and the full tool catalog.
+ * Boot the engine with real data modules and the personal-management catalog.
  * No model, no credentials: nothing here talks to an LLM provider.
  */
 export async function bootstrapEngine(
@@ -24,15 +24,18 @@ export async function bootstrapEngine(
   const config = loadConfig()
   initI18n(config.language)
 
-  const sessions = new SessionManager(config.dataDir)
   await registerToolCatalog(config.dataDir)
-  initCoreModules(config.dataDir, sessions)
+  initCoreModules(config.dataDir)
 
+  const policy = policyFromEnv(env)
+  // Plugins execute arbitrary commands: opt in by name, separately from the catalog lists.
+  const allowedPlugins = new Set((env.SMOLERCLAW_PLUGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean))
   const engine = createEngine({
-    catalog: () => TOOLS,
-    execute: executeTool,
-    policy: policyFromEnv(env),
+    catalog: () => engineCatalog(allowedPlugins),
+    execute: executeToolResult,
+    policy,
     audit: createFileAuditSink(join(config.dataDir, 'audit')),
+    isReadOnly: (name) => READ_ONLY_TOOL_NAMES.has(name),
   })
 
   return { engine, dataDir: config.dataDir }

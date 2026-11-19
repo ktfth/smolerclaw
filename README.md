@@ -46,14 +46,12 @@ smolerclaw is a terminal AI assistant that lives on your Windows machine. It can
 - **Track people & delegations** — team, family, contacts
 - **Take notes** — searchable memo system with tags
 - **Draft emails** — opens directly in Outlook
-- **Daily briefing** — calendar, tasks, news, follow-ups in one summary
-- **Investigate issues** — structured evidence collection, findings, reports
+- **Daily briefing** — calendar, tasks, follow-ups, projects in one summary
 - **Run workflows** — multi-step automated routines
 - **Monitor processes** — watch Windows processes, notify on changes
 - **Track finances** — income/expense logging with monthly summaries
 - **Log decisions** — record context and rationale for important choices
 - **Pomodoro timer** — focus sessions with toast notifications
-- **Local RAG memory** — TF-IDF + BM25 search across memos, materials, decisions, and sessions
 - **Project management** — track projects, work sessions, generate progress reports
 - **Opportunity pipeline** — register and filter demands by tech stack and priority
 - **PowerShell scripting** — execute .ps1 scripts with safety guards (blocks Defender/System32/destructive ops)
@@ -65,7 +63,6 @@ smolerclaw is a terminal AI assistant that lives on your Windows machine. It can
 - **Plugin system** — install plugins from GitHub with `/plugin install owner/repo`, supports JSON and TypeScript plugins with lifecycle hooks
 - **Macros** — quick program launchers (`/macro vscode`, `/macro chrome`), create custom macros for apps, URLs, files, and commands
 - **Web UI** — browser-based interface via `smolerclaw ui` (Hono server)
-- **Desktop app** — native desktop window via `smolerclaw desktop` (Electrobun)
 - **i18n** — full Portuguese and English interface, auto-detected or set with `/lang`
 - **Scheduler** — recurring jobs via Windows Task Scheduler (`/schedule`, `/jobs`)
 
@@ -91,6 +88,8 @@ smolerclaw workflow iniciar-dia                 # Run a saved workflow
 smolerclaw mcp                                  # Serve tools over MCP (stdio)
 ```
 
+- **Catalog:** the personal-management core — tasks, scheduler, people, memos, bookmarks, materials, finance and decisions, projects, email drafts, notifications, calendar, vault, Microsoft 365 and Google Workspace . Plugins run arbitrary commands, so the engine exposes one only when it is named in `SMOLERCLAW_PLUGINS=a,b`. File, shell and HTTP primitives stay in the built-in chat: an external agent such as Claude Code brings its own.
+- **Results:** every tool reports success or failure structurally, never by parsing its text. `--json` adds a `data` field with the records. Read-only tools are flagged with the MCP `readOnlyHint` annotation.
 - **Exit codes:** `0` ok, `1` tool error, `2` invalid input or unknown tool, `3` denied by policy.
 - **Policy:** dangerous operations are always denied. `SMOLERCLAW_READONLY=1` denies anything that is not a verified read. `SMOLERCLAW_ALLOW=a,b` and `SMOLERCLAW_DENY=a,b` restrict the catalog.
 - **Audit:** one JSONL file per day under `<dataDir>/audit/`. Records store a SHA-256 of the canonical input, never the raw input.
@@ -111,13 +110,11 @@ Combine with `SMOLERCLAW_READONLY=1` for unattended runs that must not change an
 ```
 /help          All commands          /clear         Clear conversation
 /task 18h buy bread                  /tasks         List pending
-/briefing      Morning summary       /news          Headlines
-/open excel    Launch app            /calendar      Outlook events
-/investigar    List investigations   /memo #tag     Save a note
+/briefing      Morning summary       /calendar      Outlook events
+/open excel    Launch app            /memo #tag     Save a note
 /email         Draft email           /pomodoro      Focus timer
 /model sonnet  Switch model          /login codex   Login + switch provider
 /review        Cross-review          /export        Save to markdown
-/indexar       Build RAG index       /memoria <q>   Search local memory
 /projeto auto  Set active project    /projetos      List all projects
 /sessao start  Start work timer      /sessao stop   Stop work timer
 /relatorio     Progress report       /oportunidades List opportunities
@@ -189,14 +186,12 @@ smolerclaw e um assistente de IA no terminal que vive na sua maquina Windows. El
 - **Rastrear pessoas e delegacoes** — equipe, familia, contatos
 - **Fazer anotacoes** — sistema de memos com busca e tags
 - **Rascunhar emails** — abre direto no Outlook
-- **Resumo matinal** — calendario, tarefas, noticias, follow-ups em um so resumo
-- **Investigar problemas** — coleta estruturada de evidencias, conclusoes, relatorios
+- **Resumo matinal** — calendário, tarefas, follow-ups e projetos em um só resumo
 - **Executar workflows** — rotinas automatizadas de multiplos passos
 - **Monitorar processos** — vigiar processos do Windows, notificar mudancas
 - **Controle financeiro** — registro de entradas/saidas com resumo mensal
 - **Registrar decisoes** — guardar contexto e justificativa de escolhas importantes
 - **Timer Pomodoro** — sessoes de foco com notificacoes toast
-- **Memoria RAG local** — busca TF-IDF + BM25 em memos, materiais, decisoes e sessoes
 - **Gestao de projetos** — rastrear projetos, sessoes de trabalho, gerar relatorios de progresso
 - **Pipeline de oportunidades** — registrar e filtrar demandas por tech stack e prioridade
 - **Scripts PowerShell** — executar .ps1 com safety guards (bloqueia Defender/System32/ops destrutivas)
@@ -208,7 +203,6 @@ smolerclaw e um assistente de IA no terminal que vive na sua maquina Windows. El
 - **Sistema de plugins** — instalar plugins do GitHub com `/plugin install owner/repo`, suporte a plugins JSON e TypeScript com lifecycle hooks
 - **Macros** — atalhos rapidos para programas (`/macro vscode`, `/macro chrome`), crie macros customizados para apps, URLs, arquivos e comandos
 - **Interface Web** — interface no navegador via `smolerclaw ui` (servidor Hono)
-- **App Desktop** — janela nativa via `smolerclaw desktop` (Electrobun)
 - **i18n** — interface em Portugues e Ingles, detectado automaticamente ou via `/idioma`
 - **Agendador** — jobs recorrentes via Agendador de Tarefas do Windows (`/schedule`, `/jobs`)
 
@@ -234,6 +228,8 @@ smolerclaw workflow iniciar-dia                    # Roda um workflow salvo
 smolerclaw mcp                                     # Serve os tools via MCP (stdio)
 ```
 
+- **Catálogo:** o núcleo de gestão pessoal — tarefas, agendador, pessoas, memos, bookmarks, materiais, finanças e decisões, projetos, rascunho de email, notificações, calendário, vault, Microsoft 365 e Google Workspace . Plugins executam comandos arbitrários, então o motor só expõe os que estiverem em `SMOLERCLAW_PLUGINS=a,b`. Arquivos, shell e HTTP ficam só no chat embutido: um agente externo como o Claude Code já traz os seus.
+- **Resultados:** todo tool informa sucesso ou falha de forma estruturada, nunca pela leitura do texto. `--json` inclui o campo `data` com os registros. Tools de leitura levam a anotação MCP `readOnlyHint`.
 - **Códigos de saída:** `0` ok, `1` erro do tool, `2` entrada inválida ou tool desconhecido, `3` negado pela política.
 - **Política:** operações perigosas são sempre negadas. `SMOLERCLAW_READONLY=1` nega tudo que não for leitura verificada. `SMOLERCLAW_ALLOW=a,b` e `SMOLERCLAW_DENY=a,b` restringem o catálogo.
 - **Auditoria:** um arquivo JSONL por dia em `<dataDir>/audit/`. Os registros guardam o SHA-256 da entrada canônica, nunca a entrada bruta.
@@ -254,13 +250,11 @@ Combine com `SMOLERCLAW_READONLY=1` para execuções desassistidas que não pode
 ```
 /ajuda         Todos os comandos     /limpar        Limpar conversa
 /tarefa 18h comprar pao              /tarefas       Listar pendentes
-/resumo        Briefing matinal      /noticias      Manchetes
-/abrir excel   Abrir app             /calendario    Eventos Outlook
-/investigar    Listar investigacoes  /memo #tag     Salvar anotacao
+/resumo        Briefing matinal      /calendario    Eventos Outlook
+/abrir excel   Abrir app             /memo #tag     Salvar anotacao
 /email         Rascunho de email     /foco          Timer Pomodoro
 /modelo sonnet Trocar modelo         /login codex   Login + troca provider
 /review        Revisao cruzada       /exportar      Salvar em markdown
-/indexar       Construir indice RAG  /memoria <q>   Buscar na memoria
 /projeto auto  Definir projeto ativo /projetos      Listar projetos
 /sessao start  Iniciar timer         /sessao stop   Parar timer
 /relatorio     Relatorio progresso   /oportunidades Listar oportunidades

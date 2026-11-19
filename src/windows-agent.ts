@@ -27,6 +27,7 @@ import {
   executePowerShellSTA,
   executePowerShellScript as executeScriptFile,
   DEFAULT_TIMEOUT_MS,
+  psSingleQuoteEscape,
   type ExecutionResult,
 } from './utils/windows-executor'
 
@@ -141,7 +142,9 @@ export async function executePowerShellScript(script: string): Promise<ScriptRes
   const scriptPath = join(tmpdir(), `smolerclaw-${scriptId}.ps1`)
 
   try {
-    writeFileSync(scriptPath, script, 'utf-8')
+    // BOM: PowerShell 5.1 reads BOM-less scripts as ANSI, which can turn UTF-8
+    // bytes (e.g. "Ñ" = C3 91) into quote characters after escaping.
+    writeFileSync(scriptPath, '\uFEFF' + script, 'utf-8')
 
     const result = await executeScriptFile(scriptPath, { timeout: PS_TIMEOUT_MS })
 
@@ -451,9 +454,9 @@ export async function sendNotification(
     return { success: false, error: 'Notifications only available on Windows.' }
   }
 
-  // Escape single quotes for PowerShell
-  const safeTitle = title.replace(/'/g, "''")
-  const safeMessage = message.replace(/'/g, "''")
+  // Covers ASCII and typographic quotes, which PowerShell also treats as delimiters.
+  const safeTitle = psSingleQuoteEscape(title)
+  const safeMessage = psSingleQuoteEscape(message)
 
   const script = `
 $notificationTitle = '${safeTitle}'

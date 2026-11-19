@@ -130,7 +130,7 @@ export async function executeGwsTool(
   // Check auth first
   const connected = await isGwsConnected()
   if (!connected) {
-    return 'Not connected to Google Workspace. Run /gws login to authenticate.'
+    return 'Error: Not connected to Google Workspace. Run /gws login to authenticate.'
   }
 
   switch (name) {

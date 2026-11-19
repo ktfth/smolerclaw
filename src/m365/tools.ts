@@ -163,7 +163,7 @@ export async function executeM365Tool(
   // Check auth first
   const connected = await isM365Connected()
   if (!connected) {
-    return 'Not connected to Microsoft 365. Run /m365 login to authenticate.'
+    return 'Error: Not connected to Microsoft 365. Run /m365 login to authenticate.'
   }
 
   switch (name) {

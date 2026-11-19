@@ -355,7 +355,8 @@ export async function executePowerShellAsFile(
   const fullScript = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n${script}`
 
   try {
-    writeFileSync(tempPath, fullScript, 'utf-8')
+    // The BOM is required: PowerShell 5.1 decodes BOM-less scripts as ANSI.
+    writeFileSync(tempPath, '\uFEFF' + fullScript, 'utf-8')
   } catch (err) {
     return {
       stdout: '',

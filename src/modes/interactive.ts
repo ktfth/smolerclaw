@@ -15,7 +15,6 @@ import { stopAutoBackup } from '../vault'
 import { startAutoRefresh, stopAutoRefresh, updateAutoRefreshAuth } from '../auto-refresh'
 import { shutdownPluginSystem } from '../plugin-system'
 import { isFirstRunToday, markMorningDone, generateMorningBriefing } from '../morning'
-import { runSelfReflection } from '../services/docs-engine'
 import { getVersion } from '../cli'
 import { initAllModules } from '../init/modules'
 import { handleCommand, generateDashboardBriefing } from '../commands/handlers'
@@ -50,7 +49,7 @@ export async function runInteractive(
   provider.setConversationKey(sessions.session.name)
 
   // Initialize people, task, memo, and material systems
-  initAllModules(config.dataDir, tui, sessions)
+  initAllModules(config.dataDir, tui)
 
   // Initialize Time & Load Balancer — detect persona based on day/workload
   let timeContext: TimeContext | null = null
@@ -232,11 +231,6 @@ export async function runInteractive(
     stopAutoBackup()
     stopAutoRefresh()
     shutdownPluginSystem().catch(() => { /* best effort */ })
-
-    // Run self-reflection asynchronously before exit (non-blocking)
-    runSelfReflection().catch(() => {
-      // Best effort - don't block exit if reflection fails
-    })
 
     tui.stop()
     process.exit(0)

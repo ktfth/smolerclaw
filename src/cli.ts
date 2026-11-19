@@ -157,7 +157,7 @@ Commands (inside TUI):
   /new      New session        /load     Load session
   /model    Show/set model     /login    Login Claude/Codex
   /review   Cross-review       /persona  Switch mode
-  /briefing Daily briefing     /news     News radar
+  /briefing Daily briefing
   /task     Create task        /tasks    List tasks
   /open     Open Windows app   /calendar Outlook calendar
   /export   Export markdown    /exit     Quit`)

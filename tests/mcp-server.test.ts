@@ -6,6 +6,7 @@ import { createEngine } from '../src/engine/engine'
 import { DEFAULT_POLICY } from '../src/engine/policy'
 import { withTailCacheBreakpoint } from '../src/claude'
 import type Anthropic from '@anthropic-ai/sdk'
+import { ok, fail } from '../src/core/result'
 
 async function connect() {
   const engine = createEngine({
@@ -15,10 +16,13 @@ async function connect() {
         description: 'Create a task',
         input_schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] },
       },
+      { name: 'list_tasks', description: 'List tasks', input_schema: { type: 'object', properties: {} } },
     ],
-    execute: async (_name, input) => `created ${String(input.title)}`,
+    execute: async (_name, input) =>
+      input.title === 'missing' ? fail('Tarefa não encontrada') : ok(`created ${String(input.title)}`),
     policy: DEFAULT_POLICY,
     audit: { write: () => {} },
+    isReadOnly: (name) => name === 'list_tasks',
   })
   const server = createMcpServer(engine, '0.0.0-test')
   const client = new Client({ name: 'test-client', version: '0.0.0' })
@@ -31,8 +35,10 @@ describe('MCP server', () => {
   test('lists engine tools', async () => {
     const client = await connect()
     const { tools } = await client.listTools()
-    expect(tools.map((t) => t.name)).toEqual(['create_task'])
+    expect(tools.map((t) => t.name)).toEqual(['create_task', 'list_tasks'])
     expect(tools[0].inputSchema.required).toEqual(['title'])
+    expect(tools[0].annotations).toBeUndefined()
+    expect(tools[1].annotations).toEqual({ readOnlyHint: true })
     await client.close()
   })
 
@@ -44,6 +50,10 @@ describe('MCP server', () => {
 
     const invalid = await client.callTool({ name: 'create_task', arguments: {} })
     expect(invalid.isError).toBe(true)
+
+    // A failure phrased in Portuguese, with no "Error:" prefix, is still an error.
+    const missing = await client.callTool({ name: 'create_task', arguments: { title: 'missing' } })
+    expect(missing.isError).toBe(true)
     await client.close()
   })
 })

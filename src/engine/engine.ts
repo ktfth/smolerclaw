@@ -3,6 +3,7 @@ import { InputValidator } from './validate'
 import { decide, isListed, type EnginePolicy } from './policy'
 import type { AuditSink } from './audit'
 import type { RiskLevel } from '../tool-safety'
+import { toChatText, type ToolResult } from '../core/result'
 
 export interface CatalogTool {
   name: string
@@ -14,6 +15,7 @@ export interface ToolDescriptor {
   name: string
   description: string
   inputSchema: unknown
+  readOnly: boolean
 }
 
 export type InvokeDecision = 'executed' | 'denied' | 'invalid' | 'unknown'
@@ -24,6 +26,8 @@ export interface InvokeResult {
   decision: InvokeDecision
   risk: RiskLevel | 'n/a'
   output: string
+  /** Structured payload from the tool, when it provides one (successful calls only). */
+  data?: unknown
   inputHash: string
   durationMs: number
 }
@@ -32,10 +36,12 @@ export interface EngineDeps {
   /** Source of the tool catalog. Read on every call so late registrations are seen. */
   catalog: () => readonly CatalogTool[]
   /** Executes a tool that already passed validation and policy. */
-  execute: (name: string, input: Record<string, unknown>) => Promise<string>
+  execute: (name: string, input: Record<string, unknown>) => Promise<ToolResult>
   policy: EnginePolicy
   audit: AuditSink
   clock?: () => Date
+  /** Whether a tool only reads state (advertised to clients as a hint). */
+  isReadOnly?: (name: string) => boolean
 }
 
 export interface Engine {
@@ -67,7 +73,12 @@ export function createEngine(deps: EngineDeps): Engine {
     return unique
       .filter((t) => isListed(deps.policy, t.name))
       .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-      .map((t) => ({ name: t.name, description: t.description ?? '', inputSchema: t.input_schema }))
+      .map((t) => ({
+        name: t.name,
+        description: t.description ?? '',
+        inputSchema: t.input_schema,
+        readOnly: deps.isReadOnly?.(t.name) ?? false,
+      }))
   }
 
   async function invoke(name: string, rawInput: unknown): Promise<InvokeResult> {
@@ -80,6 +91,7 @@ export function createEngine(deps: EngineDeps): Engine {
       risk: InvokeResult['risk'],
       ok: boolean,
       output: string,
+      data?: unknown,
     ): InvokeResult => {
       const durationMs = Math.max(0, clock().getTime() - startedAt.getTime())
       deps.audit.write({
@@ -94,11 +106,15 @@ export function createEngine(deps: EngineDeps): Engine {
         // reasons can echo raw arguments, which the audit must never store.
         ...(!ok && (decision === 'invalid' || decision === 'unknown') ? { error: output.slice(0, 500) } : {}),
       })
-      return { ok, tool: name, decision, risk, output, inputHash, durationMs }
+      return {
+        ok, tool: name, decision, risk, output,
+        ...(data === undefined ? {} : { data }),
+        inputHash, durationMs,
+      }
     }
 
     const tool = findTool(name)
-    if (!tool) return finish('unknown', 'n/a', false, `Error: unknown tool "${name}"`)
+    if (!tool) return finish('unknown', 'n/a', false, `Error: unknown tool "${name.slice(0, 64)}"`)
 
     if (!isRecord(rawInput)) {
       return finish('invalid', 'n/a', false, 'Error: tool input must be a JSON object')
@@ -119,8 +135,9 @@ export function createEngine(deps: EngineDeps): Engine {
     }
 
     try {
-      const output = await deps.execute(name, input)
-      return finish('executed', policy.risk, !output.startsWith('Error:'), output)
+      // Success comes from the tool's structured result, never from its text.
+      const result = await deps.execute(name, input)
+      return finish('executed', policy.risk, result.ok, toChatText(result), result.ok ? result.data : undefined)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       return finish('executed', policy.risk, false, `Error: ${message}`)

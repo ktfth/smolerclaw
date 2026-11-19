@@ -4,6 +4,8 @@
  * Includes secret detection, protected paths, and rate limiting.
  */
 
+import { READ_ONLY_TOOL_NAMES, CATALOG_TOOL_NAMES } from './tools/read-only'
+
 export type RiskLevel = 'safe' | 'moderate' | 'dangerous'
 
 interface ToolRisk {
@@ -147,35 +149,11 @@ const MODERATE_COMMANDS = [
 ]
 
 /**
- * Tools verified to only read state (no writes, sends or side effects).
- * Anything not listed here or below defaults to `moderate`.
- */
-const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
-  // listings
-  'list_archived_sessions', 'list_bookmarks', 'list_catalog', 'list_incidents',
-  'list_investigations', 'list_materials', 'list_neighborhoods', 'list_people',
-  'list_projects', 'list_scheduled_jobs', 'list_tasks', 'list_tradeoff_analyses',
-  'gws_list_emails', 'gws_list_events', 'gws_list_files',
-  // lookups
-  'get_calendar_events', 'get_current_plan', 'get_neighborhood', 'get_news',
-  'get_people_dashboard', 'get_recommendations', 'get_regional_news',
-  'get_running_apps', 'get_system_info', 'get_tradeoff_adr', 'get_usage_insights',
-  'find_person_info', 'gws_read_email', 'gws_briefing', 'investigation_report',
-  // searches
-  'search_bookmarks', 'search_content', 'search_decisions', 'search_materials',
-  'search_memos', 'search_neighborhoods', 'gws_search_files',
-  // status and summaries
-  'attention_status', 'check_plan_status', 'db_status', 'docker_containers',
-  'docker_status', 'fs_watch_history', 'fs_watch_status', 'investigation_status',
-  'pitwall_status', 'vault_status', 'bookmark_tags', 'content_stats',
-  'energy_profile', 'explain_optimal_usage', 'financial_summary', 'security_audit_log',
-])
-
-/**
- * Assess risk level of a tool call.
+ * Assess risk level of a tool call. Catalog tools declared read-only are safe;
+ * anything not classified here defaults to `moderate`.
  */
 export function assessToolRisk(name: string, input: Record<string, unknown>): ToolRisk {
-  if (READ_ONLY_TOOLS.has(name)) return { level: 'safe' }
+  if (READ_ONLY_TOOL_NAMES.has(name)) return { level: 'safe' }
 
   switch (name) {
     case 'read_file':
@@ -183,10 +161,6 @@ export function assessToolRisk(name: string, input: Record<string, unknown>): To
     case 'find_files':
     case 'search_files':
     case 'fetch_url':
-    case 'read_clipboard_content':
-    case 'analyze_screen_context':
-    case 'memory_status':
-    case 'recall_memory':
       return { level: 'safe' }
 
     case 'write_file': {
@@ -241,18 +215,7 @@ export function assessToolRisk(name: string, input: Record<string, unknown>): To
       return { level: 'moderate', reason: cmd }
     }
 
-    case 'execute_powershell_script':
-      return { level: 'dangerous', reason: `PowerShell script execution` }
-
-    // M365 tools — read operations are safe, write operations are moderate
-    case 'm365_list_emails':
-    case 'm365_read_email':
-    case 'm365_list_events':
-    case 'm365_list_todos':
-    case 'm365_list_files':
-    case 'm365_briefing':
-      return { level: 'safe' }
-
+    // M365 writes (reads are declared read-only in the catalog)
     case 'm365_send_email':
       return { level: 'moderate', reason: `send email to ${input.to ?? 'unknown'}` }
 
@@ -266,7 +229,9 @@ export function assessToolRisk(name: string, input: Record<string, unknown>): To
       return { level: 'moderate', reason: `complete To Do task: ${input.taskId ?? ''}` }
 
     default:
-      return { level: 'moderate', reason: `unknown tool: ${name}` }
+      return CATALOG_TOOL_NAMES.has(name)
+        ? { level: 'moderate', reason: `changes state: ${name}` }
+        : { level: 'moderate', reason: `unknown tool: ${name}` }
   }
 }
 

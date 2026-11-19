@@ -19,6 +19,7 @@ export function createMcpServer(engine: Engine, version: string): Server {
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema as { type: 'object'; [key: string]: unknown },
+      ...(t.readOnly ? { annotations: { readOnlyHint: true } } : {}),
     })),
   }))
 

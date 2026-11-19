@@ -78,7 +78,7 @@ async function main(): Promise<void> {
   // Initialize core data modules (vault, tasks, memory, etc.)
   // This makes all tools functional in every mode (TUI, web, print).
   // TUI-specific modules (pomodoro notifications, etc.) init later in interactive mode.
-  initCoreModules(config.dataDir, sessions)
+  initCoreModules(config.dataDir)
 
   // ── Web UI mode ─────────────────────────────────────────
   if (cliArgs.uiMode === 'web') {

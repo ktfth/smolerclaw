@@ -183,16 +183,6 @@ export const DEFAULT_PALETTE_ITEMS: PaletteItem[] = [
     keywords: ['summary', 'overview', 'today'],
   },
   {
-    id: 'cmd-news',
-    label: 'News Feed',
-    description: 'Read latest news',
-    shortcut: '/news',
-    command: '/news',
-    category: 'command',
-    icon: '📰',
-    keywords: ['headlines', 'articles'],
-  },
-  {
     id: 'cmd-tasks',
     label: 'Task List',
     description: 'View pending tasks',
