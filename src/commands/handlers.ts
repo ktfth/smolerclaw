@@ -1,6 +1,5 @@
 import { loadConfig, saveConfig, getConfigPath } from '../config'
 import { refreshAuthForProvider, resolveAuthForProvider, authLabel, type AuthResult } from '../auth'
-import { formatAutoRefreshStatus, updateAutoRefreshAuth } from '../auto-refresh'
 import { loadSkills, buildSystemPrompt, formatSkillList } from '../skills'
 import type { SessionPickerEntry, DashboardLayout, DashboardPanel } from '../tui'
 import { TUI } from '../tui'
@@ -322,7 +321,9 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
 
       const provider = rawTarget === 'claude' ? 'anthropic' : 'codex'
       const targetModel = defaultModelForProvider(provider)
-      ctx.tui.showSystem(`Abrindo login ${assistantNameForProvider(provider)}...`)
+      ctx.tui.showSystem(provider === 'anthropic'
+        ? 'Verificando ANTHROPIC_API_KEY...'
+        : `Abrindo login ${assistantNameForProvider(provider)}...`)
 
       try {
         await loginWithProvider(provider, true)
@@ -354,9 +355,6 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
           ctx.auth.auth = freshAuth
           ctx.provider.syncAuth(freshAuth)
           ctx.tui.updateAuthInfo(authLabel(freshAuth))
-          if (providerType === 'anthropic') {
-            updateAutoRefreshAuth(freshAuth as AuthResult & { expiresAt: number })
-          }
           ctx.tui.showSystem(refreshResult.successMessage(freshAuth))
         } else {
           ctx.tui.showSystem(refreshResult.failureMessage)
@@ -364,12 +362,6 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
       } catch (err) {
         ctx.tui.showError(`Falha ao renovar: ${err instanceof Error ? err.message : String(err)}`)
       }
-      break
-    }
-
-    case 'auto-refresh':
-    case 'autorefresh': {
-      ctx.tui.showSystem(formatAutoRefreshStatus())
       break
     }
 
@@ -623,7 +615,6 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
           'Auth:',
           '  /auth                Status de autenticacao',
           '  /refresh /renovar    Renovar sessao manualmente',
-          '  /auto-refresh        Status do auto-refresh de token',
           '',
           'Plugins:',
           '  /plugins /plugin         Listar plugins',
@@ -1273,7 +1264,6 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
     case 'agendar':
     case 'schedule': {
       // /agendar "mensagem" "14:00" [data] [tipo]
-      // /agendar "comando" "14:00" daily command
       const sub = args[0]?.toLowerCase()
 
       if (!sub || sub === 'list' || sub === 'listar') {
@@ -2423,9 +2413,6 @@ function wireReviewApproval(reviewProvider: AnyProvider, ctx: CommandContext): v
 
 function formatAuthStatus(auth: AuthResult): string {
   const lines = [`Auth: ${auth.provider} (${auth.kind})`, `Source: ${auth.source}`]
-  if (auth.subscriptionType) {
-    lines.push(`Plan: ${auth.subscriptionType}`)
-  }
   if (auth.expiresAt) {
     lines.push(`Expires: ${new Date(auth.expiresAt).toLocaleString()}`)
   }
@@ -2437,13 +2424,9 @@ async function performProviderRefresh(provider: ReturnType<AnyProvider['getProvi
   successMessage: (auth: AuthResult) => string
 }> {
   if (provider === 'anthropic') {
-    const proc = Bun.spawn(['claude', '-p', 'Fresh!'], { stdout: 'pipe', stderr: 'pipe' })
-    const timer = setTimeout(() => proc.kill(), 15_000)
-    await proc.exited
-    clearTimeout(timer)
     return {
-      failureMessage: 'claude executado, mas credenciais nao atualizaram. Tente novamente.',
-      successMessage: (auth) => `Sessao renovada. Expira: ${new Date(auth.expiresAt || Date.now()).toLocaleString()}`,
+      failureMessage: 'ANTHROPIC_API_KEY não definida.',
+      successMessage: () => 'Chave de API relida de ANTHROPIC_API_KEY (chaves não expiram).',
     }
   }
 

@@ -3,7 +3,7 @@ import {
   setActiveProject, getActiveProject, addProject, listProjects,
   startSession, endSession, getOpenSession,
   addOpportunity, updateOpportunityStatus, listOpportunities,
-  generateWorkReport, autoDetectProject,
+  generateWorkReport, autoDetectProject, checkProjectPath,
   formatProjectList, formatOpportunityList,
   type Opportunity,
 } from '../../projects'
@@ -189,10 +189,12 @@ const HANDLERS: Record<string, ToolHandler> = {
   add_project: (input) => {
     const name = requireText(input, 'name')
     if (!name) return fail('name is required.')
-    const path = requireText(input, 'path')
-    if (!path) return fail('path is required.')
+    const rawPath = requireText(input, 'path')
+    if (!rawPath) return fail('path is required.')
+    const checked = checkProjectPath(rawPath)
+    if (!checked.ok) return fail(checked.error)
     const project = addProject(
-      name, path, optionalText(input, 'description') ?? '',
+      name, checked.path, optionalText(input, 'description') ?? '',
       optionalStrings(input, 'tags') ?? [], optionalStrings(input, 'tech_stack') ?? [],
     )
     return ok(`Projeto registrado: "${project.name}" (${project.path}) [${project.id}]`, project)

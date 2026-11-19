@@ -12,7 +12,6 @@ import { stopPomodoroTimer } from '../pomodoro'
 import { stopAllMonitors } from '../monitor'
 import { stopScheduler } from '../scheduler'
 import { stopAutoBackup } from '../vault'
-import { startAutoRefresh, stopAutoRefresh, updateAutoRefreshAuth } from '../auto-refresh'
 import { shutdownPluginSystem } from '../plugin-system'
 import { isFirstRunToday, markMorningDone, generateMorningBriefing } from '../morning'
 import { getVersion } from '../cli'
@@ -229,7 +228,6 @@ export async function runInteractive(
     stopAllMonitors()
     stopScheduler()
     stopAutoBackup()
-    stopAutoRefresh()
     shutdownPluginSystem().catch(() => { /* best effort */ })
 
     tui.stop()
@@ -336,18 +334,6 @@ export async function runInteractive(
     tui.updateAssistantLabel(provider.getAssistantLabel())
     tui.updateAuthInfo(authLabel(authHolder.auth))
 
-    stopAutoRefresh()
-    if (authHolder.auth && provider.supportsAutoRefresh()) {
-      startAutoRefresh(authHolder.auth as AuthResult & { expiresAt: number }, {
-        onRefreshed: (fresh) => {
-          provider.syncAuth(fresh)
-          tui.updateAuthInfo(authLabel(fresh))
-        },
-        onRefreshFailed: (msg) => {
-          tui.showError(`Auto-refresh: ${msg}`)
-        },
-      })
-    }
   }
 }
 
@@ -357,7 +343,7 @@ function formatStartupAuthInfo(auth: AuthResult | null, assistantLabel: string):
   }
 
   if (auth.provider === 'anthropic') {
-    return `Authenticated via Claude ${auth.subscriptionType} subscription.`
+    return 'Authenticated via ANTHROPIC_API_KEY.'
   }
 
   if (auth.provider === 'codex') {

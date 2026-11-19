@@ -130,7 +130,8 @@ Deterministic engine (no model, no credentials):
   workflow <name>              Run a saved workflow
   mcp                          Serve tools over MCP stdio (for Claude Code)
 
-  Policy env: SMOLERCLAW_READONLY=1, SMOLERCLAW_ALLOW=a,b, SMOLERCLAW_DENY=a,b
+  Policy env: SMOLERCLAW_READONLY=1, SMOLERCLAW_ALLOW=a,b, SMOLERCLAW_DENY=a,b,
+              SMOLERCLAW_ALLOW_SEND=1, SMOLERCLAW_PLUGINS=a,b
 
 Options:
   -h, --help           Show this help

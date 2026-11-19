@@ -27,7 +27,7 @@ export async function listFiles(
 
   const args = ['onedrive', 'list']
   if (folder) {
-    args.push('--folderUrl', folder)
+    args.push(`--folderUrl=${folder}`)
   }
 
   const result = await executeM365<M365DriveItem[]>(args)
@@ -43,7 +43,7 @@ export async function listFiles(
  * Get info about a specific file or folder.
  */
 export async function getFileInfo(fileUrl: string): Promise<M365Result<M365DriveItem>> {
-  return executeM365<M365DriveItem>(['onedrive', 'get', '--webUrl', fileUrl])
+  return executeM365<M365DriveItem>(['onedrive', 'get', `--webUrl=${fileUrl}`])
 }
 
 /**

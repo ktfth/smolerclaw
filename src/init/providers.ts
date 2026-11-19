@@ -28,7 +28,6 @@ export interface AnyProvider {
   getProviderType: () => ProviderType
   getAssistantLabel: () => string
   getCurrentModel: () => string
-  supportsAutoRefresh: () => boolean
   syncAuth: (auth: AuthResult | null) => void
 }
 
@@ -75,10 +74,6 @@ export class ProviderManager implements AnyProvider {
 
   getCurrentModel(): string {
     return this.model
-  }
-
-  supportsAutoRefresh(): boolean {
-    return this.providerType === 'anthropic'
   }
 
   syncAuth(auth: AuthResult | null): void {

@@ -39,6 +39,8 @@ export interface CatalogEntry {
   readonly run: ToolHandler
   /** True when the tool only reads state. Declared next to the handler, never guessed. */
   readonly readOnly: boolean
+  /** Delivers content to third parties immediately (gated by the engine policy). */
+  readonly sends?: boolean
 }
 
 /**

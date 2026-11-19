@@ -13,6 +13,7 @@ import { toolFetchUrl } from './network-tools'
 import { INTEGRATION_TOOLS } from './integrations'
 import { WORKSTATION_SCHEMAS } from './schemas'
 import { DOMAIN_TOOLS } from './domain'
+import { InputValidator } from '../engine/validate'
 
 type LegacyRunner = (input: Record<string, unknown>) => string | Promise<string>
 
@@ -47,6 +48,9 @@ export function workstationTools(undoStack: UndoStack): CatalogEntry[] {
 
 export const ENGINE_TOOLS: readonly CatalogEntry[] = [...DOMAIN_TOOLS, ...INTEGRATION_TOOLS]
 
+// Every caller (chat loop included) gets schema validation, not only the engine.
+const validator = new InputValidator()
+
 /** Resolve and run a tool. Never throws: handler exceptions become failures. */
 export async function dispatchTool(
   entries: ReadonlyMap<string, CatalogEntry>,
@@ -56,7 +60,11 @@ export async function dispatchTool(
 ): Promise<ToolResult> {
   try {
     const entry = entries.get(name)
-    if (entry) return await entry.run(input)
+    if (entry) {
+      const check = validator.validate(entry.schema, input)
+      if (!check.valid) return fail(`invalid input for "${name}": ${check.errors.join('; ')}`)
+      return await entry.run(input)
+    }
 
     const pluginResult = await executePluginTool(name, input)
     if (pluginResult !== null) return fromLegacyText(pluginResult)

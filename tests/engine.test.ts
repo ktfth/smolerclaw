@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test'
 import { canonicalJson, canonicalHash } from '../src/engine/canonical'
 import { InputValidator } from '../src/engine/validate'
-import { decide, isListed, policyFromEnv, DEFAULT_POLICY, type EnginePolicy } from '../src/engine/policy'
+import { decide, isListed, policyFromEnv, capturePolicyEnv, DEFAULT_POLICY, type EnginePolicy } from '../src/engine/policy'
 import { createEngine, type CatalogTool } from '../src/engine/engine'
 import type { AuditRecord } from '../src/engine/audit'
 import { exitCodeFor, isEngineCommand, splitEngineArgs } from '../src/modes/engine-mode'
@@ -108,8 +108,24 @@ describe('policy', () => {
 
   test('policyFromEnv parses variables', () => {
     const p = policyFromEnv({ SMOLERCLAW_READONLY: '1', SMOLERCLAW_DENY: 'a, b', SMOLERCLAW_ALLOW: '' })
-    expect(p).toEqual({ allowModerate: false, deny: ['a', 'b'], allow: [] })
+    expect(p).toEqual({ allowModerate: false, deny: ['a', 'b'], allow: [], allowSend: false, plugins: [] })
     expect(policyFromEnv({})).toEqual(DEFAULT_POLICY)
+    expect(policyFromEnv({ SMOLERCLAW_ALLOW_SEND: '1', SMOLERCLAW_PLUGINS: 'x,y' })).toMatchObject({ allowSend: true, plugins: ['x', 'y'] })
+  })
+
+  test('sending email to third parties is denied unless explicitly allowed', () => {
+    for (const name of ['m365_send_email', 'gws_send_email']) {
+      const denied = decide(DEFAULT_POLICY, name, { to: 'a@b.c', subject: 's', body: 'b' })
+      expect(denied.allowed).toBe(false)
+      expect(denied.reason).toContain('SMOLERCLAW_ALLOW_SEND=1')
+      expect(decide({ ...DEFAULT_POLICY, allowSend: true }, name, { to: 'a@b.c' }).allowed).toBe(true)
+    }
+    // Drafts never leave the machine and stay allowed.
+    expect(decide(DEFAULT_POLICY, 'draft_email', { to: 'a@b.c', subject: 's', body: 'b' }).allowed).toBe(true)
+  })
+
+  test('captured policy env keeps only policy keys', () => {
+    expect(capturePolicyEnv({ SMOLERCLAW_READONLY: '1', PATH: 'x', SMOLERCLAW_DENY: '' })).toEqual({ SMOLERCLAW_READONLY: '1' })
   })
 })
 

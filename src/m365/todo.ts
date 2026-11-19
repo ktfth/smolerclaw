@@ -50,7 +50,7 @@ export async function listTodoTasks(
 
   const args = ['todo', 'task', 'list']
   if (listId) {
-    args.push('--listId', listId)
+    args.push(`--listId=${listId}`)
   } else {
     args.push('--listName', 'Tasks')
   }
@@ -68,11 +68,11 @@ export async function listTodoTasks(
  * Create a new To Do task.
  */
 export async function createTodo(params: M365CreateTodoParams): Promise<M365Result<string>> {
-  const args = ['todo', 'task', 'add', '--title', params.title]
+  const args = ['todo', 'task', 'add', `--title=${params.title}`]
 
-  if (params.listId) args.push('--listId', params.listId)
-  if (params.dueDateTime) args.push('--dueDateTime', params.dueDateTime)
-  if (params.importance) args.push('--importance', params.importance)
+  if (params.listId) args.push(`--listId=${params.listId}`)
+  if (params.dueDateTime) args.push(`--dueDateTime=${params.dueDateTime}`)
+  if (params.importance) args.push(`--importance=${params.importance}`)
 
   const result = await executeM365<string>(args, { jsonOutput: false })
 
@@ -90,8 +90,8 @@ export async function completeTodo(
   taskId: string,
   listId?: string,
 ): Promise<M365Result<string>> {
-  const args = ['todo', 'task', 'set', '--id', taskId, '--status', 'completed']
-  if (listId) args.push('--listId', listId)
+  const args = ['todo', 'task', 'set', `--id=${taskId}`, '--status', 'completed']
+  if (listId) args.push(`--listId=${listId}`)
 
   const result = await executeM365<string>(args, { jsonOutput: false })
 

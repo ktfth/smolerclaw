@@ -1,6 +1,16 @@
 import type { ToolApprovalMode } from './types'
+import { SEND_TOOL_NAMES } from './tools/read-only'
 
 export type ApprovalCallback = (toolName: string, input: Record<string, unknown>, riskLevel: string) => Promise<boolean>
+
+/**
+ * Tools that deliver content to third parties immediately. They always ask,
+ * whatever the approval mode or "approve all", and are blocked when nobody
+ * can be asked (non-interactive runs).
+ */
+export function requiresExplicitConsent(toolName: string): boolean {
+  return SEND_TOOL_NAMES.has(toolName)
+}
 
 /**
  * Determines whether a tool call needs user approval.

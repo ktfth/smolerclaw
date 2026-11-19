@@ -50,7 +50,7 @@ export async function listPages(
 
   const result = await executeM365<M365OneNotePage[]>([
     'onenote', 'page', 'list',
-    '--name', notebookName,
+    `--name=${notebookName}`,
   ])
 
   if (result.success && result.data) {

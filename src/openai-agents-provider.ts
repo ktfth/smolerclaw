@@ -15,7 +15,7 @@ import type { LLMProvider } from './providers'
 import { TOOLS, executeTool } from './tools'
 import { assessToolRisk } from './tool-safety'
 import { humanizeError } from './errors'
-import { needsApproval } from './approval'
+import { needsApproval, requiresExplicitConsent } from './approval'
 
 const OPENAI_BASE = 'https://api.openai.com/v1'
 
@@ -175,9 +175,15 @@ export class OpenAIAgentsProvider implements LLMProvider {
           return `Error: ${reason}.`
         }
 
+        const consent = requiresExplicitConsent(toolDef.name)
+        if (consent && !this.approvalCallback) {
+          const reason = 'Sending requires interactive approval'
+          this.toolExecutionMeta.set(callId, { status: 'blocked', reason })
+          return 'Error: Sending to third parties requires interactive approval and none is available.'
+        }
+
         if (
-          !this.autoApproveAll &&
-          needsApproval(this.approvalMode, toolDef.name, risk.level) &&
+          (consent || (!this.autoApproveAll && needsApproval(this.approvalMode, toolDef.name, risk.level))) &&
           this.approvalCallback
         ) {
           const approved = await this.approvalCallback(toolDef.name, input, risk.level)

@@ -32,7 +32,7 @@ smolerclaw e um assistente de IA de terminal que combina o Claude da Anthropic c
 │  news · finance · decisions · investigations        │
 │  workflows · scheduler · monitor · pomodoro         │
 │  email · briefing · morning · pitwall · macros      │
-│  auto-refresh · finance-guard · plugin-system       │
+│  finance-guard · plugin-system                      │
 ├─────────────────────────────────────────────────────┤
 │              Services Layer (Smart)                  │
 │  decision-engine · agency-engine · docs-engine      │
@@ -91,30 +91,17 @@ User Input
 
 ### Autenticacao
 
+Só o chat embutido usa credenciais; o motor, a CLI e o MCP rodam sem nenhuma.
+
 ```
-~/.claude/.credentials.json
-    │ OAuth token (Claude Code subscription)
+ANTHROPIC_API_KEY (Console Anthropic)
     ▼
-  auth.ts → resolveAuth()
-    │ read + validate + check expiry
+  auth.ts → resolveAuthForProvider('anthropic')
     ▼
-  ClaudeProvider → new Anthropic({ apiKey: token })
-    │
-    ├── On 401 → retry.ts → onAuthExpired callback
-    │                │ refreshAuth() → re-read credentials
-    │                └── updateToken() → recreate client
-    │
-    ├── On /refresh → spawn `claude -p 'Fresh!'`
-    │                  → re-read credentials
-    │
-    └── Auto-refresh (auto-refresh.ts)
-         │ timer check a cada 60s
-         ├── Token longe de expirar → noop
-         ├── Token perto de expirar → re-read disk
-         │   └── Token ja rotacionado → adota novo token
-         └── Token nao mudou → spawn `claude -p 'Fresh!'`
-              → re-read → updateToken()
+  ClaudeProvider → new Anthropic({ apiKey })
 ```
+
+O token OAuth da assinatura do Claude Code não é lido: ele é emitido para o Claude Code, não para clientes de terceiros. Quem quer usar a assinatura roda o smolerclaw como servidor MCP dentro do Claude Code.
 
 ### Persistencia
 
@@ -155,9 +142,9 @@ Toda escrita usa `atomicWriteFile()` (tmp + rename) com checksums SHA-256 verifi
 
 ## Decisoes Arquiteturais
 
-### Por que Subscription-Only (sem API Key)?
+### Por que API key e não a assinatura?
 
-smolerclaw foi projetado para rodar junto com Claude Code, aproveitando a assinatura Pro/Max do usuario. Isso elimina a necessidade de gerenciar API keys, reduz risco de vazamento de secrets, e simplifica o onboarding a zero configuracao.
+Versões anteriores reaproveitavam o token OAuth do Claude Code como `apiKey`. Esse token pertence ao Claude Code, expira e exigia um auto-refresh que disparava o próprio `claude`. O caminho suportado para usar a assinatura é o inverso: o Claude Code é o agente e o smolerclaw entra como servidor MCP.
 
 ### Por que Event Bus?
 
@@ -169,7 +156,7 @@ Dados do usuario (tarefas, memos, financas) sao criticos. Escrita atomica (write
 
 ### Por que Multi-Provider?
 
-Suporta Anthropic (principal, via subscription), OpenAI (via API key), e Ollama (local, sem key). Permite o usuario escolher o melhor modelo para cada situacao. Interface `LLMProvider` garante que novos providers podem ser adicionados facilmente.
+Suporta Anthropic (via `ANTHROPIC_API_KEY`), OpenAI (via API key), e Ollama (local, sem key). Permite o usuario escolher o melhor modelo para cada situacao. Interface `LLMProvider` garante que novos providers podem ser adicionados facilmente.
 
 ### Por que Modulos Feature Split?
 
@@ -178,10 +165,6 @@ Cada dominio (tasks, people, memos, etc.) vive em seu proprio modulo com estado 
 - Lazy loading futuro
 - Facil adicao de novos dominios
 - Limites claros de responsabilidade
-
-### Por que Auto-Refresh Proativo?
-
-O token OAuth do Claude Code expira periodicamente. Sem auto-refresh, o usuario so descobre quando a proxima chamada falha com 401. O auto-refresh monitora a expiracao com timer (check a cada 60s, refresh 5min antes de expirar) e tenta re-ler o token do disco — se Claude Code ja rotacionou, basta adotar. Se nao, spawna `claude -p 'Fresh!'` para forcar a rotacao. Nenhuma interrupcao da conversa.
 
 ### Por que Finance Guard como Camada Separada?
 
@@ -256,7 +239,6 @@ Toda execucao de PowerShell no codebase passa por `utils/windows-executor.ts`. I
 ### Cross-Cutting Modules
 | Modulo | LOC | Responsabilidade |
 |--------|-----|------------------|
-| `auto-refresh.ts` | 280 | Monitoramento e renovacao automatica de token OAuth |
 | `finance-guard.ts` | 240 | Verificacao de transacoes: limites, duplicatas, gasto diario |
 | `plugin-system.ts` | 530 | Registry de plugins: JSON + script, lifecycle, GitHub install |
 | `macros.ts` | 546 | Atalhos rapidos: CRUD, execucao, tags, 16 defaults |

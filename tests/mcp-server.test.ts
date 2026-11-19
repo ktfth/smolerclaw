@@ -19,7 +19,7 @@ async function connect() {
       { name: 'list_tasks', description: 'List tasks', input_schema: { type: 'object', properties: {} } },
     ],
     execute: async (_name, input) =>
-      input.title === 'missing' ? fail('Tarefa não encontrada') : ok(`created ${String(input.title)}`),
+      input.title === 'missing' ? fail('Tarefa não encontrada') : ok(`created ${String(input.title)}`, { title: input.title }),
     policy: DEFAULT_POLICY,
     audit: { write: () => {} },
     isReadOnly: (name) => name === 'list_tasks',
@@ -47,6 +47,7 @@ describe('MCP server', () => {
     const ok = await client.callTool({ name: 'create_task', arguments: { title: 'pagar conta' } })
     expect(ok.isError).toBe(false)
     expect(ok.content).toEqual([{ type: 'text', text: 'created pagar conta' }])
+    expect(ok.structuredContent).toEqual({ data: { title: 'pagar conta' } })
 
     const invalid = await client.callTool({ name: 'create_task', arguments: {} })
     expect(invalid.isError).toBe(true)
@@ -54,6 +55,7 @@ describe('MCP server', () => {
     // A failure phrased in Portuguese, with no "Error:" prefix, is still an error.
     const missing = await client.callTool({ name: 'create_task', arguments: { title: 'missing' } })
     expect(missing.isError).toBe(true)
+    expect(missing.structuredContent).toBeUndefined()
     await client.close()
   })
 })

@@ -80,7 +80,7 @@ export async function listEmails(
  * Get a specific email by ID.
  */
 export async function getEmail(id: string): Promise<M365Result<M365EmailDetail>> {
-  const result = await executeM365<Record<string, unknown>>(['outlook', 'message', 'get', '--id', id])
+  const result = await executeM365<Record<string, unknown>>(['outlook', 'message', 'get', `--id=${id}`])
 
   if (result.success && result.data) {
     const r = result.data
@@ -118,16 +118,16 @@ export async function getEmail(id: string): Promise<M365Result<M365EmailDetail>>
 export async function sendEmail(params: M365SendEmailParams): Promise<M365Result<string>> {
   const args = [
     'outlook', 'mail', 'send',
-    '--to', params.to,
-    '--subject', params.subject,
-    '--bodyContents', params.body,
+    `--to=${params.to}`,
+    `--subject=${params.subject}`,
+    `--bodyContents=${params.body}`,
   ]
 
   if (params.cc) {
-    args.push('--cc', params.cc)
+    args.push(`--cc=${params.cc}`)
   }
   if (params.importance && params.importance !== 'normal') {
-    args.push('--importance', params.importance)
+    args.push(`--importance=${params.importance}`)
   }
 
   return executeM365<string>(args, { jsonOutput: false })
@@ -211,13 +211,13 @@ export async function listEvents(
 export async function createEvent(params: M365CreateEventParams): Promise<M365Result<string>> {
   const args = [
     'outlook', 'event', 'add',
-    '--subject', params.subject,
-    '--startDateTime', params.start,
-    '--endDateTime', params.end,
+    `--subject=${params.subject}`,
+    `--startDateTime=${params.start}`,
+    `--endDateTime=${params.end}`,
   ]
 
-  if (params.location) args.push('--location', params.location)
-  if (params.body) args.push('--bodyContents', params.body)
+  if (params.location) args.push(`--location=${params.location}`)
+  if (params.body) args.push(`--bodyContents=${params.body}`)
   if (params.isAllDay) args.push('--isAllDay')
 
   return executeM365<string>(args, { jsonOutput: false })

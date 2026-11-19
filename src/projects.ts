@@ -8,8 +8,8 @@
  *   - briefing/morning for daily summaries
  */
 
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { join, basename } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { join, basename, isAbsolute, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { atomicWriteFile } from './vault'
 
@@ -163,6 +163,28 @@ export function addProject(
   _projects = [..._projects, project]
   saveProjects()
   return project
+}
+
+export type ProjectPathCheck = { ok: true; path: string } | { ok: false; error: string }
+
+/**
+ * Project paths come from tool input and become git's cwd. Accept only an
+ * absolute, existing, local directory: UNC paths would make git reach the network.
+ */
+export function checkProjectPath(raw: string): ProjectPathCheck {
+  const trimmed = raw.trim()
+  if (/^[\\/]{2}/.test(trimmed)) return { ok: false, error: 'caminhos de rede (UNC) não são aceitos' }
+  if (!isAbsolute(trimmed)) return { ok: false, error: `use um caminho absoluto: "${trimmed}"` }
+  let path: string
+  try {
+    // Follow junctions/symlinks: the target, not the link, becomes git's cwd.
+    path = realpathSync.native(resolve(trimmed))
+    if (!statSync(path).isDirectory()) return { ok: false, error: `não é um diretório: ${path}` }
+  } catch {
+    return { ok: false, error: `diretório não existe: ${resolve(trimmed)}` }
+  }
+  if (/^[\\/]{2}/.test(path)) return { ok: false, error: 'o caminho aponta para a rede (UNC)' }
+  return { ok: true, path }
 }
 
 export function getProject(idOrName: string): Project | null {
@@ -398,7 +420,10 @@ async function gitExec(
   args: string[],
   cwd: string,
 ): Promise<{ stdout: string; stderr: string; ok: boolean }> {
-  const proc = Bun.spawn(args, { stdout: 'pipe', stderr: 'pipe', cwd })
+  // Entries saved before path validation existed are re-checked here.
+  const checked = checkProjectPath(cwd)
+  if (!checked.ok) return { stdout: '', stderr: checked.error, ok: false }
+  const proc = Bun.spawn(args, { stdout: 'pipe', stderr: 'pipe', cwd: checked.path })
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),

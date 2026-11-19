@@ -4,12 +4,10 @@
  * Runs `m365 <command> --output json` via Bun.spawn, parses JSON output,
  * handles timeouts, and detects auth expiration.
  *
- * Resolves the m365 binary from the local node_modules/.bin first,
- * falling back to the global PATH.
+ * Binary resolution never picks a .cmd/.bat shim (see utils/resolve-bin).
  */
 
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { resolveCliBinary } from '../utils/resolve-bin'
 import type { M365Result } from './types'
 
 // ─── Constants ──────────────────────────────────────────────
@@ -31,31 +29,9 @@ let _m365Binary: string = 'm365'
 
 // ─── Binary Resolution ─────────────────────────────────────
 
-/**
- * Resolve the m365 binary path. Prefers local node_modules/.bin over global.
- * Bun generates .exe on Windows, npm/yarn generate .cmd shims.
- */
-function resolveM365Binary(): string {
-  const binDir = join(process.cwd(), 'node_modules', '.bin')
-
-  // Bun on Windows: .exe
-  const localExe = join(binDir, 'm365.exe')
-  if (existsSync(localExe)) return localExe
-
-  // npm/yarn on Windows: .cmd shim
-  const localCmd = join(binDir, 'm365.cmd')
-  if (existsSync(localCmd)) return localCmd
-
-  // Unix / Bun .bunx
-  const localBunx = join(binDir, 'm365.bunx')
-  if (existsSync(localBunx)) return localBunx
-
-  // Plain binary (Unix)
-  const localBin = join(binDir, 'm365')
-  if (existsSync(localBin)) return localBin
-
-  // Fallback to global PATH
-  return 'm365'
+/** Resolve the m365 binary; null when only an unsafe .cmd/.bat shim exists. */
+function resolveM365Binary(): string | null {
+  return resolveCliBinary('m365')
 }
 
 // ─── Core ───────────────────────────────────────────────────
@@ -66,7 +42,12 @@ function resolveM365Binary(): string {
 export async function checkM365Installed(): Promise<boolean> {
   if (_m365Available !== null) return _m365Available
 
-  _m365Binary = resolveM365Binary()
+  const binary = resolveM365Binary()
+  if (!binary) {
+    _m365Available = false
+    return false
+  }
+  _m365Binary = binary
 
   try {
     const proc = Bun.spawn([_m365Binary, '--version'], {
@@ -111,7 +92,7 @@ export async function executeM365<T = unknown>(
     return {
       success: false,
       data: null,
-      error: 'M365 CLI not found. Run: bun install',
+      error: 'M365 CLI not found. Run `bun install` in the smolerclaw directory (.cmd/.bat shims are refused: cmd.exe re-parses their arguments).',
       raw: '',
       duration: 0,
     }
@@ -285,7 +266,7 @@ export async function executeM365Streaming(
  */
 export function getM365Binary(): string {
   if (_m365Available === null) {
-    _m365Binary = resolveM365Binary()
+    _m365Binary = resolveM365Binary() ?? 'm365'
   }
   return _m365Binary
 }

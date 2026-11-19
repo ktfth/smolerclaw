@@ -3,18 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { parseModelString, type ProviderType } from './providers'
 
-const CLAUDE_CRED_PATH = join(homedir(), '.claude', '.credentials.json')
 const CODEX_AUTH_PATH = join(homedir(), '.codex', 'auth.json')
-
-interface ClaudeOAuth {
-  accessToken: string
-  expiresAt: number
-  subscriptionType: string
-}
-
-interface ClaudeCredentials {
-  claudeAiOauth?: ClaudeOAuth
-}
 
 interface CodexTokens {
   access_token?: string
@@ -27,12 +16,11 @@ interface CodexAuthFile {
 
 export interface AuthResult {
   provider: ProviderType
-  kind: 'subscription' | 'chatgpt' | 'api-key' | 'local'
+  kind: 'chatgpt' | 'api-key' | 'local'
   token?: string
   expiresAt: number | null
   label: string
   source: string
-  subscriptionType?: string
 }
 
 /**
@@ -87,42 +75,31 @@ export function refreshAuthForProvider(provider: ProviderType): AuthResult | nul
 /** Human-readable label for the TUI header */
 export function authLabel(auth: AuthResult | null): string {
   if (!auth) return ''
-  if (auth.provider === 'anthropic') return `sub:${auth.subscriptionType || 'pro'}`
   return auth.label
 }
 
+/**
+ * Anthropic requires an API key from the Anthropic Console. The Claude Code
+ * subscription OAuth token is deliberately not read: it is issued to Claude
+ * Code, not to third-party clients.
+ */
 function resolveClaudeAuth(): AuthResult {
-  const result = readClaudeSubscription()
-  if (result) return result
-
-  throw new Error(
-    'Claude Code subscription not found or expired.\n' +
-    'Install Claude Code with a Pro/Max subscription and run `claude` to authenticate.',
-  )
-}
-
-function readClaudeSubscription(): AuthResult | null {
-  if (!existsSync(CLAUDE_CRED_PATH)) return null
-
-  try {
-    const raw: ClaudeCredentials = JSON.parse(readFileSync(CLAUDE_CRED_PATH, 'utf-8'))
-    const oauth = raw.claudeAiOauth
-    if (!oauth?.accessToken) return null
-
-    if (Date.now() > oauth.expiresAt - 60_000) return null
-
+  const token = process.env.ANTHROPIC_API_KEY?.trim()
+  if (token) {
     return {
       provider: 'anthropic',
-      kind: 'subscription',
-      token: oauth.accessToken,
-      subscriptionType: oauth.subscriptionType,
-      expiresAt: oauth.expiresAt,
-      label: `sub:${oauth.subscriptionType || 'pro'}`,
-      source: CLAUDE_CRED_PATH,
+      kind: 'api-key',
+      token,
+      expiresAt: null,
+      label: 'api:anthropic',
+      source: 'ANTHROPIC_API_KEY',
     }
-  } catch {
-    return null
   }
+
+  throw new Error(
+    'ANTHROPIC_API_KEY not set.\n' +
+    'Create a key at https://console.anthropic.com and export ANTHROPIC_API_KEY.',
+  )
 }
 
 function resolveCodexAuth(): AuthResult {

@@ -4,12 +4,12 @@
  * Runs `gws <command>` via Bun.spawn, parses JSON output,
  * handles timeouts, and detects auth expiration.
  *
- * Resolves the gws binary from the local node_modules/.bin first,
- * falling back to the global PATH.
+ * Binary resolution never picks a .cmd/.bat shim (see utils/resolve-bin).
  */
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { resolveCliBinary } from '../utils/resolve-bin'
 import type { GwsResult } from './types'
 
 // ─── Constants ──────────────────────────────────────────────
@@ -33,30 +33,9 @@ let _gwsBinary: string = 'gws'
 
 // ─── Binary Resolution ─────────────────────────────────────
 
-/**
- * Resolve the gws binary path. Prefers local node_modules/.bin over global.
- */
-function resolveGwsBinary(): string {
-  const binDir = join(process.cwd(), 'node_modules', '.bin')
-
-  // Windows: .exe
-  const localExe = join(binDir, 'gws.exe')
-  if (existsSync(localExe)) return localExe
-
-  // Windows: .cmd shim
-  const localCmd = join(binDir, 'gws.cmd')
-  if (existsSync(localCmd)) return localCmd
-
-  // Bun .bunx
-  const localBunx = join(binDir, 'gws.bunx')
-  if (existsSync(localBunx)) return localBunx
-
-  // Plain binary (Unix)
-  const localBin = join(binDir, 'gws')
-  if (existsSync(localBin)) return localBin
-
-  // Fallback to global PATH
-  return 'gws'
+/** Resolve the gws binary; null when only an unsafe .cmd/.bat shim exists. */
+function resolveGwsBinary(): string | null {
+  return resolveCliBinary('gws')
 }
 
 // ─── Core ───────────────────────────────────────────────────
@@ -67,7 +46,12 @@ function resolveGwsBinary(): string {
 export async function checkGwsInstalled(): Promise<boolean> {
   if (_gwsAvailable !== null) return _gwsAvailable
 
-  _gwsBinary = resolveGwsBinary()
+  const binary = resolveGwsBinary()
+  if (!binary) {
+    _gwsAvailable = false
+    return false
+  }
+  _gwsBinary = binary
 
   try {
     const proc = Bun.spawn([_gwsBinary, '--version'], {
@@ -114,7 +98,7 @@ export async function executeGws<T = unknown>(
     return {
       success: false,
       data: null,
-      error: 'GWS CLI not found. Run: npm install -g @googleworkspace/cli',
+      error: 'GWS CLI not found. Run `bun install` in the smolerclaw directory (.cmd/.bat shims are refused: cmd.exe re-parses their arguments).',
       raw: '',
       duration: 0,
     }
@@ -271,7 +255,7 @@ export async function executeGwsStreaming(
  */
 export function getGwsBinary(): string {
   if (_gwsAvailable === null) {
-    _gwsBinary = resolveGwsBinary()
+    _gwsBinary = resolveGwsBinary() ?? 'gws'
   }
   return _gwsBinary
 }

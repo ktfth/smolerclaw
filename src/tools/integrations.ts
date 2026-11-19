@@ -14,10 +14,17 @@ const READ_ONLY: ReadonlySet<string> = new Set([
   'gws_list_emails', 'gws_read_email', 'gws_list_events', 'gws_list_files', 'gws_search_files', 'gws_briefing',
 ])
 
+/**
+ * Tools that deliver content to third parties immediately (no draft step).
+ * The engine denies them unless SMOLERCLAW_ALLOW_SEND=1.
+ */
+const SENDS: ReadonlySet<string> = new Set(['m365_send_email', 'gws_send_email'])
+
 function adapt(schemas: readonly Anthropic.Tool[], execute: Executor): CatalogEntry[] {
   return schemas.map((schema) => ({
     schema,
     readOnly: READ_ONLY.has(schema.name),
+    sends: SENDS.has(schema.name),
     run: async (input) =>
       fromLegacyText((await execute(schema.name, { ...input })) ?? `Error: unknown tool "${schema.name}"`),
   }))
@@ -28,5 +35,5 @@ export const INTEGRATION_TOOLS: readonly CatalogEntry[] = [
   ...adapt(GWS_TOOLS, executeGwsTool),
 ]
 
-const unknownReads = [...READ_ONLY].filter((n) => !INTEGRATION_TOOLS.some((t) => t.schema.name === n))
-if (unknownReads.length > 0) throw new Error(`Unknown read-only integration tools: ${unknownReads.join(', ')}`)
+const unknown = [...READ_ONLY, ...SENDS].filter((n) => !INTEGRATION_TOOLS.some((t) => t.schema.name === n))
+if (unknown.length > 0) throw new Error(`Unknown integration tools: ${unknown.join(', ')}`)

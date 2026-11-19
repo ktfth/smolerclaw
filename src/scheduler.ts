@@ -26,11 +26,18 @@ import {
   psSingleQuoteEscape,
 } from './utils/windows-executor'
 import { selfCommand } from './engine/self-command'
+import { capturePolicyEnv, POLICY_ENV_KEYS } from './engine/policy-env'
 
 // ─── Types ──────────────────────────────────────────────────
 
 export type ScheduleType = 'once' | 'daily' | 'weekly'
-export type JobAction = 'toast' | 'command' | 'workflow'
+/**
+ * There is deliberately no raw "command" action: jobs are recreated from
+ * jobs.json at startup, so a stored command line would be persistent code
+ * execution outside the engine's policy.
+ */
+export type JobAction = 'toast' | 'workflow'
+const JOB_ACTIONS: ReadonlySet<string> = new Set<JobAction>(['toast', 'workflow'])
 
 export interface ScheduledJob {
   id: string
@@ -43,8 +50,10 @@ export interface ScheduledJob {
   dateOrDay?: string
   /** Action type */
   action: JobAction
-  /** Message for toast, or command/workflow name */
+  /** Message for toast, or workflow name */
   target: string
+  /** Policy env pinned when a workflow job is created; the scheduled run uses exactly this. */
+  policyEnv?: Record<string, string>
   /** Whether the job is active */
   enabled: boolean
   /** Windows Task Scheduler task name */
@@ -85,10 +94,12 @@ export function initScheduler(
   _dataDir = dataDir
   _onNotify = onNotify ?? null
   if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true })
-  load()
+  const dropped = load()
 
   // Sync jobs with Windows Task Scheduler on startup
   if (IS_WINDOWS && options.sync !== false) {
+    // Legacy raw-command tasks would keep firing with no job left to remove them.
+    for (const taskName of dropped) deleteWindowsTask(taskName).catch(() => {})
     syncScheduledJobs().catch(() => {})
   }
 }
@@ -98,8 +109,8 @@ export function initScheduler(
  * @param name Human-readable name
  * @param scheduleType once, daily, or weekly
  * @param time Time in HH:MM format
- * @param action toast, command, or workflow
- * @param target Message for toast, or command/workflow to execute
+ * @param action toast or workflow
+ * @param target Message for toast, or workflow to run
  * @param dateOrDay Date (DD/MM/YYYY) for once, or day name for weekly
  */
 export async function scheduleJob(
@@ -121,6 +132,7 @@ export async function scheduleJob(
     dateOrDay,
     action,
     target: target.trim(),
+    ...(action === 'workflow' ? { policyEnv: capturePolicyEnv(process.env) } : {}),
     enabled: true,
     taskName,
     createdAt: new Date().toISOString(),
@@ -253,7 +265,7 @@ export function formatJobList(jobs: ScheduledJob[]): string {
   const lines = jobs.map((j) => {
     const status = j.enabled ? 'ativo' : 'desativado'
     const schedule = formatSchedule(j)
-    const actionIcon = j.action === 'toast' ? 'msg' : j.action === 'command' ? 'cmd' : 'wf'
+    const actionIcon = j.action === 'toast' ? 'msg' : 'wf'
     return `  [${j.id}] ${j.name} — ${schedule} [${actionIcon}] (${status})`
   })
 
@@ -543,18 +555,25 @@ function deleteToastScript(jobId: string): void {
  * Create a PowerShell script that runs a workflow through the deterministic
  * engine (`smolerclaw workflow <name>`), appending output to a per-job log.
  */
-function createWorkflowScript(jobId: string, workflowName: string): string {
+function createWorkflowScript(jobId: string, workflowName: string, policyEnv: Record<string, string>): string {
   const scriptPath = join(getScriptsDir(), `workflow_${jobId}.ps1`)
   const logDir = join(_dataDir, 'logs')
   if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true })
   const logPath = join(logDir, `workflow_${jobId}.log`)
   const quote = (s: string) => `'${psSingleQuoteEscape(s)}'`
   const invocation = [...selfCommand(), 'workflow', workflowName].map(quote).join(' ')
+  // Pin the policy captured at scheduling time; never inherit the scheduler's environment.
+  const policyLines = POLICY_ENV_KEYS.map((key) =>
+    typeof policyEnv[key] === 'string'
+      ? `$env:${key} = ${quote(policyEnv[key])}`
+      : `Remove-Item Env:${key} -ErrorAction SilentlyContinue`,
+  ).join('\n')
 
   const script = `# Workflow runner for smolerclaw
 # Job ID: ${jobId}
 # Generated: ${new Date().toISOString()}
 
+${policyLines}
 "[$(Get-Date -Format o)] start" | Out-File -FilePath ${quote(logPath)} -Append -Encoding utf8
 & ${invocation} *>> ${quote(logPath)}
 "[$(Get-Date -Format o)] exit $LASTEXITCODE" | Out-File -FilePath ${quote(logPath)} -Append -Encoding utf8
@@ -575,12 +594,9 @@ function buildTaskCommand(job: ScheduledJob): string {
     // Create a script file for the toast notification
     const scriptPath = createToastScript(job.id, 'smolerclaw', job.target)
     return `powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${scriptPath}"`
-  } else if (job.action === 'command') {
-    // Execute a command directly
-    return job.target
   } else {
     // Workflow — run it headless through the deterministic engine
-    const scriptPath = createWorkflowScript(job.id, job.target)
+    const scriptPath = createWorkflowScript(job.id, job.target, job.policyEnv ?? {})
     return `powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${scriptPath}"`
   }
 }
@@ -638,16 +654,24 @@ export async function clearAllJobs(): Promise<string> {
 
 // ─── Internal Helpers ───────────────────────────────────────
 
-function load(): void {
+/** Load jobs; returns the task names of stored jobs this version refuses to run. */
+function load(): string[] {
   const file = DATA_FILE()
   if (!existsSync(file)) {
     _jobs = []
-    return
+    return []
   }
   try {
-    _jobs = JSON.parse(readFileSync(file, 'utf-8'))
+    const parsed: unknown = JSON.parse(readFileSync(file, 'utf-8'))
+    const records = Array.isArray(parsed) ? parsed.filter((j): j is ScheduledJob => typeof j === 'object' && j !== null) : []
+    // Drop anything this version cannot run safely (e.g. legacy "command" jobs).
+    _jobs = records.filter((j) => JOB_ACTIONS.has(j.action))
+    const dropped = records.filter((j) => !JOB_ACTIONS.has(j.action) && typeof j.taskName === 'string')
+    if (dropped.length > 0) save()
+    return dropped.map((j) => j.taskName)
   } catch {
     _jobs = []
+    return []
   }
 }
 

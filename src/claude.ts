@@ -5,7 +5,7 @@ import { withRetry } from './retry'
 import { trimToContextWindow, compressToolResults, estimateTokens, needsSummary, buildSummaryRequest, summarizationPrompt } from './context-window'
 import { assessToolRisk } from './tool-safety'
 import { humanizeError } from './errors'
-import { needsApproval, type ApprovalCallback } from './approval'
+import { needsApproval, requiresExplicitConsent, type ApprovalCallback } from './approval'
 
 export class ClaudeProvider {
   readonly name = 'anthropic'
@@ -182,8 +182,19 @@ export class ClaudeProvider {
           continue
         }
 
+        const consent = requiresExplicitConsent(tc.name)
+        if (consent && !this.approvalCallback) {
+          yield { type: 'tool_blocked', id: tc.id, name: tc.name, reason: 'Sending requires interactive approval' }
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: tc.id,
+            content: 'Error: Sending to third parties requires interactive approval and none is available.',
+          })
+          continue
+        }
+
         // Check if approval is needed
-        if (!this.autoApproveAll && needsApproval(this.approvalMode, tc.name, risk.level) && this.approvalCallback) {
+        if ((consent || (!this.autoApproveAll && needsApproval(this.approvalMode, tc.name, risk.level))) && this.approvalCallback) {
           yield { type: 'tool_call', id: tc.id, name: tc.name, input: tc.input }
           const approved = await this.approvalCallback(tc.name, input, risk.level)
           if (!approved) {

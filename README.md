@@ -12,8 +12,8 @@ One binary, zero config, full TUI.
 ## Quick Start
 
 ```bash
-# 1. Authenticate with one of the supported local CLIs:
-#    - Claude Code (auto-detected from ~/.claude/.credentials.json)
+# 1. Built-in chat only (the engine, CLI and MCP need no credentials):
+#    - Claude: export ANTHROPIC_API_KEY (Anthropic Console key)
 #    - Codex CLI (auto-detected from ~/.codex/auth.json)
 #    - On interactive startup, smolerclaw can prompt you to pick Claude or Codex for the session
 
@@ -89,11 +89,11 @@ smolerclaw mcp                                  # Serve tools over MCP (stdio)
 ```
 
 - **Catalog:** the personal-management core — tasks, scheduler, people, memos, bookmarks, materials, finance and decisions, projects, email drafts, notifications, calendar, vault, Microsoft 365 and Google Workspace . Plugins run arbitrary commands, so the engine exposes one only when it is named in `SMOLERCLAW_PLUGINS=a,b`. File, shell and HTTP primitives stay in the built-in chat: an external agent such as Claude Code brings its own.
-- **Results:** every tool reports success or failure structurally, never by parsing its text. `--json` adds a `data` field with the records. Read-only tools are flagged with the MCP `readOnlyHint` annotation.
+- **Results:** every tool reports success or failure structurally, never by parsing its text. `--json` adds a `data` field with the records, and MCP returns the same records as `structuredContent.data`. Read-only tools are flagged with the MCP `readOnlyHint` annotation.
 - **Exit codes:** `0` ok, `1` tool error, `2` invalid input or unknown tool, `3` denied by policy.
-- **Policy:** dangerous operations are always denied. `SMOLERCLAW_READONLY=1` denies anything that is not a verified read. `SMOLERCLAW_ALLOW=a,b` and `SMOLERCLAW_DENY=a,b` restrict the catalog.
+- **Policy:** dangerous operations are always denied. `SMOLERCLAW_READONLY=1` denies anything that is not a verified read. `SMOLERCLAW_ALLOW=a,b` and `SMOLERCLAW_DENY=a,b` restrict the catalog. Tools that send email immediately (`m365_send_email`, `gws_send_email`) are denied unless `SMOLERCLAW_ALLOW_SEND=1`; `draft_email` stays available. Every tool input is validated against its schema, in the chat loop too.
 - **Audit:** one JSONL file per day under `<dataDir>/audit/`. Records store a SHA-256 of the canonical input, never the raw input.
-- **Scheduled workflows:** jobs with the `workflow` action run `smolerclaw workflow <name>` headless and append output to `<dataDir>/logs/`.
+- **Scheduled workflows:** jobs with the `workflow` action run `smolerclaw workflow <name>` headless and append output to `<dataDir>/logs/`. The policy variables in effect when the job is created are pinned into the job, so the scheduled run never inherits a looser environment. There is no raw-command action.
 
 ### Use with Claude Code
 
@@ -119,8 +119,8 @@ Combine with `SMOLERCLAW_READONLY=1` for unattended runs that must not change an
 /sessao start  Start work timer      /sessao stop   Stop work timer
 /relatorio     Progress report       /oportunidades List opportunities
 /clipboard     Read clipboard/OCR    /tela          Screen context
-/ps1 <script>  Run PowerShell        /refresh       Renew auth token
-/auto-refresh  Token refresh status  /plugins       List plugins
+/ps1 <script>  Run PowerShell        /refresh       Re-read credentials
+/plugins       List plugins
 /plugin install owner/repo           /plugin info   Plugin details
 /entrada 500 cat  Record income      /saida 50 cat  Record expense
 /macro vscode  Run macro             /macro list    List all macros
@@ -129,7 +129,7 @@ Combine with `SMOLERCLAW_READONLY=1` for unattended runs that must not change an
 
 ## Auth
 
-Claude Code subscription (auto-detected from `~/.claude/.credentials.json`) or Codex CLI login (auto-detected from `~/.codex/auth.json`). Interactive startup can ask whether the session should use Claude or Codex. OpenAI models now run through the OpenAI Agents SDK and can use `OPENAI_API_KEY` or a Codex-provided API key when available. Claude tokens are automatically renewed via auto-refresh. Use `/login <claude|codex>` to re-authenticate and switch provider, `/refresh` for manual validation/renewal, or `/auto-refresh` to check Claude auto-refresh status.
+Only the built-in chat needs credentials. Claude models use `ANTHROPIC_API_KEY` from the Anthropic Console; the Claude Code subscription token is not read, because it is issued to Claude Code, not to third-party clients. To use your subscription, run smolerclaw as an MCP server inside Claude Code instead. Codex uses its CLI login (`~/.codex/auth.json`). OpenAI models run through the OpenAI Agents SDK with `OPENAI_API_KEY` or a Codex-provided API key. Use `/login <claude|codex>` to switch provider and `/refresh` to re-read credentials.
 
 ## Requirements
 
@@ -152,8 +152,8 @@ Um binario, zero configuracao, TUI completa.
 ## Inicio Rapido
 
 ```bash
-# 1. Autentique um dos CLIs suportados:
-#    - Claude Code (credenciais em ~/.claude/.credentials.json)
+# 1. Só para o chat embutido (motor, CLI e MCP não precisam de credenciais):
+#    - Claude: exporte ANTHROPIC_API_KEY (chave da Console Anthropic)
 #    - Codex CLI (credenciais em ~/.codex/auth.json)
 #    - Na abertura interativa, o smolerclaw pode perguntar se a sessao vai usar Claude ou Codex
 
@@ -229,11 +229,11 @@ smolerclaw mcp                                     # Serve os tools via MCP (std
 ```
 
 - **Catálogo:** o núcleo de gestão pessoal — tarefas, agendador, pessoas, memos, bookmarks, materiais, finanças e decisões, projetos, rascunho de email, notificações, calendário, vault, Microsoft 365 e Google Workspace . Plugins executam comandos arbitrários, então o motor só expõe os que estiverem em `SMOLERCLAW_PLUGINS=a,b`. Arquivos, shell e HTTP ficam só no chat embutido: um agente externo como o Claude Code já traz os seus.
-- **Resultados:** todo tool informa sucesso ou falha de forma estruturada, nunca pela leitura do texto. `--json` inclui o campo `data` com os registros. Tools de leitura levam a anotação MCP `readOnlyHint`.
+- **Resultados:** todo tool informa sucesso ou falha de forma estruturada, nunca pela leitura do texto. `--json` inclui o campo `data` com os registros, e o MCP devolve os mesmos registros em `structuredContent.data`. Tools de leitura levam a anotação MCP `readOnlyHint`.
 - **Códigos de saída:** `0` ok, `1` erro do tool, `2` entrada inválida ou tool desconhecido, `3` negado pela política.
-- **Política:** operações perigosas são sempre negadas. `SMOLERCLAW_READONLY=1` nega tudo que não for leitura verificada. `SMOLERCLAW_ALLOW=a,b` e `SMOLERCLAW_DENY=a,b` restringem o catálogo.
+- **Política:** operações perigosas são sempre negadas. `SMOLERCLAW_READONLY=1` nega tudo que não for leitura verificada. `SMOLERCLAW_ALLOW=a,b` e `SMOLERCLAW_DENY=a,b` restringem o catálogo. Tools que enviam email na hora (`m365_send_email`, `gws_send_email`) são negados sem `SMOLERCLAW_ALLOW_SEND=1`; `draft_email` continua liberado. Toda entrada é validada contra o schema, inclusive no chat.
 - **Auditoria:** um arquivo JSONL por dia em `<dataDir>/audit/`. Os registros guardam o SHA-256 da entrada canônica, nunca a entrada bruta.
-- **Workflows agendados:** jobs com ação `workflow` rodam `smolerclaw workflow <nome>` sem interface e gravam a saída em `<dataDir>/logs/`.
+- **Workflows agendados:** jobs com ação `workflow` rodam `smolerclaw workflow <nome>` sem interface e gravam a saída em `<dataDir>/logs/`. As variáveis de política vigentes na criação ficam fixadas no job, então a execução agendada nunca herda um ambiente mais permissivo. Não existe ação de comando cru.
 
 ### Uso com o Claude Code
 
@@ -259,8 +259,8 @@ Combine com `SMOLERCLAW_READONLY=1` para execuções desassistidas que não pode
 /sessao start  Iniciar timer         /sessao stop   Parar timer
 /relatorio     Relatorio progresso   /oportunidades Listar oportunidades
 /area          Ler clipboard/OCR     /tela          Contexto de tela
-/ps1 <script>  Executar PowerShell   /refresh       Renovar token auth
-/auto-refresh  Status auto-refresh   /plugins       Listar plugins
+/ps1 <script>  Executar PowerShell   /refresh       Reler credenciais
+/plugins       Listar plugins
 /plugin install owner/repo           /plugin info   Detalhes plugin
 /entrada 500 cat  Registrar entrada  /saida 50 cat  Registrar saida
 /macro vscode  Executar macro        /macro list    Listar macros
@@ -269,7 +269,7 @@ Combine com `SMOLERCLAW_READONLY=1` para execuções desassistidas que não pode
 
 ## Autenticacao
 
-Assinatura Claude Code (detectada automaticamente de `~/.claude/.credentials.json`) ou login do Codex CLI (detectado automaticamente de `~/.codex/auth.json`). Na abertura interativa, o app pode perguntar se a sessao deve usar Claude ou Codex. Modelos OpenAI agora usam o OpenAI Agents SDK e podem reutilizar `OPENAI_API_KEY` ou uma chave provida pelo login do Codex quando disponivel. O token do Claude e renovado automaticamente via auto-refresh. Use `/login <claude|codex>` para autenticar e trocar o provider, `/refresh` para validacao/renovacao manual ou `/auto-refresh` para ver o status do Claude.
+Só o chat embutido precisa de credenciais. Modelos Claude usam `ANTHROPIC_API_KEY` da Console Anthropic; o token da assinatura do Claude Code não é lido, porque é emitido para o Claude Code e não para clientes de terceiros. Para usar a assinatura, rode o smolerclaw como servidor MCP dentro do Claude Code. O Codex usa o login do CLI (`~/.codex/auth.json`). Modelos OpenAI usam o OpenAI Agents SDK com `OPENAI_API_KEY` ou a chave provida pelo Codex. Use `/login <claude|codex>` para trocar o provider e `/refresh` para reler as credenciais.
 
 ## Requisitos
 

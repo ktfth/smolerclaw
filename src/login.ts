@@ -48,11 +48,13 @@ export async function loginWithProvider(provider: LoginProvider, force = false):
     }
   }
 
-  const cmd = provider === 'anthropic'
-    ? ['claude', 'auth', 'login']
-    : ['codex', 'login']
+  if (provider === 'anthropic') {
+    // API-key auth has no interactive login; resolve again to surface the setup message.
+    resolveAuthForProvider(provider)
+    return
+  }
 
-  const proc = Bun.spawn(cmd, {
+  const proc = Bun.spawn(['codex', 'login'], {
     stdin: 'inherit',
     stdout: 'inherit',
     stderr: 'inherit',

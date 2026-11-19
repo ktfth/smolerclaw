@@ -28,8 +28,7 @@ export async function bootstrapEngine(
   initCoreModules(config.dataDir)
 
   const policy = policyFromEnv(env)
-  // Plugins execute arbitrary commands: opt in by name, separately from the catalog lists.
-  const allowedPlugins = new Set((env.SMOLERCLAW_PLUGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean))
+  const allowedPlugins = new Set(policy.plugins)
   const engine = createEngine({
     catalog: () => engineCatalog(allowedPlugins),
     execute: executeToolResult,

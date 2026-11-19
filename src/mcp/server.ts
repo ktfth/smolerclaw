@@ -27,6 +27,8 @@ export function createMcpServer(engine: Engine, version: string): Server {
     const result = await engine.invoke(request.params.name, request.params.arguments ?? {})
     return {
       content: [{ type: 'text' as const, text: result.output }],
+      // structuredContent must be an object; records travel under "data".
+      ...(result.ok && result.data !== undefined ? { structuredContent: { data: result.data } } : {}),
       isError: !result.ok,
     }
   })
