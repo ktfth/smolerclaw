@@ -17,8 +17,7 @@ import { formatApprovalPrompt, formatEditDiff } from '../approval'
 import { generateBriefing, getTimeContext, type TimeContext } from '../briefing'
 import { stopTasks, addTask, completeTask, removeTask, listTasks, formatTaskList, parseTime, type Task } from '../tasks'
 import { addPerson, findPerson, listPeople, logInteraction, delegateTask, getDelegations, getPendingFollowUps, markFollowUpDone, formatPeopleList, formatPersonDetail, formatDelegationList, formatFollowUps, generatePeopleDashboard, type PersonGroup } from '../people'
-import { saveMemo, searchMemos, listMemos, deleteMemo, formatMemoList, formatMemoDetail, formatMemoTags } from '../memos'
-import { saveMaterial, searchMaterials, listMaterials, deleteMaterial, updateMaterial, getMaterial, formatMaterialList, formatMaterialDetail, formatMaterialCategories } from '../materials'
+import { addNote, getNote, deleteNote, listNotes, searchNotes, noteCategories, formatNoteList, formatNoteDetail, formatNoteTags } from '../notes'
 import { isFirstRunToday, markMorningDone, generateMorningBriefing } from '../morning'
 import { openEmailDraft, formatDraftPreview } from '../email'
 import { startPomodoro, stopPomodoro, pomodoroStatus, stopPomodoroTimer } from '../pomodoro'
@@ -1622,20 +1621,18 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
       break
     }
 
-    // ── Memo commands ─────────────────────────────────────
+    // ── Note commands (memos, links and references share one store) ──
 
     case 'memo':
     case 'anotar':
     case 'note': {
       const text = args.join(' ')
       if (!text) {
-        // Show recent memos
-        const memos = listMemos()
-        ctx.tui.showSystem(formatMemoList(memos))
+        ctx.tui.showSystem(formatNoteList(listNotes({ kind: 'memo' })))
         break
       }
-      const memo = saveMemo(text)
-      const tagStr = memo.tags.length > 0 ? ` [${memo.tags.map((t: string) => '#' + t).join(' ')}]` : ''
+      const memo = addNote({ kind: 'memo', body: text })
+      const tagStr = memo.tags.length > 0 ? ` [${memo.tags.map((t) => '#' + t).join(' ')}]` : ''
       ctx.tui.showSystem(`Memo salvo${tagStr}  {${memo.id}}`)
       break
     }
@@ -1643,54 +1640,47 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
     case 'memos':
     case 'notas': {
       const query = args.join(' ')
-      if (query) {
-        const results = searchMemos(query)
-        ctx.tui.showSystem(formatMemoList(results))
-      } else {
-        const memos = listMemos()
-        ctx.tui.showSystem(formatMemoList(memos))
-      }
+      ctx.tui.showSystem(formatNoteList(query ? searchNotes(query) : listNotes()))
       break
     }
 
     case 'memotags':
     case 'tags': {
-      ctx.tui.showSystem(formatMemoTags())
+      ctx.tui.showSystem(formatNoteTags())
       break
     }
 
     case 'rmmemo':
-    case 'rmnota': {
+    case 'rmnota':
+    case 'rmmat':
+    case 'rmmaterial': {
       const id = args[0]
       if (!id) {
-        ctx.tui.showError('Uso: /rmmemo <id>')
+        ctx.tui.showError('Uso: /rmnota <id>')
         break
       }
-      if (deleteMemo(id)) {
-        ctx.tui.showSystem('Memo removido.')
+      if (deleteNote(id)) {
+        ctx.tui.showSystem('Nota removida.')
       } else {
-        ctx.tui.showError(`Memo nao encontrado: ${id}`)
+        ctx.tui.showError(`Nota nao encontrada: ${id}`)
       }
       break
     }
-
-    // ── Material commands ───────────────────────────────��───
 
     case 'material':
     case 'mat': {
       const text = args.join(' ')
       if (!text) {
-        const mats = listMaterials(10)
-        ctx.tui.showSystem(formatMaterialList(mats))
+        ctx.tui.showSystem(formatNoteList(listNotes({ kind: 'reference', limit: 10 })))
         break
       }
-      // Check if it's a detail view (ID-like: 6 alphanumeric chars)
-      if (/^[a-z0-9]{6}$/.test(text)) {
-        const mat = getMaterial(text)
-        if (mat) {
-          ctx.tui.showSystem(formatMaterialDetail(mat))
+      // A single ID-like token shows that note in full.
+      if (/^[a-z0-9]{6,8}$/.test(text)) {
+        const note = getNote(text)
+        if (note) {
+          ctx.tui.showSystem(formatNoteDetail(note))
         } else {
-          ctx.tui.showError(`Material nao encontrado: ${text}`)
+          ctx.tui.showError(`Nota nao encontrada: ${text}`)
         }
         break
       }
@@ -1706,8 +1696,8 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
         ctx.tui.showError('Titulo e conteudo sao obrigatorios.')
         break
       }
-      const mat = saveMaterial(title, content)
-      const tagStr = mat.tags.length > 0 ? ` [${mat.tags.map((t: string) => '#' + t).join(' ')}]` : ''
+      const mat = addNote({ kind: 'reference', title, body: content, category: 'geral' })
+      const tagStr = mat.tags.length > 0 ? ` [${mat.tags.map((t) => '#' + t).join(' ')}]` : ''
       ctx.tui.showSystem(`Material salvo: "${mat.title}" (${mat.category})${tagStr}  {${mat.id}}`)
       break
     }
@@ -1715,34 +1705,16 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
     case 'materials':
     case 'materiais': {
       const query = args.join(' ')
-      if (query) {
-        const results = searchMaterials(query)
-        ctx.tui.showSystem(formatMaterialList(results))
-      } else {
-        const mats = listMaterials()
-        ctx.tui.showSystem(formatMaterialList(mats))
-      }
+      ctx.tui.showSystem(formatNoteList(query
+        ? searchNotes(query, { kind: 'reference' })
+        : listNotes({ kind: 'reference' })))
       break
     }
 
     case 'matcats':
     case 'categorias': {
-      ctx.tui.showSystem(formatMaterialCategories())
-      break
-    }
-
-    case 'rmmat':
-    case 'rmmaterial': {
-      const id = args[0]
-      if (!id) {
-        ctx.tui.showError('Uso: /rmmat <id>')
-        break
-      }
-      if (deleteMaterial(id)) {
-        ctx.tui.showSystem('Material removido.')
-      } else {
-        ctx.tui.showError(`Material nao encontrado: ${id}`)
-      }
+      const cats = noteCategories('reference')
+      ctx.tui.showSystem(cats.length ? cats.map((c) => `  @${c.category} (${c.count})`).join('\n') : 'Nenhuma categoria.')
       break
     }
 

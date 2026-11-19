@@ -1,6 +1,6 @@
 import { SessionManager } from '../session'
 import { loadSkills, buildSystemPrompt } from '../skills'
-import { buildMaterialsContext } from '../materials'
+import { buildReferenceContext } from '../notes'
 import type { loadPlugins } from '../plugins'
 import type { loadConfig } from '../config'
 import { registerToolCatalog } from './tools'
@@ -31,7 +31,7 @@ export async function initSession(
   const plugins = await registerToolCatalog(config.dataDir)
 
   // Append materials context to system prompt so the AI knows about saved reference materials
-  const materialsCtx = buildMaterialsContext()
+  const materialsCtx = buildReferenceContext()
   const activeSystemPrompt = materialsCtx ? `${systemPrompt}\n\n${materialsCtx}` : systemPrompt
 
   return {

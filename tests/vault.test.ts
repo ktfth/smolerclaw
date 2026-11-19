@@ -94,7 +94,7 @@ describe('Vault — Core', () => {
   // ─── Checksum Tracking ─────────────────────────────────
 
   test('atomicWriteFile updates checksum for tracked files', () => {
-    const path = join(TEST_DIR, 'memos.json')
+    const path = join(TEST_DIR, 'tasks.json')
     const data = JSON.stringify([{ id: '1', content: 'test' }])
     atomicWriteFile(path, data)
 
@@ -103,7 +103,7 @@ describe('Vault — Core', () => {
     expect(existsSync(checksumFile)).toBe(true)
 
     const store = JSON.parse(readFileSync(checksumFile, 'utf-8'))
-    const record = store.checksums.find((c: { file: string }) => c.file === 'memos.json')
+    const record = store.checksums.find((c: { file: string }) => c.file === 'tasks.json')
     expect(record).toBeTruthy()
     expect(record.sha256).toBe(createHash('sha256').update(data).digest('hex'))
   })
@@ -130,51 +130,51 @@ describe('Vault — Core', () => {
   })
 
   test('getVaultStatus reports existing files', () => {
-    writeJson(join(TEST_DIR, 'memos.json'), [])
+    writeJson(join(TEST_DIR, 'tasks.json'), [])
     writeJson(join(TEST_DIR, 'tasks.json'), [])
 
     const status = getVaultStatus()
-    const memos = status.files.find((f) => f.file === 'memos.json')
+    const memos = status.files.find((f) => f.file === 'tasks.json')
     expect(memos).toBeTruthy()
     expect(memos!.exists).toBe(true)
     expect(memos!.size).toBeGreaterThan(0)
   })
 
   test('getVaultStatus detects checksum validity', () => {
-    const path = join(TEST_DIR, 'memos.json')
+    const path = join(TEST_DIR, 'tasks.json')
     atomicWriteFile(path, '[]') // tracked file -> checksum saved
 
     const status = getVaultStatus()
-    const memos = status.files.find((f) => f.file === 'memos.json')
+    const memos = status.files.find((f) => f.file === 'tasks.json')
     expect(memos).toBeTruthy()
     expect(memos!.checksumValid).toBe(true)
   })
 
   test('getVaultStatus detects corrupted checksum', () => {
-    const path = join(TEST_DIR, 'memos.json')
+    const path = join(TEST_DIR, 'tasks.json')
     atomicWriteFile(path, '[]') // saves checksum for '[]'
 
     // Externally modify file without updating checksum
     writeFileSync(path, '[{"modified": true}]')
 
     const status = getVaultStatus()
-    const memos = status.files.find((f) => f.file === 'memos.json')
+    const memos = status.files.find((f) => f.file === 'tasks.json')
     expect(memos).toBeTruthy()
     // Checksum won't match since file was modified externally
     expect(memos!.checksumValid).toBe(false)
   })
 
   test('formatVaultStatus produces readable output', () => {
-    atomicWriteFile(join(TEST_DIR, 'memos.json'), '[]')
+    atomicWriteFile(join(TEST_DIR, 'tasks.json'), '[]')
     const status = getVaultStatus()
     const text = formatVaultStatus(status)
     expect(text).toContain('Vault Status')
     expect(text).toContain('Integridade')
-    expect(text).toContain('memos.json')
+    expect(text).toContain('tasks.json')
   })
 
   test('getVaultStatus shows corruptFiles count 0 when all good', () => {
-    atomicWriteFile(join(TEST_DIR, 'memos.json'), '[]')
+    atomicWriteFile(join(TEST_DIR, 'tasks.json'), '[]')
     atomicWriteFile(join(TEST_DIR, 'tasks.json'), '[]')
     const status = getVaultStatus()
     expect(status.corruptFiles).toBe(0)
@@ -183,13 +183,13 @@ describe('Vault — Core', () => {
   // ─── Checksums persist across re-init ──────────────────
 
   test('checksums persist across re-init', () => {
-    atomicWriteFile(join(TEST_DIR, 'memos.json'), '["data"]')
+    atomicWriteFile(join(TEST_DIR, 'tasks.json'), '["data"]')
 
     // Re-init
     initVault(TEST_DIR, CONFIG_DIR)
 
     const status = getVaultStatus()
-    const memos = status.files.find((f) => f.file === 'memos.json')
+    const memos = status.files.find((f) => f.file === 'tasks.json')
     expect(memos!.checksumValid).toBe(true)
   })
 })
@@ -225,7 +225,7 @@ describe('Vault — Shadow Backup', () => {
     await initShadowBackup()
 
     // Create some data
-    atomicWriteFile(join(TEST_DIR, 'memos.json'), JSON.stringify([{ id: '1' }]))
+    atomicWriteFile(join(TEST_DIR, 'tasks.json'), JSON.stringify([{ id: '1' }]))
     atomicWriteFile(join(TEST_DIR, 'tasks.json'), JSON.stringify([]))
 
     const result = await performBackup('test backup')
@@ -237,7 +237,7 @@ describe('Vault — Shadow Backup', () => {
     await initShadowBackup()
 
     // First backup
-    atomicWriteFile(join(TEST_DIR, 'memos.json'), '[]')
+    atomicWriteFile(join(TEST_DIR, 'tasks.json'), '[]')
     await performBackup('first')
 
     // Second backup with no changes
@@ -254,7 +254,7 @@ describe('Vault — Shadow Backup', () => {
 
   test('vault status reflects backup state after init', async () => {
     await initShadowBackup()
-    atomicWriteFile(join(TEST_DIR, 'memos.json'), '[]')
+    atomicWriteFile(join(TEST_DIR, 'tasks.json'), '[]')
     await performBackup()
 
     // Re-init to pick up backup state

@@ -1,7 +1,6 @@
 import { initVault, initShadowBackup, startAutoBackup } from '../vault'
 import { initPeople } from '../people'
-import { initMemos } from '../memos'
-import { initMaterials } from '../materials'
+import { initNotes } from '../notes'
 import { initFinance } from '../finance'
 import { initFinanceGuard } from '../finance-guard'
 import { initBrCompany } from '../br-company'
@@ -10,7 +9,6 @@ import { initPomodoro } from '../pomodoro'
 import { initWorkflows } from '../workflows'
 import { initMacros } from '../macros'
 import { initProjects } from '../projects'
-import { initBookmarks } from '../bookmarks'
 import { initMonitor } from '../monitor'
 import { initScheduler } from '../scheduler'
 import { initTasks, type Task } from '../tasks'
@@ -30,8 +28,7 @@ export function initCoreModules(dataDir: string): void {
 
   initVault(dataDir, getConfigPath().replace(/[/\\]config\.json$/, ''))
   initPeople(dataDir)
-  initMemos(dataDir)
-  initMaterials(dataDir)
+  initNotes(dataDir)
   initFinance(dataDir)
   initFinanceGuard()
   initBrCompany(dataDir)
@@ -39,7 +36,6 @@ export function initCoreModules(dataDir: string): void {
   initWorkflows(dataDir)
   initMacros(dataDir)
   initProjects(dataDir)
-  initBookmarks(dataDir)
   // Headless modes need scheduler storage too; Windows task sync stays TUI-only.
   initScheduler(dataDir, undefined, { sync: false })
   initTasks(dataDir, () => {}) // no-op notifier for headless modes; TUI overrides later

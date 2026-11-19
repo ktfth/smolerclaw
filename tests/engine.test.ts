@@ -132,7 +132,7 @@ describe('policy', () => {
 describe('tool-safety read-only classification', () => {
   test('known reads are safe, state-changing tools are not', () => {
     expect(assessToolRisk('list_tasks', {}).level).toBe('safe')
-    expect(assessToolRisk('search_memos', {}).level).toBe('safe')
+    expect(assessToolRisk('search_notes', {}).level).toBe('safe')
     expect(assessToolRisk('check_energy', {}).level).toBe('moderate')
     expect(assessToolRisk('create_task', {}).level).toBe('moderate')
     expect(assessToolRisk('create_task', {}).reason).toBe('changes state: create_task')

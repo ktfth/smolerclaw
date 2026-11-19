@@ -82,13 +82,13 @@ The engine runs tools without any model in the loop and needs no credentials. Ev
 ```bash
 smolerclaw tools [--json]                       # List the tool catalog
 smolerclaw run create_task '{"title":"Pay rent"}' # Invoke one tool directly
-echo '{"query":"rent"}' | smolerclaw run search_memos -   # Input from stdin
+echo '{"query":"rent"}' | smolerclaw run search_notes -   # Input from stdin
 smolerclaw run list_tasks --json                # Structured result
 smolerclaw workflow iniciar-dia                 # Run a saved workflow
 smolerclaw mcp                                  # Serve tools over MCP (stdio)
 ```
 
-- **Catalog:** the personal-management core — tasks, scheduler, people, memos, bookmarks, materials, finance and decisions, projects, email drafts, notifications, calendar, vault, Microsoft 365 and Google Workspace . Plugins run arbitrary commands, so the engine exposes one only when it is named in `SMOLERCLAW_PLUGINS=a,b`. File, shell and HTTP primitives stay in the built-in chat: an external agent such as Claude Code brings its own.
+- **Catalog:** the personal-management core — tasks, scheduler, people, notes, finance and decisions, projects, email drafts, notifications, calendar, vault, Microsoft 365 and Google Workspace. Notes (memos, links and reference material) share one SQLite store, `notes.db`; on first start the old `memos.json`, `bookmarks.json` and `materials.json` are imported once and renamed to `*.migrated.json`. Plugins run arbitrary commands, so the engine exposes one only when it is named in `SMOLERCLAW_PLUGINS=a,b`. File, shell and HTTP primitives stay in the built-in chat: an external agent such as Claude Code brings its own.
 - **Results:** every tool reports success or failure structurally, never by parsing its text. `--json` adds a `data` field with the records, and MCP returns the same records as `structuredContent.data`. Read-only tools are flagged with the MCP `readOnlyHint` annotation.
 - **Exit codes:** `0` ok, `1` tool error, `2` invalid input or unknown tool, `3` denied by policy.
 - **Policy:** dangerous operations are always denied. `SMOLERCLAW_READONLY=1` denies anything that is not a verified read. `SMOLERCLAW_ALLOW=a,b` and `SMOLERCLAW_DENY=a,b` restrict the catalog. Tools that send email immediately (`m365_send_email`, `gws_send_email`) are denied unless `SMOLERCLAW_ALLOW_SEND=1`; `draft_email` stays available. Every tool input is validated against its schema, in the chat loop too.
@@ -222,13 +222,13 @@ O motor executa tools sem nenhum modelo no circuito e não precisa de credenciai
 ```bash
 smolerclaw tools [--json]                          # Lista o catálogo de tools
 smolerclaw run create_task '{"title":"Pagar aluguel"}' # Invoca um tool direto
-echo '{"query":"aluguel"}' | smolerclaw run search_memos -   # Entrada via stdin
+echo '{"query":"aluguel"}' | smolerclaw run search_notes -   # Entrada via stdin
 smolerclaw run list_tasks --json                   # Resultado estruturado
 smolerclaw workflow iniciar-dia                    # Roda um workflow salvo
 smolerclaw mcp                                     # Serve os tools via MCP (stdio)
 ```
 
-- **Catálogo:** o núcleo de gestão pessoal — tarefas, agendador, pessoas, memos, bookmarks, materiais, finanças e decisões, projetos, rascunho de email, notificações, calendário, vault, Microsoft 365 e Google Workspace . Plugins executam comandos arbitrários, então o motor só expõe os que estiverem em `SMOLERCLAW_PLUGINS=a,b`. Arquivos, shell e HTTP ficam só no chat embutido: um agente externo como o Claude Code já traz os seus.
+- **Catálogo:** o núcleo de gestão pessoal — tarefas, agendador, pessoas, notas, finanças e decisões, projetos, rascunho de email, notificações, calendário, vault, Microsoft 365 e Google Workspace. Notas (memos, links e materiais de referência) ficam num único store SQLite, `notes.db`; na primeira execução os antigos `memos.json`, `bookmarks.json` e `materials.json` são importados uma vez e renomeados para `*.migrated.json`. Plugins executam comandos arbitrários, então o motor só expõe os que estiverem em `SMOLERCLAW_PLUGINS=a,b`. Arquivos, shell e HTTP ficam só no chat embutido: um agente externo como o Claude Code já traz os seus.
 - **Resultados:** todo tool informa sucesso ou falha de forma estruturada, nunca pela leitura do texto. `--json` inclui o campo `data` com os registros, e o MCP devolve os mesmos registros em `structuredContent.data`. Tools de leitura levam a anotação MCP `readOnlyHint`.
 - **Códigos de saída:** `0` ok, `1` erro do tool, `2` entrada inválida ou tool desconhecido, `3` negado pela política.
 - **Política:** operações perigosas são sempre negadas. `SMOLERCLAW_READONLY=1` nega tudo que não for leitura verificada. `SMOLERCLAW_ALLOW=a,b` e `SMOLERCLAW_DENY=a,b` restringem o catálogo. Tools que enviam email na hora (`m365_send_email`, `gws_send_email`) são negados sem `SMOLERCLAW_ALLOW_SEND=1`; `draft_email` continua liberado. Toda entrada é validada contra o schema, inclusive no chat.

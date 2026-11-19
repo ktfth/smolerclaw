@@ -6,9 +6,7 @@ import type { CatalogEntry } from '../../core/result'
 import { TASK_TOOLS } from './tasks'
 import { SCHEDULER_TOOLS } from './scheduler'
 import { PEOPLE_TOOLS } from './people'
-import { MEMO_TOOLS } from './memos'
-import { BOOKMARK_TOOLS } from './bookmarks'
-import { MATERIAL_TOOLS } from './materials'
+import { NOTE_TOOLS } from './notes'
 import { FINANCE_TOOLS } from './finance'
 import { PROJECT_TOOLS } from './projects'
 import { COMMS_TOOLS } from './comms'
@@ -18,9 +16,7 @@ export const DOMAIN_TOOLS: readonly CatalogEntry[] = [
   ...TASK_TOOLS,
   ...SCHEDULER_TOOLS,
   ...PEOPLE_TOOLS,
-  ...MEMO_TOOLS,
-  ...BOOKMARK_TOOLS,
-  ...MATERIAL_TOOLS,
+  ...NOTE_TOOLS,
   ...FINANCE_TOOLS,
   ...PROJECT_TOOLS,
   ...COMMS_TOOLS,

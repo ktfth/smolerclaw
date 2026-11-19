@@ -20,6 +20,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { eventBus } from './core/event-bus'
 import type { FileSavedEvent, TaskCompletedEvent } from './types'
 import { ok, fail, type ToolResult } from './core/result'
+import { exportNotesSnapshot } from './notes'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -60,8 +61,6 @@ const BACKUP_BRANCH = 'smolerclaw-backup'
 // Files to track checksums for (relative to dataDir)
 const TRACKED_FILES = [
   'config.json',
-  'memos.json',
-  'materials.json',
   'decisions.json',
   'tasks.json',
   'finance.json',
@@ -383,6 +382,10 @@ export async function performBackup(message?: string): Promise<ToolResult> {
       if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true })
       writeFileSync(dest, readFileSync(src, 'utf-8'))
     }
+
+    // Notes live in SQLite; back them up as a JSON snapshot.
+    const notes = exportNotesSnapshot()
+    if (notes !== null) writeFileSync(join(_backupDir, 'notes.json'), notes)
 
     // Also copy config
     const configFile = join(_configDir, 'config.json')

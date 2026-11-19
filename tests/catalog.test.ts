@@ -7,7 +7,7 @@ import { TOOLS, engineCatalog, executeToolResult, executeTool } from '../src/too
 import { READ_ONLY_TOOL_NAMES, CATALOG_TOOL_NAMES } from '../src/tools/read-only'
 import { initPeople } from '../src/people'
 import { initTasks } from '../src/tasks'
-import { initMemos } from '../src/memos'
+import { initNotes, closeNotes } from '../src/notes'
 
 const WORKSTATION = ['read_file', 'write_file', 'edit_file', 'search_files', 'find_files', 'list_directory', 'run_command', 'fetch_url']
 const schema = (name: string) => ({ name, description: name, input_schema: { type: 'object' as const, properties: {} } })
@@ -58,7 +58,7 @@ describe('catalog', () => {
     const names = engineCatalog().map((t) => t.name)
     expect(new Set(names).size).toBe(names.length)
     expect(names.length).toBe(CATALOG_TOOL_NAMES.size)
-    for (const core of ['create_task', 'list_people', 'save_memo', 'record_transaction', 'schedule_job', 'gws_list_emails']) {
+    for (const core of ['create_task', 'list_people', 'save_note', 'record_transaction', 'schedule_job', 'gws_list_emails']) {
       expect(names).toContain(core)
     }
     for (const cut of ['open_map', 'pitwall_benchmark', 'docker_status', 'get_news', 'check_energy', 'propose_plan']) {
@@ -98,7 +98,8 @@ describe('domain handlers report failure structurally', () => {
     const dir = mkdtempSync(join(tmpdir(), 'smolerclaw-catalog-'))
     initPeople(dir)
     initTasks(dir, () => {})
-    initMemos(dir)
+    closeNotes()
+    initNotes(dir)
   })
 
   test('not-found results are failures, not successes', async () => {
