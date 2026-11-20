@@ -263,8 +263,8 @@ export function startSession(projectId: string, notes: string = '', now: Date = 
   const project = _projects.find((p) => p.id === projectId)
   if (!project) return null
 
-  // Close any open session for this project
-  endOpenSessions(projectId, now)
+  // One person, one timer: starting here closes whatever is still running.
+  endOpenSessions(now)
 
   const session: WorkSession = {
     id: genId(),
@@ -329,17 +329,19 @@ function formatSpan(minutes: number): string {
   return `${Math.floor(minutes / 60)}h`
 }
 
-function endOpenSessions(projectId: string, now: Date): void {
-  _sessions = _sessions.map((s) => (s.projectId === projectId && !s.endedAt ? closeSession(s, now) : s))
+function endOpenSessions(now: Date): void {
+  _sessions = _sessions.map((s) => (s.endedAt ? s : closeSession(s, now)))
   saveSessions()
 }
 
+/**
+ * The open session for a project, or the most recent open one overall.
+ * Data written before the one-timer rule may still hold several.
+ */
 export function getOpenSession(projectId?: string): WorkSession | null {
-  return (
-    _sessions.find(
-      (s) => !s.endedAt && (projectId ? s.projectId === projectId : true),
-    ) || null
-  )
+  const open = _sessions.filter((s) => !s.endedAt && (projectId ? s.projectId === projectId : true))
+  if (open.length === 0) return null
+  return open.reduce((latest, s) => (s.startedAt > latest.startedAt ? s : latest))
 }
 
 export function getSessionsForPeriod(

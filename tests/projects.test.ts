@@ -549,3 +549,41 @@ describe('Work sessions — duration cap', () => {
     expect(stale.stale).toBe(true)
   })
 })
+
+describe('Work sessions — one timer at a time', () => {
+  const MIN = 60_000
+
+  beforeEach(() => {
+    cleanup()
+    mkdirSync(TEST_DIR, { recursive: true })
+    initProjects(TEST_DIR)
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  test('starting a session in another project closes the open one', () => {
+    const a = addProject('a', '/a')
+    const b = addProject('b', '/b')
+    const first = startSession(a.id)!
+    const later = new Date(Date.parse(first.startedAt) + 40 * MIN)
+    startSession(b.id, '', later)
+
+    expect(getOpenSession(a.id)).toBeNull()
+    expect(getOpenSession(b.id)).toBeTruthy()
+    const closed = getSessionsForPeriod(a.id, new Date(0), later).find((x) => x.id === first.id)!
+    expect(closed.durationMinutes).toBe(40)
+  })
+
+  test('getOpenSession without a project returns the most recent open session', () => {
+    const a = addProject('a', '/a')
+    const b = addProject('b', '/b')
+    writeFileSync(join(TEST_DIR, 'work-sessions.json'), JSON.stringify([
+      { id: 'old', projectId: a.id, startedAt: '2026-04-08T16:00:00.000Z', endedAt: null, durationMinutes: 0, notes: '' },
+      { id: 'new', projectId: b.id, startedAt: '2026-11-20T17:00:00.000Z', endedAt: null, durationMinutes: 0, notes: '' },
+    ]))
+    initProjects(TEST_DIR)
+    expect(getOpenSession()!.id).toBe('new')
+  })
+})

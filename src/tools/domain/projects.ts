@@ -1,6 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import {
-  setActiveProject, getActiveProject, addProject, listProjects,
+  setActiveProject, getActiveProject, getProject, addProject, listProjects,
   startSession, endSession, getOpenSession, openSessionStatus, MAX_SESSION_MINUTES,
   addOpportunity, updateOpportunityStatus, listOpportunities,
   generateWorkReport, autoDetectProject, checkProjectPath,
@@ -133,6 +133,10 @@ function clock(d: Date): string {
   return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }
 
+function projectName(projectId: string): string {
+  return getProject(projectId)?.name ?? projectId
+}
+
 function workSession(action: unknown, notes: string): ToolResult {
   const active = getActiveProject()
   if (!active) return fail(NO_ACTIVE_PROJECT)
@@ -144,19 +148,20 @@ function workSession(action: unknown, notes: string): ToolResult {
       return ok(`Sessão iniciada para "${active.name}" às ${clock(new Date())}. [${session.id}]`, session)
     }
     case 'stop': {
-      const open = getOpenSession(active.id)
-      if (!open) return fail('Nenhuma sessão aberta para este projeto.')
+      // The timer may be running on another project: stop it wherever it is.
+      const open = getOpenSession(active.id) ?? getOpenSession()
+      if (!open) return fail('Nenhuma sessão aberta.')
       const ended = endSession(open.id, notes)
       if (!ended) return fail('Erro ao encerrar sessão.')
       const capNote = ended.capped ? ` A sessão ficou aberta além de ${MAX_SESSION_MINUTES / 60}h e foi registrada no teto.` : ''
-      return ok(`Sessão encerrada: ${ended.durationMinutes} minutos trabalhados em "${active.name}".${capNote}`, ended)
+      return ok(`Sessão encerrada: ${ended.durationMinutes} minutos trabalhados em "${projectName(open.projectId)}".${capNote}`, ended)
     }
     case 'status': {
-      const open = getOpenSession(active.id)
-      if (!open) return ok(`Nenhuma sessão aberta para "${active.name}".`, null)
+      const open = getOpenSession(active.id) ?? getOpenSession()
+      if (!open) return ok(`Nenhuma sessão aberta (projeto ativo: "${active.name}").`, null)
       const status = openSessionStatus(open)
       const staleNote = status.stale ? ` Aberta há mais de ${MAX_SESSION_MINUTES / 60}h: provavelmente esquecida; ao encerrar, conta ${MAX_SESSION_MINUTES / 60}h.` : ''
-      return ok(`Sessão aberta: "${active.name}" — ${status.elapsedMinutes} minutos (desde ${clock(new Date(open.startedAt))}).${staleNote}`, status)
+      return ok(`Sessão aberta: "${projectName(open.projectId)}" — ${status.elapsedMinutes} minutos (desde ${clock(new Date(open.startedAt))}).${staleNote}`, status)
     }
     default:
       return fail('action must be start, stop, or status.')
