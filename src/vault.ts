@@ -22,6 +22,8 @@ import type { FileSavedEvent, TaskCompletedEvent } from './types'
 import { ok, fail, type ToolResult } from './core/result'
 import { exportNotesSnapshot } from './notes'
 import { exportTasksSnapshot } from './tasks'
+import { exportFinanceSnapshot } from './finance'
+import { exportPeopleSnapshot } from './people'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -61,13 +63,11 @@ const BACKUP_BRANCH = 'smolerclaw-backup'
 
 // Files to track checksums for (relative to dataDir)
 /**
- * JSON files in the data dir. Tasks and notes live in SQLite and config in the
- * config dir; performBackup snapshots or copies those separately.
+ * JSON files in the data dir. Tasks, notes, finance and people live in SQLite and
+ * config in the config dir; performBackup snapshots or copies those separately.
  */
 const TRACKED_FILES = [
   'decisions.json',
-  'finance.json',
-  'people.json',
   'projects.json',
   'work-sessions.json',
   'opportunities.json',
@@ -411,11 +411,15 @@ export async function performBackup(message?: string): Promise<ToolResult> {
       writeFileSync(dest, readFileSync(src, 'utf-8'))
     }
 
-    // Notes and tasks live in SQLite; back them up as JSON snapshots.
+    // Notes, tasks, finance and people live in SQLite; back them up as JSON snapshots.
     const notes = exportNotesSnapshot()
     if (notes !== null) writeFileSync(join(_backupDir, 'notes.json'), notes)
     const tasks = exportTasksSnapshot()
     if (tasks !== null) writeFileSync(join(_backupDir, 'tasks.json'), tasks)
+    const finance = exportFinanceSnapshot()
+    if (finance !== null) writeFileSync(join(_backupDir, 'finance.json'), finance)
+    const people = exportPeopleSnapshot()
+    if (people !== null) writeFileSync(join(_backupDir, 'people.json'), people)
 
     // Also copy config
     const configFile = join(_configDir, 'config.json')

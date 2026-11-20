@@ -4,9 +4,10 @@ import {
   logInteraction, getInteractions, getPendingFollowUps, markFollowUpDone,
   delegateTask, updateDelegation, getDelegations,
   formatPeopleList, formatPersonDetail, formatDelegationList, formatFollowUps,
-  generatePeopleDashboard,
+  generatePeopleDashboard, exportPeopleSnapshot,
 } from '../src/people'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, existsSync } from 'node:fs'
+import { closeStore } from '../src/core/store'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -200,5 +201,58 @@ describe('people', () => {
     expect(text).toContain('PAINEL DE PESSOAS')
     expect(text).toContain('Equipe: 1')
     expect(text).toContain('Familia: 1')
+  })
+})
+
+describe('people — SQLite store', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'smolerclaw-people-'))
+    initPeople(dir)
+  })
+
+  test('people, interactions and delegations survive a restart', () => {
+    const ana = addPerson('Ana', 'equipe', 'dev')
+    const it = logInteraction('Ana', 'conversa', 'alinhamento')!
+    const dg = delegateTask('Ana', 'revisar PR')!
+    closeStore()
+    initPeople(dir)
+    expect(listPeople()).toEqual([ana])
+    expect(getInteractions('Ana')).toEqual([it])
+    expect(getDelegations('Ana')).toEqual([dg])
+  })
+
+  test('optional fields come back absent, not null', () => {
+    addPerson('Bia', 'contato')
+    closeStore()
+    initPeople(dir)
+    const bia = findPerson('Bia')!
+    expect('role' in bia).toBe(false)
+    expect('contact' in bia).toBe(false)
+    expect('notes' in bia).toBe(false)
+  })
+
+  test('removing a person removes their interactions and delegations', () => {
+    addPerson('Caio', 'equipe')
+    logInteraction('Caio', 'email', 'x')
+    delegateTask('Caio', 'y')
+    expect(removePerson('Caio')).toBe(true)
+    expect(JSON.parse(exportPeopleSnapshot()!)).toEqual({ people: [], interactions: [], delegations: [] })
+  })
+
+  test('legacy people.json is imported once and renamed', () => {
+    const legacyDir = mkdtempSync(join(tmpdir(), 'smolerclaw-people-'))
+    writeFileSync(join(legacyDir, 'people.json'), JSON.stringify({
+      people: [{ id: 'p1', name: 'Duda', group: 'familia', role: 'irmã', createdAt: '2026-04-01T00:00:00.000Z' }, { name: 42 }],
+      interactions: [{ id: 'i1', personId: 'p1', date: '2026-04-02T00:00:00.000Z', type: 'ligacao', summary: 'oi', followUpDone: false }],
+      delegations: [{ id: 'd1', personId: 'p1', task: 'comprar bolo', assignedAt: '2026-04-03T00:00:00.000Z', status: 'concluido' }],
+    }))
+    initPeople(legacyDir)
+    expect(listPeople()).toEqual([{ id: 'p1', name: 'Duda', group: 'familia', role: 'irmã', createdAt: '2026-04-01T00:00:00.000Z' }])
+    expect(getInteractions('Duda').map((i) => i.id)).toEqual(['i1'])
+    expect(getDelegations('Duda', false).map((d) => d.status)).toEqual(['concluido'])
+    expect(existsSync(join(legacyDir, 'people.json'))).toBe(false)
+    expect(existsSync(join(legacyDir, 'people.migrated.json'))).toBe(true)
   })
 })

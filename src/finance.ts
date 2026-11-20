@@ -1,11 +1,11 @@
 /**
  * Simple personal finance tracker — income/expense by category.
+ * Transactions live in the shared SQLite store; amounts are kept in cents so
+ * sums stay exact.
  */
 
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { atomicWriteFile } from './vault'
+import { ensureSchema, hasSchema, importLegacyJson, openStore, store } from './core/store'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -20,28 +20,57 @@ export interface Transaction {
 
 // ─── Storage ────────────────────────────────────────────────
 
-let _dataDir = ''
-let _transactions: Transaction[] = []
+const LEGACY_FILE = 'finance.json'
+const TYPES: ReadonlySet<string> = new Set(['entrada', 'saida'])
 
-const DATA_FILE = () => join(_dataDir, 'finance.json')
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS transactions (
+  id           TEXT PRIMARY KEY,
+  type         TEXT NOT NULL CHECK (type IN ('entrada', 'saida')),
+  amount_cents INTEGER NOT NULL CHECK (amount_cents >= 0),
+  category     TEXT NOT NULL,
+  description  TEXT NOT NULL,
+  date         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date)
+`
 
-function save(): void {
-  atomicWriteFile(DATA_FILE(), JSON.stringify(_transactions, null, 2))
+interface TransactionRow {
+  id: string
+  type: Transaction['type']
+  amount_cents: number
+  category: string
+  description: string
+  date: string
 }
 
-function load(): void {
-  const file = DATA_FILE()
-  if (!existsSync(file)) { _transactions = []; return }
-  try { _transactions = JSON.parse(readFileSync(file, 'utf-8')) }
-  catch { _transactions = [] }
+function toTransaction(row: TransactionRow): Transaction {
+  return {
+    id: row.id,
+    type: row.type,
+    amount: row.amount_cents / 100,
+    category: row.category,
+    description: row.description,
+    date: row.date,
+  }
+}
+
+function toCents(amount: number): number {
+  return Math.round(Math.abs(amount) * 100)
+}
+
+function insertTransaction(tx: Transaction): void {
+  store().query(
+    'INSERT INTO transactions (id, type, amount_cents, category, description, date) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(tx.id, tx.type, toCents(tx.amount), tx.category, tx.description, tx.date)
 }
 
 // ─── Init ───────────────────────────────────────────────────
 
 export function initFinance(dataDir: string): void {
-  _dataDir = dataDir
-  if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true })
-  load()
+  openStore(dataDir)
+  ensureSchema('finance', SCHEMA)
+  importLegacyJson(dataDir, LEGACY_FILE, importLegacyTransactions)
 }
 
 // ─── Operations ─────────────────────────────────────────────
@@ -55,22 +84,28 @@ export function addTransaction(
   const tx: Transaction = {
     id: genId(),
     type,
-    amount: Math.abs(amount),
+    amount: toCents(amount) / 100,
     category: category.toLowerCase().trim(),
     description: description.trim(),
     date: new Date().toISOString(),
   }
-  _transactions = [..._transactions, tx]
-  save()
+  insertTransaction(tx)
   return tx
 }
 
 export function removeTransaction(id: string): boolean {
-  const idx = _transactions.findIndex((t) => t.id === id)
-  if (idx === -1) return false
-  _transactions = [..._transactions.slice(0, idx), ..._transactions.slice(idx + 1)]
-  save()
-  return true
+  return store().query('DELETE FROM transactions WHERE id = ?').run(id).changes > 0
+}
+
+/** Every transaction in insertion order. */
+export function listTransactions(): Transaction[] {
+  return (store().query('SELECT * FROM transactions ORDER BY rowid').all() as TransactionRow[]).map(toTransaction)
+}
+
+/** Every transaction as pretty JSON, for the vault's git backup. Null when the store is not initialized. */
+export function exportFinanceSnapshot(): string | null {
+  if (!hasSchema('finance')) return null
+  return JSON.stringify(listTransactions(), null, 2)
 }
 
 // ─── Reports ────────────────────────────────────────────────
@@ -80,7 +115,7 @@ export function getMonthSummary(year?: number, month?: number): string {
   const y = year || now.getFullYear()
   const m = month !== undefined ? month : now.getMonth()
 
-  const monthTx = _transactions.filter((t) => {
+  const monthTx = listTransactions().filter((t) => {
     const d = new Date(t.date)
     return d.getFullYear() === y && d.getMonth() === m
   })
@@ -120,7 +155,7 @@ export function getMonthSummary(year?: number, month?: number): string {
 }
 
 export function getRecentTransactions(limit = 10): string {
-  const recent = [..._transactions]
+  const recent = listTransactions()
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, limit)
 
@@ -136,6 +171,34 @@ export function getRecentTransactions(limit = 10): string {
 }
 
 // ─── Helpers ────────────────────────────────────────────────
+
+function importLegacyTransactions(parsed: unknown): void {
+  if (!Array.isArray(parsed)) return
+  const taken = store().query('SELECT 1 FROM transactions WHERE id = ?')
+  for (const record of parsed) {
+    const tx = legacyTransaction(record)
+    if (!tx) continue
+    // A missing or repeated id gets a fresh one, never a dropped transaction.
+    let id = tx.id && !taken.get(tx.id) ? tx.id : genId()
+    while (taken.get(id)) id = genId()
+    insertTransaction({ ...tx, id })
+  }
+}
+
+function legacyTransaction(value: unknown): Transaction | null {
+  if (!value || typeof value !== 'object') return null
+  const r = value as Record<string, unknown>
+  if (typeof r.type !== 'string' || !TYPES.has(r.type)) return null
+  if (typeof r.amount !== 'number' || !Number.isFinite(r.amount)) return null
+  return {
+    id: typeof r.id === 'string' ? r.id : '',
+    type: r.type as Transaction['type'],
+    amount: Math.abs(r.amount),
+    category: typeof r.category === 'string' ? r.category : 'geral',
+    description: typeof r.description === 'string' ? r.description : '',
+    date: typeof r.date === 'string' && !Number.isNaN(Date.parse(r.date)) ? r.date : new Date().toISOString(),
+  }
+}
 
 function genId(): string {
   return randomUUID().slice(0, 8)

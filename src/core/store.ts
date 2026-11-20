@@ -6,7 +6,7 @@
  * busy_timeout makes a second writer wait its turn instead of failing.
  */
 import { Database } from 'bun:sqlite'
-import { existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { logger } from './logger'
 
@@ -92,6 +92,35 @@ export function migrateOnce(name: string, apply: (db: Database) => void): boolea
     db.query('INSERT INTO migrations (name, applied_at) VALUES (?, ?)').run(name, new Date().toISOString())
     return true
   }).immediate()
+}
+
+/**
+ * Import a legacy JSON file into the store once. `apply` receives the parsed
+ * content inside the migration transaction. The file is renamed to
+ * *.migrated.json only after the rows are committed, never deleted; an
+ * unreadable file is left untouched for manual recovery.
+ */
+export function importLegacyJson(dataDir: string, file: string, apply: (parsed: unknown, db: Database) => void): void {
+  const name = `legacy:${file}`
+  if (store().query('SELECT 1 FROM migrations WHERE name = ?').get(name)) return
+  const path = join(dataDir, file)
+  if (!existsSync(path)) return
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf-8'))
+  } catch (err) {
+    logger.warn('Legacy file is unreadable; skipped', { file, error: err })
+    return
+  }
+
+  if (!migrateOnce(name, (db) => apply(parsed, db))) return
+  try {
+    renameSync(path, path.replace(/\.json$/, '.migrated.json'))
+  } catch (err) {
+    // Rows are committed and the migration recorded; a locked file only stays in place.
+    logger.warn('Could not rename migrated file', { file, error: err })
+  }
 }
 
 /**
