@@ -29,6 +29,7 @@ export interface Task {
   createdAt: string          // ISO 8601 datetime
   done: boolean
   notified: boolean          // whether the notification was already sent
+  projectId: string | null   // linked project, null = personal / unlinked
 }
 
 // ─── Storage ────────────────────────────────────────────────
@@ -49,7 +50,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   due_at     TEXT,
   created_at TEXT NOT NULL,
   done       INTEGER NOT NULL DEFAULT 0 CHECK (done IN (0, 1)),
-  notified   INTEGER NOT NULL DEFAULT 0 CHECK (notified IN (0, 1))
+  notified   INTEGER NOT NULL DEFAULT 0 CHECK (notified IN (0, 1)),
+  project_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(done, notified, due_at);
 `
@@ -61,6 +63,7 @@ interface TaskRow {
   created_at: string
   done: number
   notified: number
+  project_id: string | null
 }
 
 function toTask(row: TaskRow): Task {
@@ -71,18 +74,19 @@ function toTask(row: TaskRow): Task {
     createdAt: row.created_at,
     done: row.done === 1,
     notified: row.notified === 1,
+    projectId: row.project_id ?? null,
   }
 }
 
 /** Rows in insertion order, like the JSON array they replace. */
-function selectTasks(where = ''): Task[] {
-  return (store().query(`SELECT * FROM tasks ${where} ORDER BY rowid`).all() as TaskRow[]).map(toTask)
+function selectTasks(where = '', ...params: string[]): Task[] {
+  return (store().query(`SELECT * FROM tasks ${where} ORDER BY rowid`).all(...params) as TaskRow[]).map(toTask)
 }
 
 function insertTask(task: Task): void {
   store().query(
-    'INSERT INTO tasks (id, title, due_at, created_at, done, notified) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(task.id, task.title, task.dueAt, task.createdAt, task.done ? 1 : 0, task.notified ? 1 : 0)
+    'INSERT INTO tasks (id, title, due_at, created_at, done, notified, project_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  ).run(task.id, task.title, task.dueAt, task.createdAt, task.done ? 1 : 0, task.notified ? 1 : 0, task.projectId)
 }
 
 /** First task matching the id or containing the text in its title. */
@@ -102,6 +106,7 @@ export function initTasks(dataDir: string, onNotify: (task: Task) => void): void
   _onNotify = onNotify
   openStore(dataDir)
   ensureSchema('tasks', SCHEMA)
+  addProjectColumn()
   migrateLegacyJson(dataDir)
 
   // Start background checker for in-process notifications
@@ -126,7 +131,7 @@ export function stopTasks(): void {
 /**
  * Add a new task with optional due time.
  */
-export function addTask(title: string, dueAt?: Date): Task {
+export function addTask(title: string, dueAt?: Date, projectId?: string): Task {
   const task: Task = {
     id: generateId(),
     title: title.trim(),
@@ -134,6 +139,7 @@ export function addTask(title: string, dueAt?: Date): Task {
     createdAt: new Date().toISOString(),
     done: false,
     notified: false,
+    projectId: projectId ?? null,
   }
   insertTask(task)
 
@@ -182,10 +188,12 @@ export function removeTask(idOrTitle: string): boolean {
 }
 
 /**
- * List all tasks, optionally filtering by done status.
+ * List tasks, optionally including done ones and limited to one project.
  */
-export function listTasks(showDone = false): Task[] {
-  return selectTasks(showDone ? '' : 'WHERE done = 0')
+export function listTasks(showDone = false, projectId?: string): Task[] {
+  const clauses = [showDone ? '' : 'done = 0', projectId ? 'project_id = ?' : ''].filter(Boolean)
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
+  return projectId ? selectTasks(where, projectId) : selectTasks(where)
 }
 
 /**
@@ -451,7 +459,16 @@ function legacyTask(value: unknown): Task | null {
     createdAt: typeof r.createdAt === 'string' ? r.createdAt : new Date().toISOString(),
     done: r.done === true,
     notified: r.notified === true,
+    projectId: null,
   }
+}
+
+/** Stores created before project links lack the column; add it once. */
+function addProjectColumn(): void {
+  migrateOnce('tasks-project-id', (db) => {
+    const columns = db.query('PRAGMA table_info(tasks)').all() as { name: string }[]
+    if (!columns.some((c) => c.name === 'project_id')) db.run('ALTER TABLE tasks ADD COLUMN project_id TEXT')
+  })
 }
 
 /**

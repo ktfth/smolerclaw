@@ -7,6 +7,7 @@ import { TOOLS, engineCatalog, executeToolResult, executeTool } from '../src/too
 import { READ_ONLY_TOOL_NAMES, CATALOG_TOOL_NAMES } from '../src/tools/read-only'
 import { initPeople } from '../src/people'
 import { initTasks } from '../src/tasks'
+import { initProjects, addProject, setActiveProject } from '../src/projects'
 import { initNotes, closeNotes } from '../src/notes'
 
 const WORKSTATION = ['read_file', 'write_file', 'edit_file', 'search_files', 'find_files', 'list_directory', 'run_command', 'fetch_url']
@@ -124,5 +125,38 @@ describe('domain handlers report failure structurally', () => {
   test('chat entry point renders failures with the Error: prefix', async () => {
     expect(await executeTool('find_person_info', { name_or_id: 'ninguem' })).toBe('Error: Pessoa não encontrada: "ninguem"')
     expect(await executeTool('nope', {})).toBe('Error: unknown tool "nope"')
+  })
+})
+
+describe('task tools — project link', () => {
+  let projectId: string
+
+  beforeEach(() => {
+    const dir = mkdtempSync(join(tmpdir(), 'smolerclaw-catalog-'))
+    initTasks(dir, () => {})
+    initProjects(dir)
+    projectId = addProject('harness', dir).id
+  })
+
+  test('create_task links a project by name', async () => {
+    const created = await executeToolResult('create_task', { title: 'corrigir bug', project: 'harness' })
+    expect(created.ok && (created.data as { projectId: string }).projectId).toBe(projectId)
+  })
+
+  test('create_task accepts "ativo" for the active project', async () => {
+    setActiveProject(projectId)
+    const created = await executeToolResult('create_task', { title: 'x', project: 'ativo' })
+    expect(created.ok && (created.data as { projectId: string }).projectId).toBe(projectId)
+  })
+
+  test('create_task fails for an unknown project', async () => {
+    expect((await executeToolResult('create_task', { title: 'x', project: 'nenhum' })).ok).toBe(false)
+  })
+
+  test('list_tasks filters by project', async () => {
+    await executeToolResult('create_task', { title: 'do projeto', project: 'harness' })
+    await executeToolResult('create_task', { title: 'pessoal' })
+    const listed = await executeToolResult('list_tasks', { project: 'harness' })
+    expect(listed.ok && (listed.data as { title: string }[]).map((t) => t.title)).toEqual(['do projeto'])
   })
 })

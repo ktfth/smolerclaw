@@ -1,6 +1,8 @@
 import { describe, test, expect, beforeEach } from 'bun:test'
 import { initTasks, stopTasks, addTask, completeTask, removeTask, listTasks, formatTaskList, parseTime } from '../src/tasks'
 import { mkdtempSync } from 'node:fs'
+import { Database } from 'bun:sqlite'
+import { closeStore } from '../src/core/store'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -148,5 +150,40 @@ describe('parseTime', () => {
   test('returns null for invalid input', () => {
     expect(parseTime('hello world')).toBeNull()
     expect(parseTime('')).toBeNull()
+  })
+})
+
+describe('tasks — project link', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'smolerclaw-test-'))
+    initTasks(tmpDir, () => {})
+  })
+
+  test('addTask stores an optional project id', () => {
+    expect(addTask('sem projeto').projectId).toBeNull()
+    expect(addTask('com projeto', undefined, 'p1').projectId).toBe('p1')
+  })
+
+  test('listTasks filters by project', () => {
+    addTask('a', undefined, 'p1')
+    addTask('b', undefined, 'p2')
+    addTask('c')
+    expect(listTasks(false, 'p1').map((t) => t.title)).toEqual(['a'])
+    expect(listTasks(false).length).toBe(3)
+  })
+
+  test('a store created before project links gains the column and keeps its rows', () => {
+    const legacyDir = mkdtempSync(join(tmpdir(), 'smolerclaw-test-'))
+    closeStore()
+    const db = new Database(join(legacyDir, 'smolerclaw.db'), { create: true })
+    db.run('CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, due_at TEXT, created_at TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0, notified INTEGER NOT NULL DEFAULT 0)')
+    db.run("INSERT INTO tasks (id, title, created_at) VALUES ('old', 'antiga', '2026-04-01T00:00:00.000Z')")
+    db.close()
+
+    initTasks(legacyDir, () => {})
+    expect(listTasks()).toEqual([expect.objectContaining({ id: 'old', title: 'antiga', projectId: null })])
+    expect(addTask('nova', undefined, 'p1').projectId).toBe('p1')
   })
 })
