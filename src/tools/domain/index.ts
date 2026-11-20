@@ -11,6 +11,7 @@ import { FINANCE_TOOLS } from './finance'
 import { PROJECT_TOOLS } from './projects'
 import { COMMS_TOOLS } from './comms'
 import { VAULT_TOOLS } from './vault'
+import { OBSIDIAN_TOOLS } from './obsidian'
 
 export const DOMAIN_TOOLS: readonly CatalogEntry[] = [
   ...TASK_TOOLS,
@@ -21,4 +22,5 @@ export const DOMAIN_TOOLS: readonly CatalogEntry[] = [
   ...PROJECT_TOOLS,
   ...COMMS_TOOLS,
   ...VAULT_TOOLS,
+  ...OBSIDIAN_TOOLS,
 ]

@@ -12,7 +12,8 @@ import { initProjects } from '../projects'
 import { initMonitor } from '../monitor'
 import { initScheduler } from '../scheduler'
 import { initTasks, type Task } from '../tasks'
-import { getConfigPath } from '../config'
+import { getConfigPath, loadConfig } from '../config'
+import { initObsidian } from '../obsidian'
 import type { TUI } from '../tui'
 
 let _coreInitialized = false
@@ -39,6 +40,8 @@ export function initCoreModules(dataDir: string): void {
   // Headless modes need scheduler storage too; Windows task sync stays TUI-only.
   initScheduler(dataDir, undefined, { sync: false })
   initTasks(dataDir, () => {}) // no-op notifier for headless modes; TUI overrides later
+  // Last: the mirror projects notes and tasks, so their stores must be open.
+  initObsidian(process.env.SMOLERCLAW_OBSIDIAN_VAULT?.trim() || loadConfig().obsidianVault)
 }
 
 /**

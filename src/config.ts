@@ -28,6 +28,7 @@ const DEFAULTS: SmolerclawConfig = {
   toolApproval: 'auto',
   language: 'auto',
   maxSessionCost: 0,
+  obsidianVault: '',
 }
 
 function ensureDir(dir: string): void {
@@ -90,6 +91,9 @@ function validateConfig(config: Record<string, unknown>): SmolerclawConfig {
   }
   if (typeof config.maxSessionCost === 'number' && config.maxSessionCost >= 0) {
     validated.maxSessionCost = config.maxSessionCost
+  }
+  if (typeof config.obsidianVault === 'string') {
+    validated.obsidianVault = config.obsidianVault
   }
 
   return validated

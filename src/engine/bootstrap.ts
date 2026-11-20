@@ -8,6 +8,7 @@ import { initCoreModules } from '../init/modules'
 import { createEngine, type Engine } from './engine'
 import { policyFromEnv } from './policy'
 import { createFileAuditSink } from './audit'
+import { createJournalSink, obsidianVault, teeAudit } from '../obsidian'
 
 export interface EngineRuntime {
   engine: Engine
@@ -33,7 +34,10 @@ export async function bootstrapEngine(
     catalog: () => engineCatalog(allowedPlugins),
     execute: executeToolResult,
     policy,
-    audit: createFileAuditSink(join(config.dataDir, 'audit')),
+    audit: teeAudit(
+      createFileAuditSink(join(config.dataDir, 'audit')),
+      createJournalSink(obsidianVault, (name) => READ_ONLY_TOOL_NAMES.has(name)),
+    ),
     isReadOnly: (name) => READ_ONLY_TOOL_NAMES.has(name),
   })
 

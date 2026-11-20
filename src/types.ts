@@ -55,6 +55,7 @@ export interface SmolerclawConfig {
   toolApproval: ToolApprovalMode
   language: string
   maxSessionCost: number // max cost in cents per session. 0 = unlimited
+  obsidianVault: string // Obsidian vault to mirror into; "" = off. SMOLERCLAW_OBSIDIAN_VAULT wins.
 }
 
 export type ToolApprovalMode = 'auto' | 'confirm-writes' | 'confirm-all'

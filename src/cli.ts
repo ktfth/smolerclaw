@@ -132,6 +132,7 @@ Deterministic engine (no model, no credentials):
 
   Policy env: SMOLERCLAW_READONLY=1, SMOLERCLAW_ALLOW=a,b, SMOLERCLAW_DENY=a,b,
               SMOLERCLAW_ALLOW_SEND=1, SMOLERCLAW_PLUGINS=a,b
+  Obsidian:   SMOLERCLAW_OBSIDIAN_VAULT=<vault> mirrors notes and tasks into <vault>/smolerclaw
 
 Options:
   -h, --help           Show this help

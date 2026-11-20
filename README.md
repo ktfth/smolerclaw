@@ -105,6 +105,21 @@ claude mcp add smolerclaw -- smolerclaw mcp
 
 Combine with `SMOLERCLAW_READONLY=1` for unattended runs that must not change anything.
 
+### Obsidian mirror
+
+Point `SMOLERCLAW_OBSIDIAN_VAULT` (or `obsidianVault` in `config.json`) at an Obsidian vault and smolerclaw keeps a `smolerclaw/` folder inside it. Nothing outside that folder is read or written.
+
+```
+smolerclaw/
+  Painel.md        pending tasks, recent notes, today's activity
+  Tarefas.md       tick [x] to complete; a new "- [ ] ..." line becomes a task
+  Notas/           one file per note (memo/, link/, referência/<category>/)
+  Diário/<date>.md what the engine did: tool, outcome — never the input
+  Inbox/           a file dropped here becomes a note
+```
+
+SQLite stays the source of truth. Every successful write refreshes the mirror; `obsidian_sync` (`smolerclaw run obsidian_sync`) pulls your edits back first: edited notes, Inbox files, ticked or new tasks. A file you edited is never overwritten. When both sides changed, the database wins and your version is kept as `<note>.conflito.md`. Deleting a file never deletes data; set `deletar: true` in its frontmatter instead. Moving or renaming files is fine: notes are tracked by the `id` in their frontmatter. `obsidian_status` lists pending edits, Inbox files and conflicts.
+
 ## TUI Commands
 
 ```
@@ -244,6 +259,21 @@ claude mcp add smolerclaw -- smolerclaw mcp
 ```
 
 Combine com `SMOLERCLAW_READONLY=1` para execuções desassistidas que não podem alterar nada.
+
+### Espelho no Obsidian
+
+Aponte `SMOLERCLAW_OBSIDIAN_VAULT` (ou `obsidianVault` no `config.json`) para um vault do Obsidian e o smolerclaw mantém uma pasta `smolerclaw/` dentro dele. Nada fora dessa pasta é lido ou escrito.
+
+```
+smolerclaw/
+  Painel.md        tarefas pendentes, notas recentes, atividade do dia
+  Tarefas.md       marque [x] para concluir; uma linha nova "- [ ] ..." vira tarefa
+  Notas/           um arquivo por nota (memo/, link/, referência/<categoria>/)
+  Diário/<data>.md o que o motor fez: tool e resultado — nunca o input
+  Inbox/           arquivo colocado aqui vira nota
+```
+
+O SQLite continua sendo a fonte da verdade. Toda escrita bem-sucedida atualiza o espelho; `obsidian_sync` (`smolerclaw run obsidian_sync`) primeiro traz suas edições de volta: notas editadas, arquivos da Inbox, tarefas marcadas ou novas. Arquivo que você editou nunca é sobrescrito. Quando os dois lados mudaram, o banco vence e a sua versão fica como `<nota>.conflito.md`. Apagar um arquivo nunca apaga dados; use `deletar: true` no frontmatter. Mover ou renomear arquivos não tem problema: as notas são rastreadas pelo `id` do frontmatter. `obsidian_status` lista edições pendentes, Inbox e conflitos.
 
 ## Comandos na TUI
 
