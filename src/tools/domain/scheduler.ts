@@ -136,7 +136,7 @@ const HANDLERS: Record<string, ToolHandler> = {
     const ref = requireText(input, 'reference')
     if (!ref) return fail('reference is required.')
     const job = await enableJob(ref)
-    return job ? ok(`Agendamento "${job.name}" ativado.`, job) : fail(`Agendamento não encontrado ou já ativo: "${ref}"`)
+    return job ? ok(`Agendamento "${job.name}" ativado.`, job) : fail(`Agendamento não encontrado, já ativo ou com data vencida: "${ref}"`)
   },
   disable_scheduled_job: async (input) => {
     const ref = requireText(input, 'reference')

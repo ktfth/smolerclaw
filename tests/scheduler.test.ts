@@ -4,8 +4,9 @@ import {
   listJobs, getJob,
   formatJobList, formatJobDetail,
   parseScheduleTime, parseScheduleDate, parseWeekDay,
+  expireOnceJobs, onceJobRunAt, enableJob,
 } from '../src/scheduler'
-import { mkdtempSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -252,5 +253,53 @@ describe('formatJobDetail', () => {
     expect(result).toContain('Meeting reminder')
     expect(result).toContain('ativo')
     expect(result).toContain('Smolerclaw_abc12345')
+  })
+})
+
+describe('scheduler — expired one-shot jobs', () => {
+  let tmpDir: string
+
+  const job = (id: string, scheduleType: 'once' | 'daily', dateOrDay: string | undefined, time = '09:00') => ({
+    id, name: id, scheduleType, time, dateOrDay, action: 'toast', target: id, enabled: true,
+    taskName: `Smolerclaw_${id}`, createdAt: '2026-03-31T00:00:00.000Z', updatedAt: '2026-03-31T00:00:00.000Z',
+  })
+
+  function seed(jobs: unknown[]): void {
+    tmpDir = mkdtempSync(join(tmpdir(), 'smolerclaw-scheduler-test-'))
+    writeFileSync(join(tmpDir, 'scheduler.json'), JSON.stringify(jobs))
+  }
+
+  test('onceJobRunAt reads the stored MM/DD/YYYY date in local time', () => {
+    const at = onceJobRunAt(job('a', 'once', '04/07/2026', '09:30'))!
+    expect([at.getFullYear(), at.getMonth(), at.getDate(), at.getHours(), at.getMinutes()]).toEqual([2026, 3, 7, 9, 30])
+  })
+
+  test('onceJobRunAt is null for recurring or malformed jobs', () => {
+    expect(onceJobRunAt(job('d', 'daily', undefined))).toBeNull()
+    expect(onceJobRunAt(job('x', 'once', 'amanha'))).toBeNull()
+  })
+
+  test('expireOnceJobs disables only one-shot jobs whose time has passed', () => {
+    seed([job('past', 'once', '01/01/2099'), job('future', 'once', '12/31/2099'), job('daily', 'daily', undefined)])
+    initScheduler(tmpDir, undefined, { sync: false })
+    const expired = expireOnceJobs(new Date(2099, 5, 1, 12, 0), false)
+    expect(expired.map((j) => j.id)).toEqual(['past'])
+    expect(listJobs().map((j) => j.id)).toEqual(['future', 'daily'])
+    expect(getJob('past')!.enabled).toBe(false)
+  })
+
+  test('initScheduler expires past one-shot jobs on load and persists it', () => {
+    seed([job('past', 'once', '03/31/2026')])
+    initScheduler(tmpDir, undefined, { sync: false })
+    expect(listJobs()).toEqual([])
+    const stored = JSON.parse(readFileSync(join(tmpDir, 'scheduler.json'), 'utf-8'))
+    expect(stored[0].enabled).toBe(false)
+  })
+
+  test('enableJob refuses a one-shot job whose time has passed', async () => {
+    seed([{ ...job('past', 'once', '03/31/2026'), enabled: false }])
+    initScheduler(tmpDir, undefined, { sync: false })
+    expect(await enableJob('past')).toBeNull()
+    expect(getJob('past')!.enabled).toBe(false)
   })
 })

@@ -46,7 +46,7 @@ export interface ScheduledJob {
   scheduleType: ScheduleType
   /** Time in HH:MM format */
   time: string
-  /** Date in DD/MM/YYYY format (for 'once') or day of week (for 'weekly') */
+  /** Date as MM/DD/YYYY, the schtasks format (for 'once'), or day of week (for 'weekly') */
   dateOrDay?: string
   /** Action type */
   action: JobAction
@@ -95,6 +95,8 @@ export function initScheduler(
   _onNotify = onNotify ?? null
   if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true })
   const dropped = load()
+  // Headless runs only flip the flag; a syncing start also removes the spent Windows tasks.
+  expireOnceJobs(new Date(), IS_WINDOWS && options.sync !== false)
 
   // Sync jobs with Windows Task Scheduler on startup
   if (IS_WINDOWS && options.sync !== false) {
@@ -178,7 +180,7 @@ export async function removeJob(idOrName: string): Promise<boolean> {
  */
 export async function enableJob(idOrName: string): Promise<ScheduledJob | null> {
   const job = findJob(idOrName)
-  if (!job || job.enabled) return null
+  if (!job || job.enabled || isExpired(job, new Date())) return null
 
   // Recreate Windows task
   if (IS_WINDOWS) {
@@ -193,6 +195,39 @@ export async function enableJob(idOrName: string): Promise<ScheduledJob | null> 
   save()
 
   return _jobs.find((j) => j.id === job.id) ?? null
+}
+
+/** When a one-shot job fires (local time), or null for recurring or malformed jobs. */
+export function onceJobRunAt(job: Pick<ScheduledJob, 'scheduleType' | 'dateOrDay' | 'time'>): Date | null {
+  if (job.scheduleType !== 'once' || !job.dateOrDay) return null
+  const date = job.dateOrDay.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+  const time = job.time.match(/^(\d{2}):(\d{2})$/)
+  if (!date || !time) return null
+  const at = new Date(Number(date[3]), Number(date[1]) - 1, Number(date[2]), Number(time[1]), Number(time[2]))
+  return Number.isNaN(at.getTime()) ? null : at
+}
+
+function isExpired(job: ScheduledJob, now: Date): boolean {
+  const at = onceJobRunAt(job)
+  return at !== null && at.getTime() < now.getTime()
+}
+
+/**
+ * Disable enabled one-shot jobs whose time has passed: they already fired
+ * (or were missed) and must not be recreated in the Task Scheduler.
+ * Returns the jobs it disabled.
+ */
+export function expireOnceJobs(now: Date = new Date(), removeWindowsTasks: boolean = IS_WINDOWS): ScheduledJob[] {
+  const expired = _jobs.filter((j) => j.enabled && isExpired(j, now))
+  if (expired.length === 0) return []
+  const ids = new Set(expired.map((j) => j.id))
+  const stamp = now.toISOString()
+  _jobs = _jobs.map((j) => (ids.has(j.id) ? { ...j, enabled: false, updatedAt: stamp } : j))
+  save()
+  if (removeWindowsTasks) {
+    for (const job of expired) deleteWindowsTask(job.taskName, job.id).catch(() => {})
+  }
+  return _jobs.filter((j) => ids.has(j.id))
 }
 
 /**
