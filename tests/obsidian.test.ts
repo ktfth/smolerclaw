@@ -7,7 +7,7 @@ import { initTasks, addTask, listTasks } from '../src/tasks'
 import { resolveVault, ownedPath, type VaultRoot } from '../src/obsidian/paths'
 import { push, pull, status, pendingChanges } from '../src/obsidian/sync'
 import { slugify, parseFile, renderNote, renderTasks, parseTasks, defaultNotePath } from '../src/obsidian/markdown'
-import { createJournalSink, journalLine, teeAudit } from '../src/obsidian/journal'
+import { appendJournal, createJournalSink, journalLine, teeAudit } from '../src/obsidian/journal'
 import { initObsidian } from '../src/obsidian'
 import { executeToolResult } from '../src/tools'
 import type { AuditRecord } from '../src/engine/audit'
@@ -424,5 +424,29 @@ describe('pull mode', () => {
     expect(pendingChanges(vr)).toEqual({ edits: [], inbox: [] })
     write(vr, noteFile(vr, note), read(vr, noteFile(vr, note)).replace('igual', 'diferente'))
     expect(pendingChanges(vr).edits).toEqual([noteFile(vr, note)])
+  })
+})
+
+describe('panel journal embed', () => {
+  const HEADER = '# Diário smolerclaw — 2026-11-20\n\n'
+
+  test('push creates the day journal so the panel embed is never broken', () => {
+    const vr = openVault()
+    push(vr, NOW)
+    expect(read(vr, 'Diário/2026-11-20.md')).toBe(HEADER)
+  })
+
+  test('the first activity after push appends without a second header', () => {
+    const vr = openVault()
+    push(vr, NOW)
+    appendJournal(vr, NOW, '- linha\n')
+    expect(read(vr, 'Diário/2026-11-20.md')).toBe(`${HEADER}- linha\n`)
+  })
+
+  test('push leaves an existing journal untouched', () => {
+    const vr = openVault()
+    appendJournal(vr, NOW, '- antes\n')
+    push(vr, NOW)
+    expect(read(vr, 'Diário/2026-11-20.md')).toBe(`${HEADER}- antes\n`)
   })
 })

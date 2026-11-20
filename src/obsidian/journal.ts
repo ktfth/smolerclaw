@@ -53,15 +53,27 @@ export function createJournalSink(
   }
 }
 
+function journalHeader(when: Date): string {
+  return `# Diário smolerclaw — ${localDate(when)}\n\n`
+}
+
 /** Append one line to the day's journal file, creating it with a header. Never throws. */
 export function appendJournal(vr: VaultRoot, when: Date, line: string): void {
   try {
     const file = ownedPath(vr, `${JOURNAL_DIR}/${localDate(when)}.md`)
-    const header = existsSync(file) ? '' : `# Diário smolerclaw — ${localDate(when)}\n\n`
+    const header = existsSync(file) ? '' : journalHeader(when)
     appendFileSync(file, header + line)
   } catch (err) {
     process.stderr.write(`smolerclaw: journal write failed: ${err instanceof Error ? err.message : String(err)}\n`)
   }
+}
+
+/**
+ * Create the day's journal with just its header when it does not exist yet,
+ * so the panel's embed of it is never a broken link. Never throws.
+ */
+export function ensureJournal(vr: VaultRoot, when: Date): void {
+  appendJournal(vr, when, '')
 }
 
 /** Fan one audit record out to several sinks. */

@@ -16,6 +16,7 @@ import { ensureSchema, migrateOnce, store, withWriteLock } from '../core/store'
 import { addNote, deleteNote, getNote, listNotes, updateNote, NOTE_KINDS, type Note, type NotePatch } from '../notes'
 import { addTask, completeTask, listTasks, type Task } from '../tasks'
 import { isInside, ownedPath, type VaultRoot } from './paths'
+import { ensureJournal } from './journal'
 import {
   INBOX_DIR, NOTES_DIR, PANEL_FILE, TASKS_FILE,
   defaultNotePath, fieldFlag, fieldTags, fieldText, localDate, normalizeBody, parseFile, parseTasks,
@@ -313,6 +314,7 @@ function pushLocked(vr: VaultRoot, now: Date): PushReport {
     writeOwned('tasks', () => TASKS_FILE, renderTasks(pending))
     const recent = notes.slice(0, 10).map((note) => ({ note, path: files[`note:${note.id}`]?.path ?? defaultNotePath(note) }))
     writeOwned('panel', () => PANEL_FILE, renderPanel({ pending, recent, today: localDate(now) }))
+    ensureJournal(vr, now)
   } finally {
     // Whatever was written must be recorded, or the next run mistakes our own files for edits.
     saveManifest(vr, before, files, report.errors)
