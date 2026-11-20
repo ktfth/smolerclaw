@@ -6,32 +6,37 @@ import { parseModelString, assistantNameForProvider, type ProviderType } from '.
 
 export type LoginProvider = Extract<ProviderType, 'anthropic' | 'codex'>
 
+const STARTUP_CHOICES: Record<string, LoginProvider> = {
+  '2': 'anthropic', claude: 'anthropic',
+  '3': 'codex', codex: 'codex',
+}
+
 export async function promptStartupProviderSelection(currentModel: string): Promise<string | null> {
   const current = parseModelString(currentModel).provider
-  const claudeStatus = getProviderStatusLabel('anthropic')
-  const codexStatus = getProviderStatusLabel('codex')
 
-  output.write('\nSessao inicial\n')
+  output.write('\nSessão inicial\n')
   output.write(`Atual: ${assistantNameForProvider(current)} (${currentModel})\n`)
   output.write(`1. Continuar atual\n`)
-  output.write(`2. Entrar/usar Claude [${claudeStatus}]\n`)
-  output.write(`3. Entrar/usar Codex [${codexStatus}]\n`)
+  output.write(`2. Claude via API key (ANTHROPIC_API_KEY) [${getProviderStatusLabel('anthropic')}]\n`)
+  output.write(`3. Entrar/usar Codex [${getProviderStatusLabel('codex')}]\n`)
+  output.write('   Assinatura Claude: use o Claude Code com o MCP (smolerclaw mcp).\n')
 
   const rl = createInterface({ input, output })
+  // On EOF (Ctrl+D, closed pipe) a pending question never settles; treat it as "keep current".
+  const closed = new Promise<string>((resolve) => rl.once('close', () => resolve('')))
   try {
-    const answer = (await rl.question('Escolha [Enter=atual]: ')).trim().toLowerCase()
-
-    if (!answer || answer === '1') return currentModel
-    if (answer === '2' || answer === 'claude') {
-      await loginWithProvider('anthropic')
-      return defaultModelForProvider('anthropic')
+    // A failed login explains why and asks again instead of crashing the process.
+    for (;;) {
+      const answer = (await Promise.race([rl.question('Escolha [Enter=atual]: '), closed])).trim().toLowerCase()
+      const provider = STARTUP_CHOICES[answer]
+      if (!provider) return currentModel
+      try {
+        await loginWithProvider(provider)
+        return defaultModelForProvider(provider)
+      } catch (err) {
+        output.write(`\n${err instanceof Error ? err.message : String(err)}\n\n`)
+      }
     }
-    if (answer === '3' || answer === 'codex') {
-      await loginWithProvider('codex')
-      return defaultModelForProvider('codex')
-    }
-
-    return currentModel
   } finally {
     rl.close()
   }
