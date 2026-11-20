@@ -125,13 +125,19 @@ Commands:
   ui                   Launch web-based UI (browser)
 
 Deterministic engine (no model, no credentials):
-  tools [--json]               List the tool catalog
-  run <tool> [json|-] [--json] Invoke one tool directly (exit 0/1/2/3)
-  workflow <name>              Run a saved workflow
-  mcp                          Serve tools over MCP stdio (for Claude Code)
+  tools [--json] [--data-dir <dir>]
+                               List the tool catalog
+  run <tool> [json|-] [--json] [--dry-run] [--data-dir <dir>] [--timeout <ms>]
+                               Invoke one tool directly (exit 0/1/2/3)
+  workflow <name> [--json] [--dry-run] [--data-dir <dir>]
+                               Run a saved workflow under engine policy
+  mcp [--data-dir <dir>] [--dry-run] [--timeout <ms>]
+                               Serve tools over MCP stdio (for Claude Code)
 
   Policy env: SMOLERCLAW_READONLY=1, SMOLERCLAW_ALLOW=a,b, SMOLERCLAW_DENY=a,b,
-              SMOLERCLAW_ALLOW_SEND=1, SMOLERCLAW_PLUGINS=a,b
+              SMOLERCLAW_ALLOW_SEND=1, SMOLERCLAW_PLUGINS=a,b,
+              SMOLERCLAW_DATA_DIR=<dir>, SMOLERCLAW_DRY_RUN=1,
+              SMOLERCLAW_TIMEOUT_MS=<ms>, SMOLERCLAW_RUN_ID=<id>
   Obsidian:   SMOLERCLAW_OBSIDIAN_VAULT=<vault> mirrors notes and tasks into <vault>/smolerclaw
 
 Options:

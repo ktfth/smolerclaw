@@ -22,6 +22,9 @@ import {
   isProcessRunning,
   psSingleQuoteEscape,
 } from './utils/windows-executor'
+import { canonicalHash } from './engine/canonical'
+import { DEFAULT_POLICY, decideWorkflowStep, type EnginePolicy } from './engine/policy'
+import type { AuditSink } from './engine/audit'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -280,18 +283,29 @@ export async function runWorkflow(
   return (await runWorkflowOutcome(nameOrId, onStep)).text
 }
 
+export interface WorkflowExecutionContext {
+  policy?: EnginePolicy
+  audit?: AuditSink
+  runId?: string
+  caller?: string
+  dryRun?: boolean
+}
+
 export interface WorkflowOutcome {
   ok: boolean
+  denied?: boolean
   text: string
 }
 
 /**
  * Run a workflow and report success structurally (for exit codes).
  * Uses exact lookup: an unattended run must never pick a similarly named workflow.
+ * Every step is evaluated against the engine policy and recorded in the audit sink.
  */
 export async function runWorkflowOutcome(
   nameOrId: string,
   onStep?: (msg: string) => void,
+  ctx?: WorkflowExecutionContext,
 ): Promise<WorkflowOutcome> {
   const workflow = getWorkflowExact(nameOrId)
   if (!workflow) {
@@ -303,37 +317,93 @@ export async function runWorkflowOutcome(
     return { ok: false, text: `Workflow "${workflow.name}" esta desativado.` }
   }
 
-  const result = await executeSteps(workflow.name, workflow.steps, onStep)
-  return { ok: result.success, text: formatRunResult(result) }
+  const result = await executeSteps(workflow.name, workflow.steps, onStep, ctx)
+  return {
+    ok: result.success,
+    ...(result.denied ? { denied: true } : {}),
+    text: formatRunResult(result),
+  }
 }
 
 async function executeSteps(
   workflowName: string,
   steps: WorkflowStep[],
   onStep?: (msg: string) => void,
-): Promise<WorkflowRunResult> {
+  ctx?: WorkflowExecutionContext,
+): Promise<WorkflowRunResult & { denied?: boolean }> {
   const start = performance.now()
-  const log: string[] = [`Executando workflow: "${workflowName}"`]
+  const policy = ctx?.policy ?? DEFAULT_POLICY
+  const dryRun = ctx?.dryRun ?? false
+  const log: string[] = [`Executando workflow: "${workflowName}"${dryRun ? ' (dry-run)' : ''}`]
   let stepsRun = 0
   let stepsSkipped = 0
   let stepsFailed = 0
   let success = true
+  let denied = false
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]
     const label = step.label || `${step.action}:${step.target}`
     const prefix = `[${i + 1}/${steps.length}]`
     const onError = step.on_error || 'continue'
+    const stepStarted = Date.now()
+    const inputHash = canonicalHash({ workflow: workflowName, stepIndex: i, action: step.action, target: step.target })
+    const toolName = `workflow:${step.action}`
+
+    const recordAudit = (
+      decision: 'executed' | 'dry-run' | 'denied',
+      risk: string,
+      ok: boolean,
+    ) => {
+      ctx?.audit?.write({
+        ts: new Date(stepStarted).toISOString(),
+        ...(ctx.runId ? { runId: ctx.runId } : {}),
+        ...(ctx.caller ? { caller: ctx.caller } : {}),
+        tool: toolName,
+        inputHash,
+        decision,
+        risk,
+        ok,
+        durationMs: Math.max(0, Date.now() - stepStarted),
+        ...(dryRun ? { dryRun: true } : {}),
+      })
+    }
 
     onStep?.(`${prefix} ${label}...`)
 
+    const decision = decideWorkflowStep(policy, step.action, step.target)
+    if (!decision.allowed) {
+      recordAudit('denied', decision.risk, false)
+      log.push(`  ${prefix} NEGADO PELA POLITICA: ${decision.reason}`)
+      stepsFailed++
+      success = false
+      denied = true
+      return { workflow: workflowName, success, denied, stepsRun, stepsSkipped, stepsFailed, log, duration: Math.round(performance.now() - start) }
+    }
+
+    if (dryRun) {
+      recordAudit('dry-run', decision.risk, true)
+      log.push(`  ${prefix} [dry-run] ${step.action} permitido (${decision.risk})`)
+      stepsRun++
+      continue
+    }
+
     try {
-      const stepResult = await executeStep(step, onStep)
+      const stepResult = await executeStep(step, onStep, ctx)
+      recordAudit('executed', decision.risk, true)
       log.push(`  ${prefix} ${stepResult}`)
       stepsRun++
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
+      recordAudit('executed', decision.risk, false)
       stepsFailed++
+
+      if (err instanceof PolicyDeniedError) {
+        log.push(`  ${prefix} NEGADO PELA POLITICA: ${errMsg}`)
+        success = false
+        denied = true
+        return { workflow: workflowName, success, denied, stepsRun, stepsSkipped, stepsFailed, log, duration: Math.round(performance.now() - start) }
+      }
 
       switch (onError) {
         case 'stop':
@@ -355,6 +425,7 @@ async function executeSteps(
   return {
     workflow: workflowName,
     success,
+    ...(denied ? { denied: true } : {}),
     stepsRun,
     stepsSkipped,
     stepsFailed,
@@ -363,9 +434,17 @@ async function executeSteps(
   }
 }
 
+class PolicyDeniedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PolicyDeniedError'
+  }
+}
+
 async function executeStep(
   step: WorkflowStep,
   onStep?: (msg: string) => void,
+  ctx?: WorkflowExecutionContext,
 ): Promise<string> {
   switch (step.action) {
     case 'open_app': {
@@ -425,7 +504,8 @@ async function executeStep(
       const running = await isProcessRunning(appName, { timeout: 5_000 })
 
       if (running && step.condition_steps && step.condition_steps.length > 0) {
-        const subResult = await executeSteps(`${step.target}-conditional`, step.condition_steps, onStep)
+        const subResult = await executeSteps(`${step.target}-conditional`, step.condition_steps, onStep, ctx)
+        if (subResult.denied) throw new PolicyDeniedError(`sub-step denied in "${step.target}"`)
         return `Condition: ${appName} running=true, ran ${subResult.stepsRun} sub-steps`
       }
       return `Condition: ${appName} running=${running}${!running ? ' (skipped sub-steps)' : ''}`

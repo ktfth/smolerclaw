@@ -11,6 +11,7 @@ import { JOURNAL_DIR, localDate, localTime } from './markdown'
 // Keyed by string so new engine decisions degrade to their raw name instead of breaking.
 const OUTCOME: Readonly<Record<string, string>> = {
   executed: 'ok',
+  'dry-run': 'simulado (dry-run)',
   denied: 'negado pela política',
   invalid: 'entrada inválida',
   unknown: 'tool desconhecido',

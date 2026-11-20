@@ -71,4 +71,9 @@ const HANDLERS: Record<string, ToolHandler> = {
   get_calendar_events: () => getOutlookEvents(),
 }
 
-export const COMMS_TOOLS = bindTools(SCHEMAS, HANDLERS, ['get_calendar_events'])
+export const COMMS_TOOLS = bindTools(
+  SCHEMAS,
+  HANDLERS,
+  ['get_calendar_events'],
+  { openWorld: ['draft_email', 'get_calendar_events'] },
+)

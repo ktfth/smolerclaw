@@ -1,10 +1,10 @@
 import { describe, test, expect } from 'bun:test'
 import { canonicalJson, canonicalHash } from '../src/engine/canonical'
 import { InputValidator } from '../src/engine/validate'
-import { decide, isListed, policyFromEnv, capturePolicyEnv, DEFAULT_POLICY, type EnginePolicy } from '../src/engine/policy'
+import { decide, decideWorkflowStep, isListed, policyFromEnv, capturePolicyEnv, DEFAULT_POLICY, type EnginePolicy } from '../src/engine/policy'
 import { createEngine, type CatalogTool } from '../src/engine/engine'
 import type { AuditRecord } from '../src/engine/audit'
-import { exitCodeFor, isEngineCommand, splitEngineArgs } from '../src/modes/engine-mode'
+import { exitCodeFor, isEngineCommand, parseEngineArgs, splitEngineArgs } from '../src/modes/engine-mode'
 import { selfCommand } from '../src/engine/self-command'
 import { assessToolRisk } from '../src/tool-safety'
 import { ok, fail, type ToolResult } from '../src/core/result'
@@ -85,6 +85,14 @@ describe('InputValidator', () => {
     expect(validator.canValidate(broken)).toBe(false)
     expect(validator.validate(broken, { anything: true }).valid).toBe(false)
   })
+
+  test('recompiles when a tool schema reference changes', () => {
+    const v1 = { name: 'dynamic', input_schema: { type: 'object', properties: { a: { type: 'string' } }, required: ['a'] } }
+    const v2 = { name: 'dynamic', input_schema: { type: 'object', properties: { b: { type: 'number' } }, required: ['b'] } }
+    expect(validator.validate(v1, { a: 'ok' }).valid).toBe(true)
+    expect(validator.validate(v2, { a: 'ok' }).valid).toBe(false)
+    expect(validator.validate(v2, { b: 42 }).valid).toBe(true)
+  })
 })
 
 describe('policy', () => {
@@ -126,6 +134,19 @@ describe('policy', () => {
 
   test('captured policy env keeps only policy keys', () => {
     expect(capturePolicyEnv({ SMOLERCLAW_READONLY: '1', PATH: 'x', SMOLERCLAW_DENY: '' })).toEqual({ SMOLERCLAW_READONLY: '1' })
+  })
+
+  test('workflow step policy enforces read-only, dangerous commands and deny lists', () => {
+    const readonly = { ...DEFAULT_POLICY, allowModerate: false }
+    expect(decideWorkflowStep(readonly, 'log', 'hello').allowed).toBe(true)
+    expect(decideWorkflowStep(readonly, 'wait', '1').allowed).toBe(true)
+    expect(decideWorkflowStep(readonly, 'open_app', 'vscode').allowed).toBe(false)
+    expect(decideWorkflowStep(readonly, 'notify', 'hi').allowed).toBe(false)
+    expect(decideWorkflowStep(readonly, 'run_command', 'echo ok').allowed).toBe(false)
+    expect(decideWorkflowStep(DEFAULT_POLICY, 'run_command', 'rm -rf /').allowed).toBe(false)
+    expect(decideWorkflowStep(DEFAULT_POLICY, 'run_command', 'echo ok').allowed).toBe(true)
+    expect(decideWorkflowStep({ ...DEFAULT_POLICY, deny: ['run_command'] }, 'run_command', 'echo ok').allowed).toBe(false)
+    expect(decideWorkflowStep(DEFAULT_POLICY, 'unknown_step', 'x').allowed).toBe(false)
   })
 })
 
@@ -219,6 +240,48 @@ describe('engine pipeline', () => {
     })
     expect(engine.listTools().map((t) => t.name)).toEqual(['create_task', 'list_tasks'])
   })
+
+  test('dry-run validates and checks policy without executing', async () => {
+    const { engine, records, calls } = buildEngine()
+    const result = await engine.invoke('create_task', { title: 'a' }, { dryRun: true })
+    expect(result).toMatchObject({ ok: true, decision: 'dry-run', risk: 'moderate' })
+    expect(calls).toEqual([])
+    expect(records[0]).toMatchObject({ tool: 'create_task', decision: 'dry-run', ok: true, dryRun: true })
+  })
+
+  test('timeout aborts hanging tool execution cleanly', async () => {
+    const engine = createEngine({
+      catalog: () => CATALOG,
+      execute: () => new Promise(() => {}),
+      policy: DEFAULT_POLICY,
+      audit: { write: () => {} },
+      timeoutMs: 25,
+    })
+    const result = await engine.invoke('list_tasks', {})
+    expect(result.ok).toBe(false)
+    expect(result.decision).toBe('executed')
+    expect(result.output).toContain('timed out')
+  })
+
+  test('rate limit denies excess invocations and records runId/caller in audit', async () => {
+    const records: AuditRecord[] = []
+    let count = 0
+    const engine = createEngine({
+      catalog: () => CATALOG,
+      execute: async () => ok('ok'),
+      policy: DEFAULT_POLICY,
+      audit: { write: (r) => records.push(r) },
+      runId: 'run-123',
+      caller: 'mcp',
+      checkRateLimit: () => ++count <= 1,
+    })
+    expect((await engine.invoke('list_tasks', {})).ok).toBe(true)
+    const denied = await engine.invoke('list_tasks', {})
+    expect(denied.decision).toBe('denied')
+    expect(denied.output).toContain('rate limit')
+    expect(records[0]).toMatchObject({ runId: 'run-123', caller: 'mcp', decision: 'executed' })
+    expect(records[1]).toMatchObject({ runId: 'run-123', caller: 'mcp', decision: 'denied' })
+  })
 })
 
 describe('engine CLI helpers', () => {
@@ -236,6 +299,20 @@ describe('engine CLI helpers', () => {
     expect(splitEngineArgs(['list_tasks', '--json'])).toEqual({ asJson: true, positional: ['list_tasks'] })
     expect(splitEngineArgs(['--json', 'create_task', '{}'])).toEqual({ asJson: true, positional: ['create_task', '{}'] })
     expect(splitEngineArgs(['search_memos', '-'])).toEqual({ asJson: false, positional: ['search_memos', '-'] })
+  })
+
+  test('parseEngineArgs handles --data-dir, --dry-run and --timeout', () => {
+    expect(parseEngineArgs(['create_task', '{}', '--json', '--dry-run', '--data-dir', '/tmp/s', '--timeout=5000']))
+      .toEqual({
+        asJson: true,
+        dryRun: true,
+        dataDir: '/tmp/s',
+        timeoutMs: 5000,
+        positional: ['create_task', '{}'],
+      })
+    expect(() => parseEngineArgs(['--data-dir'])).toThrow('--data-dir requires a path')
+    expect(() => parseEngineArgs(['--timeout', '-1'])).toThrow('--timeout')
+    expect(() => parseEngineArgs(['--bogus'])).toThrow('unknown option')
   })
 
   test('recognizes engine commands only', () => {

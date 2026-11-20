@@ -16,9 +16,18 @@ export interface ToolDescriptor {
   description: string
   inputSchema: unknown
   readOnly: boolean
+  destructive: boolean
+  openWorld: boolean
 }
 
-export type InvokeDecision = 'executed' | 'denied' | 'invalid' | 'unknown'
+export type InvokeDecision = 'executed' | 'dry-run' | 'denied' | 'invalid' | 'unknown'
+
+export interface InvokeOptions {
+  /** Validate and check policy without executing the tool handler. */
+  dryRun?: boolean
+  /** Override per-invocation timeout in milliseconds (0 disables timeout). */
+  timeoutMs?: number
+}
 
 export interface InvokeResult {
   ok: boolean
@@ -42,11 +51,25 @@ export interface EngineDeps {
   clock?: () => Date
   /** Whether a tool only reads state (advertised to clients as a hint). */
   isReadOnly?: (name: string) => boolean
+  /** Whether a tool deletes data or triggers irreversible side effects. */
+  isDestructive?: (name: string) => boolean
+  /** Whether a tool interacts with external systems outside the local store. */
+  isOpenWorld?: (name: string) => boolean
+  /** Optional correlation id attached to every audit record. */
+  runId?: string
+  /** Caller surface (e.g. 'cli', 'mcp', 'scheduler') attached to audit records. */
+  caller?: string
+  /** Default dry-run mode for invocations when not overridden per call. */
+  dryRun?: boolean
+  /** Default execution timeout in milliseconds (0 or undefined = no timeout). */
+  timeoutMs?: number
+  /** Optional rate-limit check; returning false denies the invocation. */
+  checkRateLimit?: (name: string) => boolean
 }
 
 export interface Engine {
   listTools(): ToolDescriptor[]
-  invoke(name: string, input: unknown): Promise<InvokeResult>
+  invoke(name: string, input: unknown, options?: InvokeOptions): Promise<InvokeResult>
 }
 
 /**
@@ -78,13 +101,17 @@ export function createEngine(deps: EngineDeps): Engine {
         description: t.description ?? '',
         inputSchema: t.input_schema,
         readOnly: deps.isReadOnly?.(t.name) ?? false,
+        destructive: deps.isDestructive?.(t.name) ?? false,
+        openWorld: deps.isOpenWorld?.(t.name) ?? false,
       }))
   }
 
-  async function invoke(name: string, rawInput: unknown): Promise<InvokeResult> {
+  async function invoke(name: string, rawInput: unknown, options?: InvokeOptions): Promise<InvokeResult> {
     const startedAt = clock()
     const input = isRecord(rawInput) ? rawInput : {}
     const inputHash = canonicalHash(rawInput ?? null)
+    const dryRun = options?.dryRun ?? deps.dryRun ?? false
+    const timeoutMs = options?.timeoutMs ?? deps.timeoutMs ?? 0
 
     const finish = (
       decision: InvokeDecision,
@@ -96,12 +123,15 @@ export function createEngine(deps: EngineDeps): Engine {
       const durationMs = Math.max(0, clock().getTime() - startedAt.getTime())
       deps.audit.write({
         ts: startedAt.toISOString(),
+        ...(deps.runId ? { runId: deps.runId } : {}),
+        ...(deps.caller ? { caller: deps.caller } : {}),
         tool: name,
         inputHash,
         decision,
         risk,
         ok,
         durationMs,
+        ...(dryRun ? { dryRun: true } : {}),
         // Only engine-generated messages are logged: tool output and policy
         // reasons can echo raw arguments, which the audit must never store.
         ...(!ok && (decision === 'invalid' || decision === 'unknown') ? { error: output.slice(0, 500) } : {}),
@@ -134,9 +164,17 @@ export function createEngine(deps: EngineDeps): Engine {
       return finish('denied', policy.risk, false, `Error: denied by policy: ${policy.reason}`)
     }
 
+    if (deps.checkRateLimit && !deps.checkRateLimit(name)) {
+      return finish('denied', policy.risk, false, `Error: denied by policy: rate limit exceeded for "${name}"`)
+    }
+
+    if (dryRun) {
+      return finish('dry-run', policy.risk, true, `Dry run: "${name}" is valid and allowed by policy (${policy.risk})`)
+    }
+
     try {
       // Success comes from the tool's structured result, never from its text.
-      const result = await deps.execute(name, input)
+      const result = await runWithTimeout(() => deps.execute(name, input), timeoutMs, name)
       return finish('executed', policy.risk, result.ok, toChatText(result), result.ok ? result.data : undefined)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -145,6 +183,21 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   return { listTools, invoke }
+}
+
+async function runWithTimeout<T>(fn: () => Promise<T>, timeoutMs: number, toolName: string): Promise<T> {
+  if (timeoutMs <= 0) return fn()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      fn(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`tool "${toolName}" timed out after ${timeoutMs}ms`)), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -10,6 +10,7 @@ import { runInteractive } from './modes/interactive'
 import { runWebUI } from './modes/ui-mode'
 import { initI18n } from './i18n'
 import { initCoreModules } from './init/modules'
+import { obsidianSetting } from './obsidian'
 import { promptStartupProviderSelection } from './login'
 import { isEngineCommand, runEngineMode } from './modes/engine-mode'
 
@@ -78,7 +79,7 @@ async function main(): Promise<void> {
   // Initialize core data modules (vault, tasks, memory, etc.)
   // This makes all tools functional in every mode (TUI, web, print).
   // TUI-specific modules (pomodoro notifications, etc.) init later in interactive mode.
-  initCoreModules(config.dataDir)
+  initCoreModules(config.dataDir, obsidianSetting(process.env, config))
 
   // ── Web UI mode ─────────────────────────────────────────
   if (cliArgs.uiMode === 'web') {

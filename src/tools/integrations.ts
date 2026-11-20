@@ -25,6 +25,8 @@ function adapt(schemas: readonly Anthropic.Tool[], execute: Executor): CatalogEn
     schema,
     readOnly: READ_ONLY.has(schema.name),
     sends: SENDS.has(schema.name),
+    destructive: SENDS.has(schema.name),
+    openWorld: true,
     run: async (input) =>
       fromLegacyText((await execute(schema.name, { ...input })) ?? `Error: unknown tool "${schema.name}"`),
   }))

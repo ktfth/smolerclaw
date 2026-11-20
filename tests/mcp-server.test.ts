@@ -16,6 +16,11 @@ async function connect() {
         description: 'Create a task',
         input_schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] },
       },
+      {
+        name: 'delete_note',
+        description: 'Delete a note',
+        input_schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+      },
       { name: 'list_tasks', description: 'List tasks', input_schema: { type: 'object', properties: {} } },
     ],
     execute: async (_name, input) =>
@@ -23,6 +28,8 @@ async function connect() {
     policy: DEFAULT_POLICY,
     audit: { write: () => {} },
     isReadOnly: (name) => name === 'list_tasks',
+    isDestructive: (name) => name === 'delete_note',
+    isOpenWorld: (name) => name === 'delete_note',
   })
   const server = createMcpServer(engine, '0.0.0-test')
   const client = new Client({ name: 'test-client', version: '0.0.0' })
@@ -35,10 +42,11 @@ describe('MCP server', () => {
   test('lists engine tools', async () => {
     const client = await connect()
     const { tools } = await client.listTools()
-    expect(tools.map((t) => t.name)).toEqual(['create_task', 'list_tasks'])
+    expect(tools.map((t) => t.name)).toEqual(['create_task', 'delete_note', 'list_tasks'])
     expect(tools[0].inputSchema.required).toEqual(['title'])
     expect(tools[0].annotations).toBeUndefined()
-    expect(tools[1].annotations).toEqual({ readOnlyHint: true })
+    expect(tools[1].annotations).toEqual({ destructiveHint: true, openWorldHint: true })
+    expect(tools[2].annotations).toEqual({ readOnlyHint: true })
     await client.close()
   })
 

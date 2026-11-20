@@ -10,6 +10,11 @@ export { push, pull, sync, status } from './sync'
 export { createJournalSink, teeAudit } from './journal'
 export type { VaultRoot } from './paths'
 
+/** The vault to mirror: SMOLERCLAW_OBSIDIAN_VAULT wins over config `obsidianVault`. */
+export function obsidianSetting(env: Record<string, string | undefined>, config: { obsidianVault: string }): string {
+  return env.SMOLERCLAW_OBSIDIAN_VAULT?.trim() || config.obsidianVault
+}
+
 let _vault: VaultRoot | null = null
 let _error: string | null = null
 

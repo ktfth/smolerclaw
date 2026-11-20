@@ -12,20 +12,20 @@ import { initProjects } from '../projects'
 import { initMonitor } from '../monitor'
 import { initScheduler } from '../scheduler'
 import { initTasks, type Task } from '../tasks'
-import { getConfigPath, loadConfig } from '../config'
+import { getConfigPath } from '../config'
 import { initObsidian } from '../obsidian'
 import type { TUI } from '../tui'
 
-let _coreInitialized = false
+let _initializedDataDir: string | null = null
 
 /**
  * Initialize core data modules that do NOT depend on TUI.
- * Safe to call from any mode (TUI, web).
- * Idempotent — only runs once.
+ * Safe to call from any mode (TUI, web, engine).
+ * Idempotent per dataDir — reinitializes if switched to a different sandbox dir.
  */
-export function initCoreModules(dataDir: string): void {
-  if (_coreInitialized) return
-  _coreInitialized = true
+export function initCoreModules(dataDir: string, obsidianVault = ''): void {
+  if (_initializedDataDir === dataDir) return
+  _initializedDataDir = dataDir
 
   initVault(dataDir, getConfigPath().replace(/[/\\]config\.json$/, ''))
   initPeople(dataDir)
@@ -41,7 +41,7 @@ export function initCoreModules(dataDir: string): void {
   initScheduler(dataDir, undefined, { sync: false })
   initTasks(dataDir, () => {}) // no-op notifier for headless modes; TUI overrides later
   // Last: the mirror projects notes and tasks, so their stores must be open.
-  initObsidian(process.env.SMOLERCLAW_OBSIDIAN_VAULT?.trim() || loadConfig().obsidianVault)
+  initObsidian(obsidianVault)
 }
 
 /**

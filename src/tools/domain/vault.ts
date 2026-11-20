@@ -55,4 +55,9 @@ const HANDLERS: Record<string, ToolHandler> = {
   vault_init_backup: withVault(() => initShadowBackup()),
 }
 
-export const VAULT_TOOLS = bindTools(SCHEMAS, HANDLERS, ['vault_status'])
+export const VAULT_TOOLS = bindTools(
+  SCHEMAS,
+  HANDLERS,
+  ['vault_status'],
+  { openWorld: ['sync_cloud_context'] },
+)

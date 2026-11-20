@@ -15,12 +15,18 @@ export function createMcpServer(engine: Engine, version: string): Server {
   )
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: engine.listTools().map((t) => ({
-      name: t.name,
-      description: t.description,
-      inputSchema: t.inputSchema as { type: 'object'; [key: string]: unknown },
-      ...(t.readOnly ? { annotations: { readOnlyHint: true } } : {}),
-    })),
+    tools: engine.listTools().map((t) => {
+      const annotations: Record<string, boolean> = {}
+      if (t.readOnly) annotations.readOnlyHint = true
+      if (t.destructive) annotations.destructiveHint = true
+      if (t.openWorld) annotations.openWorldHint = true
+      return {
+        name: t.name,
+        description: t.description,
+        inputSchema: t.inputSchema as { type: 'object'; [key: string]: unknown },
+        ...(Object.keys(annotations).length > 0 ? { annotations } : {}),
+      }
+    }),
   }))
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -42,10 +48,14 @@ export function createMcpServer(engine: Engine, version: string): Server {
  */
 export async function serveMcpStdio(engine: Engine, version: string): Promise<void> {
   const server = createMcpServer(engine, version)
+  const transport = new StdioServerTransport()
   const closed = new Promise<void>((resolve) => {
-    server.onclose = () => resolve()
-    process.stdin.once('end', () => resolve())
+    const done = () => resolve()
+    server.onclose = done
+    transport.onclose = done
+    process.stdin.once('end', done)
+    process.stdin.once('close', done)
   })
-  await server.connect(new StdioServerTransport())
+  await server.connect(transport)
   await closed
 }

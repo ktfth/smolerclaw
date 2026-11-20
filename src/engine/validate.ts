@@ -17,7 +17,7 @@ export interface ToolSchema {
  */
 export class InputValidator {
   private readonly ajv = new Ajv({ strict: false, allErrors: true })
-  private readonly cache = new Map<string, ValidateFunction>()
+  private readonly cache = new Map<string, { schema: unknown; fn: ValidateFunction }>()
 
   /** False when the tool's schema cannot be compiled; callers must fail closed. */
   canValidate(tool: ToolSchema): boolean {
@@ -37,10 +37,10 @@ export class InputValidator {
 
   private compile(tool: ToolSchema): ValidateFunction | null {
     const cached = this.cache.get(tool.name)
-    if (cached) return cached
+    if (cached && cached.schema === tool.input_schema) return cached.fn
     try {
       const fn = this.ajv.compile(tool.input_schema as object)
-      this.cache.set(tool.name, fn)
+      this.cache.set(tool.name, { schema: tool.input_schema, fn })
       return fn
     } catch {
       return null

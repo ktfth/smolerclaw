@@ -167,4 +167,9 @@ const HANDLERS: Record<string, ToolHandler> = {
   },
 }
 
-export const NOTE_TOOLS = bindTools(SCHEMAS, HANDLERS, ['search_notes', 'list_notes', 'get_note', 'note_tags'])
+export const NOTE_TOOLS = bindTools(
+  SCHEMAS,
+  HANDLERS,
+  ['search_notes', 'list_notes', 'get_note', 'note_tags'],
+  { destructive: ['delete_note'] },
+)

@@ -21,84 +21,183 @@ const DEFAULT_IO: EngineIO = {
   readStdin: () => Bun.stdin.text(),
 }
 
+export interface ParsedEngineArgs {
+  asJson: boolean
+  dryRun: boolean
+  dataDir?: string
+  timeoutMs?: number
+  positional: string[]
+}
+
 /**
  * Entry point for the deterministic engine commands. Returns the exit code.
  *
- *   smolerclaw tools [--json]            list the tool catalog
- *   smolerclaw run <tool> [json|-]       invoke one tool, no model involved
- *   smolerclaw workflow <name>           run a saved workflow
- *   smolerclaw mcp                       serve tools over MCP (stdio)
+ *   smolerclaw tools [--json] [--data-dir <dir>]
+ *   smolerclaw run <tool> [json|-] [--json] [--dry-run] [--data-dir <dir>] [--timeout <ms>]
+ *   smolerclaw workflow <name> [--json] [--dry-run] [--data-dir <dir>]
+ *   smolerclaw mcp [--data-dir <dir>] [--dry-run] [--timeout <ms>]
  */
 export async function runEngineMode(argv: string[], io: EngineIO = DEFAULT_IO): Promise<number> {
   const [command, ...rest] = argv
-  const { asJson, positional } = splitEngineArgs(rest)
+  let parsed: ParsedEngineArgs
+  try {
+    parsed = parseEngineArgs(rest)
+  } catch (err) {
+    io.err(err instanceof Error ? err.message : String(err))
+    return 2
+  }
+  const { asJson, dryRun, dataDir, timeoutMs, positional } = parsed
 
   // MCP owns stdout for protocol frames: route stray logging to stderr first.
   if (command === 'mcp') redirectConsoleToStderr()
 
   const { bootstrapEngine } = await import('../engine/bootstrap')
-  const { engine } = await bootstrapEngine()
+  const runtime = await bootstrapEngine({
+    dataDir,
+    dryRun,
+    timeoutMs,
+    caller: command === 'mcp' ? 'mcp' : 'cli',
+  })
 
-  switch (command) {
-    case 'tools': {
-      const tools = engine.listTools()
-      if (asJson) {
-        io.out(canonicalJson(tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }))))
-      } else {
-        for (const t of tools) io.out(`${t.name}\t${firstLine(t.description)}`)
+  try {
+    switch (command) {
+      case 'tools': {
+        const tools = runtime.engine.listTools()
+        if (asJson) {
+          io.out(canonicalJson(tools.map((t) => ({
+            name: t.name,
+            description: t.description,
+            inputSchema: t.inputSchema,
+            readOnly: t.readOnly,
+            destructive: t.destructive,
+            openWorld: t.openWorld,
+          }))))
+        } else {
+          for (const t of tools) io.out(`${t.name}\t${firstLine(t.description)}`)
+        }
+        return 0
       }
-      return 0
-    }
 
-    case 'run': {
-      const [name, rawInput] = positional
-      if (!name) {
-        io.err('usage: smolerclaw run <tool> [json-input | -] [--json]')
+      case 'run': {
+        const [name, rawInput] = positional
+        if (!name) {
+          io.err('usage: smolerclaw run <tool> [json-input | -] [--json] [--dry-run] [--data-dir <dir>] [--timeout <ms>]')
+          return 2
+        }
+        const text = rawInput === '-' ? await io.readStdin() : rawInput ?? '{}'
+        let input: unknown
+        try {
+          input = JSON.parse(text || '{}')
+        } catch (err) {
+          io.err(`invalid JSON input: ${err instanceof Error ? err.message : String(err)}`)
+          return 2
+        }
+        const result = await runtime.engine.invoke(name, input, { dryRun, timeoutMs })
+        emitResult(result, asJson, io)
+        return exitCodeFor(result)
+      }
+
+      case 'workflow': {
+        const [name] = positional
+        if (!name) {
+          io.err('usage: smolerclaw workflow <name> [--json] [--dry-run] [--data-dir <dir>]')
+          return 2
+        }
+        const { runWorkflowOutcome } = await import('../workflows')
+        const outcome = await runWorkflowOutcome(
+          name,
+          asJson ? undefined : (msg) => io.err(msg),
+          {
+            policy: runtime.policy,
+            audit: runtime.audit,
+            runId: runtime.runId,
+            caller: runtime.caller,
+            dryRun: runtime.dryRun,
+          },
+        )
+        if (asJson) {
+          io.out(canonicalJson({
+            ok: outcome.ok,
+            decision: outcome.denied ? 'denied' : runtime.dryRun ? 'dry-run' : 'executed',
+            workflow: name,
+            output: outcome.text,
+          }))
+        } else if (outcome.ok) {
+          io.out(outcome.text)
+        } else {
+          io.err(outcome.text)
+        }
+        if (outcome.ok) return 0
+        return outcome.denied ? 3 : 1
+      }
+
+      case 'mcp': {
+        const { serveMcpStdio } = await import('../mcp/server')
+        await serveMcpStdio(runtime.engine, getVersion())
+        return 0
+      }
+
+      default:
+        io.err(`unknown engine command: ${command}`)
         return 2
-      }
-      const text = rawInput === '-' ? await io.readStdin() : rawInput ?? '{}'
-      let input: unknown
-      try {
-        input = JSON.parse(text || '{}')
-      } catch (err) {
-        io.err(`invalid JSON input: ${err instanceof Error ? err.message : String(err)}`)
-        return 2
-      }
-      const result = await engine.invoke(name, input)
-      emitResult(result, asJson, io)
-      return exitCodeFor(result)
     }
+  } finally {
+    runtime.dispose()
+  }
+}
 
-    case 'workflow': {
-      const [name] = positional
-      if (!name) {
-        io.err('usage: smolerclaw workflow <name>')
-        return 2
-      }
-      const { runWorkflowOutcome } = await import('../workflows')
-      const outcome = await runWorkflowOutcome(name, (msg) => io.err(msg))
-      io.out(outcome.text)
-      return outcome.ok ? 0 : 1
+/** Parse engine flags and positionals. '-' is a positional meaning "read stdin". */
+export function parseEngineArgs(args: readonly string[]): ParsedEngineArgs {
+  let asJson = false
+  let dryRun = false
+  let dataDir: string | undefined
+  let timeoutMs: number | undefined
+  const positional: string[] = []
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (arg === '--json') {
+      asJson = true
+    } else if (arg === '--dry-run') {
+      dryRun = true
+    } else if (arg === '--data-dir') {
+      const value = args[++i]
+      if (!value) throw new Error('--data-dir requires a path')
+      dataDir = value
+    } else if (arg.startsWith('--data-dir=')) {
+      const value = arg.slice('--data-dir='.length)
+      if (!value) throw new Error('--data-dir requires a path')
+      dataDir = value
+    } else if (arg === '--timeout') {
+      const raw = args[++i]
+      const ms = Number(raw)
+      if (!raw || !Number.isFinite(ms) || ms < 0) throw new Error('--timeout requires a non-negative number of milliseconds')
+      timeoutMs = ms
+    } else if (arg.startsWith('--timeout=')) {
+      const raw = arg.slice('--timeout='.length)
+      const ms = Number(raw)
+      if (!raw || !Number.isFinite(ms) || ms < 0) throw new Error('--timeout requires a non-negative number of milliseconds')
+      timeoutMs = ms
+    } else if (arg === '-' || !arg.startsWith('--')) {
+      positional.push(arg)
+    } else {
+      throw new Error(`unknown option: ${arg}`)
     }
+  }
 
-    case 'mcp': {
-      const { serveMcpStdio } = await import('../mcp/server')
-      await serveMcpStdio(engine, getVersion())
-      return 0
-    }
-
-    default:
-      io.err(`unknown engine command: ${command}`)
-      return 2
+  return {
+    asJson,
+    dryRun,
+    ...(dataDir !== undefined ? { dataDir } : {}),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    positional,
   }
 }
 
 /** Separate flags from positionals. '-' is a positional meaning "read stdin". */
 export function splitEngineArgs(args: readonly string[]): { asJson: boolean; positional: string[] } {
-  return {
-    asJson: args.includes('--json'),
-    positional: args.filter((a) => a === '-' || !a.startsWith('--')),
-  }
+  const { asJson, positional } = parseEngineArgs(args)
+  return { asJson, positional }
 }
 
 function emitResult(result: InvokeResult, asJson: boolean, io: EngineIO): void {

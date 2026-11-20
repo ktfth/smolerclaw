@@ -3,12 +3,15 @@ import { join } from 'node:path'
 
 export interface AuditRecord {
   ts: string
+  runId?: string
+  caller?: string
   tool: string
   inputHash: string
-  decision: 'executed' | 'denied' | 'invalid' | 'unknown'
+  decision: 'executed' | 'dry-run' | 'denied' | 'invalid' | 'unknown'
   risk: string
   ok: boolean
   durationMs: number
+  dryRun?: boolean
   error?: string
 }
 

@@ -151,4 +151,9 @@ const HANDLERS: Record<string, ToolHandler> = {
   },
 }
 
-export const SCHEDULER_TOOLS = bindTools(SCHEMAS, HANDLERS, ['list_scheduled_jobs'])
+export const SCHEDULER_TOOLS = bindTools(
+  SCHEMAS,
+  HANDLERS,
+  ['list_scheduled_jobs'],
+  { destructive: ['remove_scheduled_job'] },
+)

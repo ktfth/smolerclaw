@@ -41,27 +41,49 @@ export interface CatalogEntry {
   readonly readOnly: boolean
   /** Delivers content to third parties immediately (gated by the engine policy). */
   readonly sends?: boolean
+  /** Removes data or triggers irreversible side effects (advertised to MCP clients). */
+  readonly destructive?: boolean
+  /** Interacts with external services/systems outside the local store (MCP openWorldHint). */
+  readonly openWorld?: boolean
+}
+
+export interface BindToolsMeta {
+  readonly destructive?: readonly string[]
+  readonly openWorld?: readonly string[]
 }
 
 /**
  * Pair schemas with handlers. Throws at module load if either side has a name
- * the other lacks (or a read-only name matches nothing), so a schema can never
- * be advertised without a handler and the read-only list cannot go stale.
+ * the other lacks (or a hint name matches nothing), so a schema can never
+ * be advertised without a handler and metadata lists cannot go stale.
  */
 export function bindTools(
   schemas: readonly CatalogEntry['schema'][],
   handlers: Readonly<Record<string, ToolHandler>>,
   readOnly: readonly string[] = [],
+  meta: BindToolsMeta = {},
 ): CatalogEntry[] {
   const names = new Set(schemas.map((s) => s.name))
+  const destructive = meta.destructive ?? []
+  const openWorld = meta.openWorld ?? []
   const orphans = [
     ...schemas.filter((s) => !handlers[s.name]).map((s) => `schema without handler: ${s.name}`),
     ...Object.keys(handlers).filter((n) => !names.has(n)).map((n) => `handler without schema: ${n}`),
     ...readOnly.filter((n) => !names.has(n)).map((n) => `read-only name without schema: ${n}`),
+    ...destructive.filter((n) => !names.has(n)).map((n) => `destructive name without schema: ${n}`),
+    ...openWorld.filter((n) => !names.has(n)).map((n) => `open-world name without schema: ${n}`),
   ]
   if (orphans.length > 0) throw new Error(`Tool catalog mismatch: ${orphans.join(', ')}`)
   const reads = new Set(readOnly)
-  return schemas.map((schema) => ({ schema, run: handlers[schema.name], readOnly: reads.has(schema.name) }))
+  const destructs = new Set(destructive)
+  const openWorlds = new Set(openWorld)
+  return schemas.map((schema) => ({
+    schema,
+    run: handlers[schema.name],
+    readOnly: reads.has(schema.name),
+    ...(destructs.has(schema.name) ? { destructive: true } : {}),
+    ...(openWorlds.has(schema.name) ? { openWorld: true } : {}),
+  }))
 }
 
 /** Read a required, non-blank string field. */

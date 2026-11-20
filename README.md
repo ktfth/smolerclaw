@@ -53,12 +53,10 @@ smolerclaw is a terminal AI assistant that lives on your Windows machine. It can
 - **Log decisions** — record context and rationale for important choices
 - **Pomodoro timer** — focus sessions with toast notifications
 - **Project management** — track projects, work sessions, generate progress reports
-- **Opportunity pipeline** — register and filter demands by tech stack and priority
 - **PowerShell scripting** — execute .ps1 scripts with safety guards (blocks Defender/System32/destructive ops)
 - **Clipboard OCR** — read text or extract text from images via Windows.Media.Ocr
 - **Screen awareness** — map foreground window and all visible windows
 - **Session refresh** — validate/renew supported local auth without leaving the TUI
-- **Auto-refresh** — proactive OAuth token monitoring and renewal before expiration
 - **Finance verification** — amount limits, duplicate detection, daily spending alerts
 - **Plugin system** — install plugins from GitHub with `/plugin install owner/repo`, supports JSON and TypeScript plugins with lifecycle hooks
 - **Macros** — quick program launchers (`/macro vscode`, `/macro chrome`), create custom macros for apps, URLs, files, and commands
@@ -80,20 +78,21 @@ smolerclaw -p "question"    # Print mode (non-interactive)
 The engine runs tools without any model in the loop and needs no credentials. Every call goes through the same fixed pipeline: catalog lookup → JSON-schema validation → static policy → execution → audit.
 
 ```bash
-smolerclaw tools [--json]                       # List the tool catalog
-smolerclaw run create_task '{"title":"Pay rent"}' # Invoke one tool directly
-echo '{"query":"rent"}' | smolerclaw run search_notes -   # Input from stdin
-smolerclaw run list_tasks --json                # Structured result
-smolerclaw workflow iniciar-dia                 # Run a saved workflow
-smolerclaw mcp                                  # Serve tools over MCP (stdio)
+smolerclaw tools [--json] [--data-dir <dir>]                       # List the tool catalog
+smolerclaw run create_task '{"title":"Pay rent"}'                  # Invoke one tool directly
+echo '{"query":"rent"}' | smolerclaw run search_notes -            # Input from stdin
+smolerclaw run create_task '{"title":"Test"}' --dry-run --json     # Validate + policy check only
+smolerclaw run list_tasks --json                                   # Structured result
+smolerclaw workflow iniciar-dia [--dry-run] [--json]               # Run a saved workflow under policy
+smolerclaw mcp [--data-dir <dir>]                                  # Serve tools over MCP (stdio)
 ```
 
 - **Catalog:** the personal-management core — tasks, scheduler, people, notes, finance and decisions, projects, email drafts, notifications, calendar, vault, Microsoft 365 and Google Workspace. Notes (memos, links and reference material) share one SQLite store, `notes.db`; on first start the old `memos.json`, `bookmarks.json` and `materials.json` are imported once and renamed to `*.migrated.json`. Plugins run arbitrary commands, so the engine exposes one only when it is named in `SMOLERCLAW_PLUGINS=a,b`. File, shell and HTTP primitives stay in the built-in chat: an external agent such as Claude Code brings its own.
-- **Results:** every tool reports success or failure structurally, never by parsing its text. `--json` adds a `data` field with the records, and MCP returns the same records as `structuredContent.data`. Read-only tools are flagged with the MCP `readOnlyHint` annotation.
+- **Results:** every tool reports success or failure structurally, never by parsing its text. `--json` adds a `data` field with the records, and MCP returns the same records as `structuredContent.data`. Tools expose MCP annotations (`readOnlyHint`, `destructiveHint`, `openWorldHint`) and the same flags in `smolerclaw tools --json`.
 - **Exit codes:** `0` ok, `1` tool error, `2` invalid input or unknown tool, `3` denied by policy.
-- **Policy:** dangerous operations are always denied. `SMOLERCLAW_READONLY=1` denies anything that is not a verified read. `SMOLERCLAW_ALLOW=a,b` and `SMOLERCLAW_DENY=a,b` restrict the catalog. Tools that send email immediately (`m365_send_email`, `gws_send_email`) are denied unless `SMOLERCLAW_ALLOW_SEND=1`; `draft_email` stays available. Every tool input is validated against its schema, in the chat loop too.
-- **Audit:** one JSONL file per day under `<dataDir>/audit/`. Records store a SHA-256 of the canonical input, never the raw input.
-- **Scheduled workflows:** jobs with the `workflow` action run `smolerclaw workflow <name>` headless and append output to `<dataDir>/logs/`. The policy variables in effect when the job is created are pinned into the job, so the scheduled run never inherits a looser environment. There is no raw-command action.
+- **Policy & Harness controls:** dangerous operations are always denied. `SMOLERCLAW_READONLY=1` denies anything that is not a verified read (including mutating workflow steps). `SMOLERCLAW_ALLOW=a,b` and `SMOLERCLAW_DENY=a,b` restrict the catalog. Tools that send email immediately (`m365_send_email`, `gws_send_email`) are denied unless `SMOLERCLAW_ALLOW_SEND=1`; `draft_email` stays available. Use `--data-dir <dir>` or `SMOLERCLAW_DATA_DIR=<dir>` for isolated sandbox/harness runs, `--dry-run` / `SMOLERCLAW_DRY_RUN=1` to validate without side effects, and `--timeout <ms>` / `SMOLERCLAW_TIMEOUT_MS=<ms>` to bound tool execution (default 60s). Every tool input is validated against its schema, in the chat loop too.
+- **Audit:** one JSONL file per day under `<dataDir>/audit/`. Records include `runId` (`SMOLERCLAW_RUN_ID`), `caller` (`cli` / `mcp`), and a SHA-256 of the canonical input, never the raw input.
+- **Scheduled workflows:** jobs with the `workflow` action run `smolerclaw workflow <name>` headless under the engine's policy and audit pipeline, appending output to `<dataDir>/logs/`. The policy variables in effect when the job is created are pinned into the job, so the scheduled run never inherits a looser environment. There is no raw-command action.
 
 ### Use with Claude Code
 
@@ -208,12 +207,10 @@ smolerclaw e um assistente de IA no terminal que vive na sua maquina Windows. El
 - **Registrar decisoes** — guardar contexto e justificativa de escolhas importantes
 - **Timer Pomodoro** — sessoes de foco com notificacoes toast
 - **Gestao de projetos** — rastrear projetos, sessoes de trabalho, gerar relatorios de progresso
-- **Pipeline de oportunidades** — registrar e filtrar demandas por tech stack e prioridade
 - **Scripts PowerShell** — executar .ps1 com safety guards (bloqueia Defender/System32/ops destrutivas)
 - **OCR de clipboard** — ler texto ou extrair texto de imagens via Windows.Media.Ocr
 - **Consciencia de tela** — mapear janela em foco e todas as janelas visiveis
 - **Renovacao de sessao** — validar/renovar autenticacao local suportada sem sair da TUI
-- **Auto-refresh** — monitoramento proativo de token OAuth com renovacao automatica antes da expiracao
 - **Verificacao financeira** — limites de valor, deteccao de duplicatas, alertas de gasto diario
 - **Sistema de plugins** — instalar plugins do GitHub com `/plugin install owner/repo`, suporte a plugins JSON e TypeScript com lifecycle hooks
 - **Macros** — atalhos rapidos para programas (`/macro vscode`, `/macro chrome`), crie macros customizados para apps, URLs, arquivos e comandos
@@ -235,20 +232,21 @@ smolerclaw -p "pergunta"    # Modo print (nao-interativo)
 O motor executa tools sem nenhum modelo no circuito e não precisa de credenciais. Toda chamada passa pelo mesmo pipeline fixo: busca no catálogo → validação por JSON Schema → política estática → execução → auditoria.
 
 ```bash
-smolerclaw tools [--json]                          # Lista o catálogo de tools
-smolerclaw run create_task '{"title":"Pagar aluguel"}' # Invoca um tool direto
-echo '{"query":"aluguel"}' | smolerclaw run search_notes -   # Entrada via stdin
-smolerclaw run list_tasks --json                   # Resultado estruturado
-smolerclaw workflow iniciar-dia                    # Roda um workflow salvo
-smolerclaw mcp                                     # Serve os tools via MCP (stdio)
+smolerclaw tools [--json] [--data-dir <dir>]                       # Lista o catálogo de tools
+smolerclaw run create_task '{"title":"Pagar aluguel"}'             # Invoca um tool direto
+echo '{"query":"aluguel"}' | smolerclaw run search_notes -         # Entrada via stdin
+smolerclaw run create_task '{"title":"Teste"}' --dry-run --json    # Valida + política sem executar
+smolerclaw run list_tasks --json                                   # Resultado estruturado
+smolerclaw workflow iniciar-dia [--dry-run] [--json]               # Roda um workflow sob política
+smolerclaw mcp [--data-dir <dir>]                                  # Serve os tools via MCP (stdio)
 ```
 
 - **Catálogo:** o núcleo de gestão pessoal — tarefas, agendador, pessoas, notas, finanças e decisões, projetos, rascunho de email, notificações, calendário, vault, Microsoft 365 e Google Workspace. Notas (memos, links e materiais de referência) ficam num único store SQLite, `notes.db`; na primeira execução os antigos `memos.json`, `bookmarks.json` e `materials.json` são importados uma vez e renomeados para `*.migrated.json`. Plugins executam comandos arbitrários, então o motor só expõe os que estiverem em `SMOLERCLAW_PLUGINS=a,b`. Arquivos, shell e HTTP ficam só no chat embutido: um agente externo como o Claude Code já traz os seus.
-- **Resultados:** todo tool informa sucesso ou falha de forma estruturada, nunca pela leitura do texto. `--json` inclui o campo `data` com os registros, e o MCP devolve os mesmos registros em `structuredContent.data`. Tools de leitura levam a anotação MCP `readOnlyHint`.
+- **Resultados:** todo tool informa sucesso ou falha de forma estruturada, nunca pela leitura do texto. `--json` inclui o campo `data` com os registros, e o MCP devolve os mesmos registros em `structuredContent.data`. Os tools expõem anotações MCP (`readOnlyHint`, `destructiveHint`, `openWorldHint`) e os mesmos campos em `smolerclaw tools --json`.
 - **Códigos de saída:** `0` ok, `1` erro do tool, `2` entrada inválida ou tool desconhecido, `3` negado pela política.
-- **Política:** operações perigosas são sempre negadas. `SMOLERCLAW_READONLY=1` nega tudo que não for leitura verificada. `SMOLERCLAW_ALLOW=a,b` e `SMOLERCLAW_DENY=a,b` restringem o catálogo. Tools que enviam email na hora (`m365_send_email`, `gws_send_email`) são negados sem `SMOLERCLAW_ALLOW_SEND=1`; `draft_email` continua liberado. Toda entrada é validada contra o schema, inclusive no chat.
-- **Auditoria:** um arquivo JSONL por dia em `<dataDir>/audit/`. Os registros guardam o SHA-256 da entrada canônica, nunca a entrada bruta.
-- **Workflows agendados:** jobs com ação `workflow` rodam `smolerclaw workflow <nome>` sem interface e gravam a saída em `<dataDir>/logs/`. As variáveis de política vigentes na criação ficam fixadas no job, então a execução agendada nunca herda um ambiente mais permissivo. Não existe ação de comando cru.
+- **Política e controles de harness:** operações perigosas são sempre negadas. `SMOLERCLAW_READONLY=1` nega tudo que não for leitura verificada (incluindo steps mutáveis de workflows). `SMOLERCLAW_ALLOW=a,b` e `SMOLERCLAW_DENY=a,b` restringem o catálogo. Tools que enviam email na hora (`m365_send_email`, `gws_send_email`) são negados sem `SMOLERCLAW_ALLOW_SEND=1`; `draft_email` continua liberado. Use `--data-dir <dir>` ou `SMOLERCLAW_DATA_DIR=<dir>` para execuções isoladas em sandbox/harness, `--dry-run` / `SMOLERCLAW_DRY_RUN=1` para validar sem efeitos colaterais e `--timeout <ms>` / `SMOLERCLAW_TIMEOUT_MS=<ms>` para limitar o tempo por execução (padrão 60s). Toda entrada é validada contra o schema, inclusive no chat.
+- **Auditoria:** um arquivo JSONL por dia em `<dataDir>/audit/`. Os registros incluem `runId` (`SMOLERCLAW_RUN_ID`), `caller` (`cli` / `mcp`) e o SHA-256 da entrada canônica, nunca a entrada bruta.
+- **Workflows agendados:** jobs com ação `workflow` rodam `smolerclaw workflow <nome>` sem interface sob a política e auditoria do motor, gravando a saída em `<dataDir>/logs/`. As variáveis de política vigentes na criação ficam fixadas no job, então a execução agendada nunca herda um ambiente mais permissivo. Não existe ação de comando cru.
 
 ### Uso com o Claude Code
 

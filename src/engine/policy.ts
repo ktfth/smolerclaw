@@ -61,6 +61,53 @@ export function decide(
   return { allowed: true, risk: risk.level, reason: risk.reason ?? 'allowed' }
 }
 
+const READ_ONLY_WORKFLOW_ACTIONS: ReadonlySet<string> = new Set(['log', 'wait', 'if_app_running'])
+const MODERATE_WORKFLOW_ACTIONS: ReadonlySet<string> = new Set(['open_app', 'open_url', 'notify'])
+
+/**
+ * Evaluate a single workflow step under the same static engine policy.
+ * Unknown actions fail closed; `run_command` is always assessed for dangerous
+ * patterns and denied in read-only mode or when `run_command` is excluded.
+ */
+export function decideWorkflowStep(
+  policy: EnginePolicy,
+  action: string,
+  target: string,
+): PolicyDecision {
+  const stepTool = `workflow:${action}`
+
+  if (policy.deny.includes(stepTool) || policy.deny.includes(action)) {
+    return { allowed: false, risk: 'moderate', reason: `workflow step "${action}" is excluded by deny list` }
+  }
+  if (policy.allow.length > 0 && !policy.allow.includes(stepTool) && !policy.allow.includes(action)) {
+    return { allowed: false, risk: 'moderate', reason: `workflow step "${action}" is excluded by allow list` }
+  }
+
+  if (READ_ONLY_WORKFLOW_ACTIONS.has(action)) {
+    return { allowed: true, risk: 'safe', reason: 'allowed' }
+  }
+
+  if (action === 'run_command') {
+    const risk = assessToolRisk('run_command', { command: target })
+    if (risk.level === 'dangerous') {
+      return { allowed: false, risk: 'dangerous', reason: risk.reason ?? 'dangerous command' }
+    }
+    if (!policy.allowModerate) {
+      return { allowed: false, risk: 'moderate', reason: 'workflow run_command blocked by read-only policy' }
+    }
+    return { allowed: true, risk: 'moderate', reason: 'allowed' }
+  }
+
+  if (MODERATE_WORKFLOW_ACTIONS.has(action)) {
+    if (!policy.allowModerate) {
+      return { allowed: false, risk: 'moderate', reason: `workflow ${action} blocked by read-only policy` }
+    }
+    return { allowed: true, risk: 'moderate', reason: 'allowed' }
+  }
+
+  return { allowed: false, risk: 'dangerous', reason: `unknown workflow action: ${action}` }
+}
+
 /**
  * Build a policy from environment variables:
  * - SMOLERCLAW_READONLY=1      → deny moderate tools
