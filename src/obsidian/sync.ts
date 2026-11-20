@@ -4,10 +4,15 @@
  *    overwrites a file the person edited (its hash no longer matches).
  *  - pull() brings those edits back: note edits, Inbox files, ticked tasks.
  * Deleting a file in Obsidian never deletes data; `deletar: true` does.
+ *
+ * The manifest (what smolerclaw last wrote) lives in the shared store, and
+ * push/pull hold its write lock: two processes never sync at the same time.
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import type { Database } from 'bun:sqlite'
+import { ensureSchema, migrateOnce, store, withWriteLock } from '../core/store'
 import { addNote, deleteNote, getNote, listNotes, updateNote, NOTE_KINDS, type Note, type NotePatch } from '../notes'
 import { addTask, completeTask, listTasks, type Task } from '../tasks'
 import { isInside, ownedPath, type VaultRoot } from './paths'
@@ -17,7 +22,8 @@ import {
   renderNote, renderPanel, renderTasks, type TaskLine,
 } from './markdown'
 
-const MANIFEST_FILE = '.smolerclaw-sync.json'
+/** Where the manifest lived before the store; imported once per vault, then renamed. */
+const LEGACY_MANIFEST_FILE = '.smolerclaw-sync.json'
 const CONFLICT_FILE = /\.conflito(-[\d-]+)?\.md$/
 const IMPORTING_PREFIX = '.importando-'
 const ALL = Number.MAX_SAFE_INTEGER
@@ -99,8 +105,35 @@ function writeAtomic(abs: string, content: string): void {
   }
 }
 
-function loadManifest(vr: VaultRoot): Manifest {
-  const text = readText(join(vr.root, MANIFEST_FILE))
+const MANIFEST_SCHEMA = `
+CREATE TABLE IF NOT EXISTS obsidian_files (
+  vault TEXT NOT NULL,
+  key   TEXT NOT NULL,
+  path  TEXT NOT NULL,
+  hash  TEXT NOT NULL,
+  mtime REAL,
+  PRIMARY KEY (vault, key)
+);
+`
+function manifestDb(): Database {
+  ensureSchema('obsidian', MANIFEST_SCHEMA)
+  return store()
+}
+
+/** The manifest is machine-local: keyed by the vault's real path, case-folded where the file system is. */
+const vaultKey = (vr: VaultRoot): string => (process.platform === 'win32' ? vr.root.toLowerCase() : vr.root)
+
+/**
+ * Take the write lock for a sync. The old JSON manifest is imported first,
+ * outside the lock: its rename must follow a committed import, never one an
+ * outer rollback could undo.
+ */
+function locked<T>(vr: VaultRoot, fn: () => T): T {
+  importLegacyManifest(manifestDb(), vr)
+  return withWriteLock(fn)
+}
+
+function legacyEntries(text: string | null): Manifest {
   if (!text) return {}
   try {
     const parsed = JSON.parse(text) as { files?: Record<string, ManifestEntry> }
@@ -111,13 +144,55 @@ function loadManifest(vr: VaultRoot): Manifest {
   }
 }
 
-function saveManifest(vr: VaultRoot, before: Manifest, after: Manifest, errors: string[]): void {
-  const next = JSON.stringify({ version: 1, files: after }, null, 2)
-  if (next === JSON.stringify({ version: 1, files: before }, null, 2)) return
+/** Move a vault's old JSON manifest into the store, once. */
+function importLegacyManifest(db: Database, vr: VaultRoot): void {
+  const name = `obsidian-manifest:${vaultKey(vr)}`
+  if (db.query('SELECT 1 FROM migrations WHERE name = ?').get(name)) return
+  const abs = join(vr.root, LEGACY_MANIFEST_FILE)
+  const entries = legacyEntries(readText(abs))
+  const applied = migrateOnce(name, () => {
+    const upsert = db.query('INSERT OR REPLACE INTO obsidian_files (vault, key, path, hash, mtime) VALUES (?, ?, ?, ?, ?)')
+    for (const [key, e] of Object.entries(entries)) {
+      if (typeof e?.path === 'string' && typeof e.hash === 'string') upsert.run(vaultKey(vr), key, e.path, e.hash, e.mtime ?? null)
+    }
+  })
+  if (!applied || !existsSync(abs)) return
   try {
-    writeAtomic(ownedPath(vr, MANIFEST_FILE), next)
+    renameSync(abs, join(vr.root, '.smolerclaw-sync.migrated.json'))
+  } catch { /* imported; a leftover file is never read again */ }
+}
+
+interface ManifestRow {
+  key: string
+  path: string
+  hash: string
+  mtime: number | null
+}
+
+function loadManifest(vr: VaultRoot): Manifest {
+  importLegacyManifest(manifestDb(), vr)
+  const rows = manifestDb().query('SELECT key, path, hash, mtime FROM obsidian_files WHERE vault = ?').all(vaultKey(vr)) as ManifestRow[]
+  return Object.fromEntries(rows.map((r) => [r.key, r.mtime === null ? { path: r.path, hash: r.hash } : { path: r.path, hash: r.hash, mtime: r.mtime }]))
+}
+
+const sameEntry = (a: ManifestEntry | undefined, b: ManifestEntry): boolean =>
+  a !== undefined && a.path === b.path && a.hash === b.hash && a.mtime === b.mtime
+
+/** Write only the entries that changed, so a concurrent writer's other entries survive. */
+function saveManifest(vr: VaultRoot, before: Manifest, after: Manifest, errors: string[]): void {
+  try {
+    const db = manifestDb()
+    const vault = vaultKey(vr)
+    const upsert = db.query('INSERT OR REPLACE INTO obsidian_files (vault, key, path, hash, mtime) VALUES (?, ?, ?, ?, ?)')
+    const remove = db.query('DELETE FROM obsidian_files WHERE vault = ? AND key = ?')
+    db.transaction(() => {
+      for (const [key, entry] of Object.entries(after)) {
+        if (!sameEntry(before[key], entry)) upsert.run(vault, key, entry.path, entry.hash, entry.mtime ?? null)
+      }
+      for (const key of Object.keys(before)) if (!(key in after)) remove.run(vault, key)
+    })()
   } catch (err) {
-    errors.push(`${MANIFEST_FILE}: ${errorText(err)}`)
+    errors.push(`manifesto: ${errorText(err)}`)
   }
 }
 
@@ -170,6 +245,10 @@ function scanNotes(vr: VaultRoot, files: Manifest, errors: string[]): Map<string
 // ─── Push ───────────────────────────────────────────────────
 
 export function push(vr: VaultRoot, now = new Date()): PushReport {
+  return locked(vr, () => pushLocked(vr, now))
+}
+
+function pushLocked(vr: VaultRoot, now: Date): PushReport {
   const before = loadManifest(vr)
   const files: Record<string, ManifestEntry> = { ...before }
   const report: PushReport = { written: [], removed: [], pending: [], errors: [] }
@@ -421,6 +500,10 @@ function pullTasks(vr: VaultRoot, files: Record<string, ManifestEntry>, report: 
 }
 
 export function pull(vr: VaultRoot, options: PullOptions = {}): PullReport {
+  return locked(vr, () => pullLocked(vr, options))
+}
+
+function pullLocked(vr: VaultRoot, options: PullOptions): PullReport {
   const now = options.now ?? new Date()
   const before = loadManifest(vr)
   const files: Record<string, ManifestEntry> = { ...before }
@@ -437,8 +520,10 @@ export function pull(vr: VaultRoot, options: PullOptions = {}): PullReport {
 
 /** Pull edits first, then project the result. */
 export function sync(vr: VaultRoot, options: PullOptions = {}): { pull: PullReport; push: PushReport } {
-  const pulled = pull(vr, options)
-  return { pull: pulled, push: push(vr, options.now) }
+  return locked(vr, () => {
+    const pulled = pullLocked(vr, options)
+    return { pull: pulled, push: pushLocked(vr, options.now ?? new Date()) }
+  })
 }
 
 // ─── Status ─────────────────────────────────────────────────

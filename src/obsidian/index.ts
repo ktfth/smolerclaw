@@ -3,7 +3,7 @@
  * Disabled unless SMOLERCLAW_OBSIDIAN_VAULT (or config `obsidianVault`) is set.
  */
 import { ownedPath, resolveVault, type VaultRoot } from './paths'
-import { pendingChanges, pull, push, type PullReport } from './sync'
+import { pendingChanges, push, sync, type PullReport } from './sync'
 import { INBOX_DIR, localTime } from './markdown'
 import { appendJournal } from './journal'
 import { parsePullMode, resolvePullMode, type PullMode, type PullModeSetting } from './mode'
@@ -97,8 +97,7 @@ function describePull(report: PullReport): string[] {
 
 function autoPull(vr: VaultRoot): string | null {
   const now = new Date()
-  const report = pull(vr, { now })
-  const pushed = push(vr, now)
+  const { pull: report, push: pushed } = sync(vr, { now })
   for (const error of [...report.errors, ...pushed.errors]) warn(error)
   const applied = describePull(report)
   if (!applied.length) return null

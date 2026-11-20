@@ -21,6 +21,7 @@ import { eventBus } from './core/event-bus'
 import type { FileSavedEvent, TaskCompletedEvent } from './types'
 import { ok, fail, type ToolResult } from './core/result'
 import { exportNotesSnapshot } from './notes'
+import { exportTasksSnapshot } from './tasks'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -383,9 +384,11 @@ export async function performBackup(message?: string): Promise<ToolResult> {
       writeFileSync(dest, readFileSync(src, 'utf-8'))
     }
 
-    // Notes live in SQLite; back them up as a JSON snapshot.
+    // Notes and tasks live in SQLite; back them up as JSON snapshots.
     const notes = exportNotesSnapshot()
     if (notes !== null) writeFileSync(join(_backupDir, 'notes.json'), notes)
+    const tasks = exportTasksSnapshot()
+    if (tasks !== null) writeFileSync(join(_backupDir, 'tasks.json'), tasks)
 
     // Also copy config
     const configFile = join(_configDir, 'config.json')

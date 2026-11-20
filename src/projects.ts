@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'nod
 import { join, basename, isAbsolute, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { atomicWriteFile } from './vault'
+import { listTasks } from './tasks'
 
 /**
  * git with repo-controlled program hooks disabled: project paths come from tool
@@ -541,21 +542,14 @@ export async function generateWorkReport(
   const sessions = getSessionsForPeriod(project.id, since)
   const totalMinutes = sessions.reduce((sum, s) => sum + s.durationMinutes, 0)
 
-  // Count tasks completed in period (from tasks.json — loose coupling)
+  // Count tasks completed in period
   let completedTasks = 0
   try {
-    const tasksFile = join(_dataDir, 'tasks.json')
-    if (existsSync(tasksFile)) {
-      const tasks: Array<{ done: boolean; createdAt: string }> = JSON.parse(
-        readFileSync(tasksFile, 'utf-8'),
-      )
-      completedTasks = tasks.filter((t) => {
-        if (!t.done) return false
-        const created = new Date(t.createdAt)
-        return created >= since
-      }).length
-    }
-  } catch { /* skip */ }
+    completedTasks = listTasks(true).filter((t) => t.done && new Date(t.createdAt) >= since).length
+  } catch (err) {
+    // Reported as zero, but never silently.
+    process.stderr.write(`smolerclaw: completed tasks unavailable for report: ${err instanceof Error ? err.message : String(err)}\n`)
+  }
 
   const markdown = formatReport(project, period, gitSummary, sessions, totalMinutes, completedTasks, lang)
 

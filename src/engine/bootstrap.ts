@@ -7,7 +7,7 @@ import { READ_ONLY_TOOL_NAMES, DESTRUCTIVE_TOOL_NAMES, OPEN_WORLD_TOOL_NAMES } f
 import { checkRateLimit } from '../tool-safety'
 import { registerToolCatalog } from '../init/tools'
 import { initCoreModules } from '../init/modules'
-import { closeNotes } from '../notes'
+import { closeStore } from '../core/store'
 import { createEngine, type Engine } from './engine'
 import { policyFromEnv, type EnginePolicy } from './policy'
 import { createFileAuditSink, type AuditSink } from './audit'
@@ -96,7 +96,7 @@ export async function bootstrapEngine(
     caller: opts.caller,
     dryRun,
     dispose: () => {
-      closeNotes()
+      closeStore()
     },
   }
 }

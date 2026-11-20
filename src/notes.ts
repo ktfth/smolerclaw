@@ -6,11 +6,11 @@
  * crash can never leave a half-written JSON array behind. Legacy JSON files
  * are imported once and renamed to *.migrated.json, never deleted.
  */
-import { Database } from 'bun:sqlite'
-import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { logger } from './core/logger'
+import { closeStore, ensureSchema, hasSchema, migrateOnce, openStore, store } from './core/store'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -54,10 +54,7 @@ export interface NoteQuery {
 
 // ─── Storage ────────────────────────────────────────────────
 
-const DB_FILE = 'notes.db'
 const DEFAULT_LIMIT = 30
-
-let _db: Database | null = null
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS notes (
@@ -77,7 +74,6 @@ CREATE TABLE IF NOT EXISTS note_tags (
 );
 CREATE INDEX IF NOT EXISTS idx_note_tags_tag ON note_tags(tag);
 CREATE INDEX IF NOT EXISTS idx_notes_kind ON notes(kind, updated_at);
-CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL);
 `
 
 interface NoteRow {
@@ -92,24 +88,17 @@ interface NoteRow {
   tags: string | null
 }
 
-function db(): Database {
-  if (!_db) throw new Error('notes not initialized')
-  return _db
-}
+const db = store
 
 export function initNotes(dataDir: string): void {
-  if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true })
-  _db?.close()
-  _db = new Database(join(dataDir, DB_FILE), { create: true, strict: true })
-  _db.exec('PRAGMA foreign_keys = ON;')
-  _db.exec(SCHEMA)
+  openStore(dataDir)
+  ensureSchema('notes', SCHEMA)
   migrateLegacyJson(dataDir)
 }
 
-/** Close the database (tests, shutdown). */
+/** Close the shared store (tests, shutdown). */
 export function closeNotes(): void {
-  _db?.close()
-  _db = null
+  closeStore()
 }
 
 // ─── Helpers ────────────────────────────────────────────────
@@ -175,6 +164,11 @@ export function getNote(id: string): Note | null {
 }
 
 export function updateNote(id: string, patch: NotePatch): Note | null {
+  // Read and write under one write lock: another process's patch in between is never overwritten.
+  return db().transaction(() => updateNoteLocked(id, patch)).immediate()
+}
+
+function updateNoteLocked(id: string, patch: NotePatch): Note | null {
   const current = getNote(id)
   if (!current) return null
   const next = {
@@ -313,7 +307,7 @@ export function buildReferenceContext(): string {
  * of a binary database. Null when the store is not initialized.
  */
 export function exportNotesSnapshot(): string | null {
-  if (!_db) return null
+  if (!hasSchema('notes')) return null
   return JSON.stringify(listNotes({ limit: Number.MAX_SAFE_INTEGER }).reverse(), null, 2)
 }
 
@@ -373,7 +367,8 @@ function migrateLegacyJson(dataDir: string): void {
       continue
     }
 
-    db().transaction(() => {
+    // Checked and recorded inside the transaction: a second process starting now skips it.
+    const applied = migrateOnce(name, () => {
       const insert = db().query(
         `INSERT INTO notes (id, kind, title, body, url, category, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -393,8 +388,8 @@ function migrateLegacyJson(dataDir: string): void {
           note.category?.trim().toLowerCase() || null, created, str(record.updatedAt) || created)
         writeTags(id, collectTags(note.tags ?? [], title, body))
       }
-      db().query('INSERT INTO migrations (name, applied_at) VALUES (?, ?)').run(name, new Date().toISOString())
-    })()
+    })
+    if (!applied) continue
     try {
       renameSync(path, path.replace(/\.json$/, '.migrated.json'))
     } catch (err) {

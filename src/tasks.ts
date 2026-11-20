@@ -1,17 +1,19 @@
 /**
  * Task/reminder system with scheduled Windows notifications.
- * Tasks are stored as JSON in the data directory.
- * A background timer checks every 30s for due tasks and fires
- * Windows toast notifications via PowerShell.
+ * Tasks live in the shared SQLite store, with no copy kept in memory: the
+ * TUI, the MCP server and the Obsidian mirror can all change them without
+ * overwriting each other. A background timer checks every 30s for due tasks
+ * and fires Windows toast notifications via PowerShell.
  *
  * REFACTORED: All PowerShell execution now goes through windows-executor.ts
  */
 
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { IS_WINDOWS } from './platform'
-import { atomicWriteFile } from './vault'
+import { logger } from './core/logger'
+import { ensureSchema, hasSchema, migrateOnce, openStore, store } from './core/store'
 import {
   showToast,
   executeSchtasks,
@@ -31,46 +33,80 @@ export interface Task {
 
 // ─── Storage ────────────────────────────────────────────────
 
-let _dataDir = ''
-let _tasks: Task[] = []
+const CHECK_INTERVAL_MS = 30_000
+/** A reminder fires only within this long after its due time. */
+const NOTIFY_WINDOW_MS = 5 * 60_000
+const LEGACY_FILE = 'tasks.json'
+const OPEN_REMINDERS = 'WHERE done = 0 AND notified = 0 AND due_at IS NOT NULL'
+
 let _checkTimer: ReturnType<typeof setInterval> | null = null
 let _onNotify: ((task: Task) => void) | null = null
 
-const TASKS_FILE = () => join(_dataDir, 'tasks.json')
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS tasks (
+  id         TEXT PRIMARY KEY,
+  title      TEXT NOT NULL,
+  due_at     TEXT,
+  created_at TEXT NOT NULL,
+  done       INTEGER NOT NULL DEFAULT 0 CHECK (done IN (0, 1)),
+  notified   INTEGER NOT NULL DEFAULT 0 CHECK (notified IN (0, 1))
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(done, notified, due_at);
+`
 
-function save(): void {
-  atomicWriteFile(TASKS_FILE(), JSON.stringify(_tasks, null, 2))
+interface TaskRow {
+  id: string
+  title: string
+  due_at: string | null
+  created_at: string
+  done: number
+  notified: number
 }
 
-function load(): void {
-  const file = TASKS_FILE()
-  if (!existsSync(file)) {
-    _tasks = []
-    return
+function toTask(row: TaskRow): Task {
+  return {
+    id: row.id,
+    title: row.title,
+    dueAt: row.due_at,
+    createdAt: row.created_at,
+    done: row.done === 1,
+    notified: row.notified === 1,
   }
-  try {
-    _tasks = JSON.parse(readFileSync(file, 'utf-8'))
-  } catch {
-    _tasks = []
-  }
+}
+
+/** Rows in insertion order, like the JSON array they replace. */
+function selectTasks(where = ''): Task[] {
+  return (store().query(`SELECT * FROM tasks ${where} ORDER BY rowid`).all() as TaskRow[]).map(toTask)
+}
+
+function insertTask(task: Task): void {
+  store().query(
+    'INSERT INTO tasks (id, title, due_at, created_at, done, notified) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(task.id, task.title, task.dueAt, task.createdAt, task.done ? 1 : 0, task.notified ? 1 : 0)
+}
+
+/** First task matching the id or containing the text in its title. */
+function findTask(idOrTitle: string): Task | undefined {
+  const lower = idOrTitle.toLowerCase()
+  return selectTasks().find((t) => t.id === idOrTitle || t.title.toLowerCase().includes(lower))
 }
 
 // ─── Public API ─────────────────────────────────────────────
 
 /**
  * Initialize the task system. Must be called once at startup.
- * @param dataDir Directory to store tasks.json
+ * @param dataDir Directory holding the shared store
  * @param onNotify Callback when a task notification fires
  */
 export function initTasks(dataDir: string, onNotify: (task: Task) => void): void {
-  _dataDir = dataDir
   _onNotify = onNotify
-  if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true })
-  load()
+  openStore(dataDir)
+  ensureSchema('tasks', SCHEMA)
+  migrateLegacyJson(dataDir)
 
-  // Start background checker (every 30 seconds) for in-process notifications
+  // Start background checker for in-process notifications
   if (_checkTimer) clearInterval(_checkTimer)
-  _checkTimer = setInterval(checkDueTasks, 30_000)
+  _checkTimer = setInterval(() => checkDueTasks(), CHECK_INTERVAL_MS)
 
   // Sync pending reminders with Windows Task Scheduler so they fire
   // even if smolerclaw is not running
@@ -99,8 +135,7 @@ export function addTask(title: string, dueAt?: Date): Task {
     done: false,
     notified: false,
   }
-  _tasks = [..._tasks, task]
-  save()
+  insertTask(task)
 
   // Schedule a Windows Task Scheduler job so the reminder fires
   // even if smolerclaw is not running
@@ -115,38 +150,28 @@ export function addTask(title: string, dueAt?: Date): Task {
  * Mark a task as done by ID or partial title match.
  */
 export function completeTask(idOrTitle: string): Task | null {
-  const lower = idOrTitle.toLowerCase()
-  const task = _tasks.find(
-    (t) => t.id === idOrTitle || t.title.toLowerCase().includes(lower),
-  )
+  const task = findTask(idOrTitle)
   if (!task || task.done) return null
 
-  _tasks = _tasks.map((t) =>
-    t.id === task.id ? { ...t, done: true } : t,
-  )
-  save()
+  // Conditional update: if another process completed it first, nothing changes here.
+  const changes = store().query('UPDATE tasks SET done = 1 WHERE id = ? AND done = 0').run(task.id).changes
+  if (changes === 0) return null
 
   // Remove the scheduled Windows task
   if (task.dueAt && IS_WINDOWS) {
     removeWindowsTask(task.id).catch(() => {})
   }
 
-  return _tasks.find((t) => t.id === task.id) || null
+  return { ...task, done: true }
 }
 
 /**
  * Remove a task by ID or partial title.
  */
 export function removeTask(idOrTitle: string): boolean {
-  const lower = idOrTitle.toLowerCase()
-  const idx = _tasks.findIndex(
-    (t) => t.id === idOrTitle || t.title.toLowerCase().includes(lower),
-  )
-  if (idx === -1) return false
-
-  const task = _tasks[idx]
-  _tasks = [..._tasks.slice(0, idx), ..._tasks.slice(idx + 1)]
-  save()
+  const task = findTask(idOrTitle)
+  if (!task) return false
+  if (store().query('DELETE FROM tasks WHERE id = ?').run(task.id).changes === 0) return false
 
   // Remove the scheduled Windows task
   if (task.dueAt && IS_WINDOWS) {
@@ -160,7 +185,16 @@ export function removeTask(idOrTitle: string): boolean {
  * List all tasks, optionally filtering by done status.
  */
 export function listTasks(showDone = false): Task[] {
-  return showDone ? [..._tasks] : _tasks.filter((t) => !t.done)
+  return selectTasks(showDone ? '' : 'WHERE done = 0')
+}
+
+/**
+ * Every task as pretty JSON, for the vault's git backup. Null when the store
+ * is not initialized.
+ */
+export function exportTasksSnapshot(): string | null {
+  if (!hasSchema('tasks')) return null
+  return JSON.stringify(listTasks(true), null, 2)
 }
 
 /**
@@ -228,34 +262,35 @@ export function parseTime(input: string): Date | null {
 
 // ─── Background Checker ─────────────────────────────────────
 
-function checkDueTasks(): void {
-  const now = new Date()
-  let changed = false
+/**
+ * Every running process checks; only the one whose update flips `notified`
+ * fires the reminder, so two processes never show it twice. Exported for
+ * tests, which pass their own toast.
+ */
+export function checkDueTasks(toast: (task: Task) => void = fireNotification): void {
+  if (!hasSchema('tasks')) return
+  try {
+    const now = Date.now()
+    const claim = store().query('UPDATE tasks SET notified = 1 WHERE id = ? AND notified = 0')
+    for (const task of selectTasks(OPEN_REMINDERS)) {
+      const due = new Date(task.dueAt as string).getTime()
+      if (isNaN(due)) continue
 
-  for (const task of _tasks) {
-    if (task.done || task.notified || !task.dueAt) continue
-
-    const due = new Date(task.dueAt)
-    if (isNaN(due.getTime())) continue
-
-    // Fire if due time has passed (within the last 5 minutes)
-    const diffMs = now.getTime() - due.getTime()
-    if (diffMs >= 0 && diffMs < 5 * 60_000) {
-      // Mark as notified
-      _tasks = _tasks.map((t) =>
-        t.id === task.id ? { ...t, notified: true } : t,
-      )
-      changed = true
+      // Fire if due time has passed (within the notification window)
+      const diffMs = now - due
+      if (diffMs < 0 || diffMs >= NOTIFY_WINDOW_MS) continue
+      if (claim.run(task.id).changes === 0) continue
 
       // Fire Windows toast notification
-      fireNotification(task)
+      toast(task)
 
       // Call the callback for TUI display
-      _onNotify?.(task)
+      _onNotify?.({ ...task, notified: true })
     }
+  } catch (err) {
+    // A busy or closed store must not crash the timer; the next tick retries.
+    logger.warn('Task reminder check failed', { error: err })
   }
-
-  if (changed) save()
 }
 
 /** XML-encode a string for safe embedding in XML attributes/text. */
@@ -353,7 +388,7 @@ async function syncScheduledTasks(): Promise<void> {
   if (!IS_WINDOWS) return
 
   const now = Date.now()
-  for (const task of _tasks) {
+  for (const task of selectTasks(OPEN_REMINDERS)) {
     if (task.done || task.notified || !task.dueAt) continue
     const due = new Date(task.dueAt)
     if (isNaN(due.getTime()) || due.getTime() <= now) continue
@@ -399,4 +434,63 @@ function formatDueTime(isoDate: string): string {
 
   const dateStr = date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
   return `${dateStr} ${time}`
+}
+
+// ─── Legacy migration ───────────────────────────────────────
+
+function legacyTask(value: unknown): Task | null {
+  if (!value || typeof value !== 'object') return null
+  const r = value as Record<string, unknown>
+  const title = typeof r.title === 'string' ? r.title.trim() : ''
+  if (!title) return null
+  const dueAt = typeof r.dueAt === 'string' && !isNaN(Date.parse(r.dueAt)) ? r.dueAt : null
+  return {
+    id: typeof r.id === 'string' ? r.id : '',
+    title,
+    dueAt,
+    createdAt: typeof r.createdAt === 'string' ? r.createdAt : new Date().toISOString(),
+    done: r.done === true,
+    notified: r.notified === true,
+  }
+}
+
+/**
+ * Import tasks.json once, keeping ids and order. The file is renamed to
+ * tasks.migrated.json only after its rows are committed, never deleted.
+ */
+function migrateLegacyJson(dataDir: string): void {
+  const name = `legacy:${LEGACY_FILE}`
+  if (store().query('SELECT 1 FROM migrations WHERE name = ?').get(name)) return
+  const path = join(dataDir, LEGACY_FILE)
+  if (!existsSync(path)) return
+
+  let records: unknown[]
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'))
+    if (!Array.isArray(parsed)) logger.warn('Legacy tasks file is not an array; nothing imported', { file: LEGACY_FILE })
+    records = Array.isArray(parsed) ? parsed : []
+  } catch (err) {
+    // Leave an unreadable file untouched for manual recovery.
+    logger.warn('Legacy tasks file is unreadable; skipped', { file: LEGACY_FILE, error: err })
+    return
+  }
+
+  const applied = migrateOnce(name, (db) => {
+    const taken = db.query('SELECT 1 FROM tasks WHERE id = ?')
+    for (const record of records) {
+      const task = legacyTask(record)
+      if (!task) continue
+      // A missing or repeated id gets a fresh one, never a dropped task.
+      let id = task.id && !taken.get(task.id) ? task.id : generateId()
+      while (taken.get(id)) id = generateId()
+      insertTask({ ...task, id })
+    }
+  })
+  if (!applied) return
+  try {
+    renameSync(path, path.replace(/\.json$/, '.migrated.json'))
+  } catch (err) {
+    // Rows are committed and the migration recorded; a locked file only stays in place.
+    logger.warn('Could not rename migrated tasks file', { file: LEGACY_FILE, error: err })
+  }
 }

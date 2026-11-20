@@ -4,11 +4,12 @@
  */
 import { logger } from './core/logger'
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { getDateTimeInfo, getOutlookEvents, getSystemInfo } from './windows'
 import { IS_WINDOWS } from './platform'
 import { listProjects, getGitSummary, type Project } from './projects'
+import { listTasks } from './tasks'
 
 // ─── Calendar Detection ─────────────────────────────────────
 
@@ -66,7 +67,7 @@ export function getDayType(): DayType {
 
 /**
  * Check for spillover work: urgent/overdue tasks and uncommitted git changes.
- * Scans tasks.json and monitored projects for pending work.
+ * Scans pending tasks and monitored projects for pending work.
  */
 export async function checkSpilloverWork(dataDir: string): Promise<{
   hasSpillover: boolean
@@ -82,45 +83,18 @@ export async function checkSpilloverWork(dataDir: string): Promise<{
   const todayEnd = new Date(now)
   todayEnd.setHours(23, 59, 59, 999)
 
-  // Check tasks.json for urgent/overdue tasks
-  const tasksFile = join(dataDir, 'tasks.json')
-  if (existsSync(tasksFile)) {
-    try {
-      const tasks: Array<{
-        id: string
-        title: string
-        dueAt: string | null
-        done: boolean
-      }> = JSON.parse(readFileSync(tasksFile, 'utf-8'))
-
-      for (const task of tasks) {
-        if (task.done) continue
-
-        if (task.dueAt) {
-          const dueDate = new Date(task.dueAt)
-          const isOverdue = dueDate < now
-          const isUrgent = !isOverdue && dueDate <= todayEnd
-
-          if (isOverdue) {
-            overdueTasks.push({
-              id: task.id,
-              title: task.title,
-              dueAt: task.dueAt,
-              isOverdue: true,
-            })
-          } else if (isUrgent) {
-            urgentTasks.push({
-              id: task.id,
-              title: task.title,
-              dueAt: task.dueAt,
-              isOverdue: false,
-            })
-          }
-        }
-      }
-    } catch (err) {
-      logger.debug('Failed to parse task for spillover check', { error: err })
+  // Check pending tasks for urgent/overdue ones
+  try {
+    for (const task of listTasks(false)) {
+      if (!task.dueAt) continue
+      const dueDate = new Date(task.dueAt)
+      const isOverdue = dueDate < now
+      const spill = { id: task.id, title: task.title, dueAt: task.dueAt, isOverdue }
+      if (isOverdue) overdueTasks.push(spill)
+      else if (dueDate <= todayEnd) urgentTasks.push(spill)
     }
+  } catch (err) {
+    logger.warn('Task store unavailable for spillover check', { error: err })
   }
 
   // Check active projects for uncommitted/unpushed work

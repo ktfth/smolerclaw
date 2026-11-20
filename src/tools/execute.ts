@@ -2,6 +2,7 @@
  * Tool dispatch. Every entry returns a ToolResult; string-returning handlers
  * (workstation primitives, integrations, plugins) go through fromLegacyText.
  */
+import { BUSY_MESSAGE, isBusyError } from '../core/store'
 import { UndoStack } from '../undo'
 import { type Plugin, executePlugin } from '../plugins'
 import { executePluginTool } from '../plugin-system'
@@ -74,6 +75,7 @@ export async function dispatchTool(
 
     return fail(`unknown tool "${name}"`)
   } catch (err) {
+    if (isBusyError(err)) return fail(BUSY_MESSAGE)
     return fail(err instanceof Error ? err.message : String(err))
   }
 }

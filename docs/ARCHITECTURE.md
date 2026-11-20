@@ -44,7 +44,7 @@ O smolerclaw separa claramente **raciocínio (agente/LLM)** de **execução de f
 │  tool-safety.ts · approval.ts · plugin-system.ts        │
 ├─────────────────────────────────────────────────────────┤
 │          Core Infrastructure & Persistence              │
-│  notes.ts (SQLite bun:sqlite) · vault.ts (atomic+git)   │
+│  core/store.ts (smolerclaw.db, WAL) · vault.ts (git)    │
 │  config.ts (SMOLERCLAW_DATA_DIR / CONFIG_DIR)           │
 │  workflows.ts · scheduler.ts · event-bus.ts · i18n/     │
 ├─────────────────────────────────────────────────────────┤
@@ -100,12 +100,11 @@ Por padrão, os dados vivem em `%LOCALAPPDATA%/smolerclaw/` (Windows) ou `~/.loc
 
 ```
 <dataDir>/
-├── notes.db                Notas unificadas (memos, links, referências) em SQLite (bun:sqlite)
+├── smolerclaw.db           SQLite compartilhado (WAL): notas, tarefas, manifesto do Obsidian
 ├── audit/engine-*.jsonl    Trilha de auditoria append-only (1 arquivo/dia UTC)
 ├── logs/workflow_*.log     Logs de workflows agendados
 ├── scripts/*.ps1           Scripts gerados para o Windows Task Scheduler
 ├── sessions/*.json         Conversas (SessionManager)
-├── tasks.json              Tarefas (escrita atômica)
 ├── people.json             Pessoas + delegações
 ├── finance.json            Transações
 ├── decisions.json          Log de decisões
@@ -113,7 +112,7 @@ Por padrão, os dados vivem em `%LOCALAPPDATA%/smolerclaw/` (Windows) ou `~/.loc
 ├── scheduler.json          Jobs agendados (com policyEnv fixado)
 ├── projects.json           Projetos e sessões de trabalho
 ├── vault-checksums.json    Integridade SHA-256
-└── .backup/                Repo git de backup (inclui snapshot JSON de notes.db)
+└── .backup/                Repo git de backup (inclui snapshots JSON de notas e tarefas)
 ```
 
 ---
@@ -125,4 +124,5 @@ Por padrão, os dados vivem em `%LOCALAPPDATA%/smolerclaw/` (Windows) ou `~/.loc
 3. **Política estática e determinística** — `dangerous` é sempre bloqueado; `SMOLERCLAW_READONLY=1` bloqueia mutações em tools e workflows; `m365_send_email` e `gws_send_email` exigem `SMOLERCLAW_ALLOW_SEND=1` no engine e consentimento interativo no chat.
 4. **Proteção contra injeção** — Binários `m365`/`gws` resolvem via `resolve-bin.ts` recusando shims `.cmd`/`.bat` (BatBadBut); PowerShell passa por `windows-executor.ts` com escape de aspas e guards; scheduler não possui ação de comando cru e fixa `policyEnv` na criação do job.
 5. **Auditoria sem vazamento** — `AuditRecord` grava apenas `inputHash` (SHA-256 do JSON canônico), `runId`, `caller`, decisão e duração — nunca argumentos brutos.
-6. **Integridade de dados** — Escrita atômica (`atomicWriteFile`), checksums SHA-256 e transações SQLite para `notes.db`.
+6. **Integridade de dados** — Escrita atômica (`atomicWriteFile`), checksums SHA-256 e transações SQLite em `smolerclaw.db`.
+7. **Vários processos, um banco** — TUI, servidor MCP e `run` abrem o mesmo `smolerclaw.db` sem cache em memória. WAL deixa leituras correrem junto com uma escrita, `busy_timeout` faz a segunda escrita esperar, e as mudanças de estado são condicionais (`UPDATE … WHERE done = 0`, `… WHERE notified = 0`). Assim um lembrete dispara num processo só, e concluir duas vezes a mesma tarefa não sobrescreve nada. O sync do Obsidian roda sob o lock de escrita (`BEGIN IMMEDIATE`). Os demais domínios em JSON (pessoas, finanças, projetos…) ainda carregam uma vez e regravam o arquivo inteiro, então neles o último processo a gravar vence.
