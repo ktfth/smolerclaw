@@ -93,9 +93,7 @@ export function initVault(dataDir: string, configDir: string): void {
 
   // Check if backup repo exists
   _backupEnabled = existsSync(join(_backupDir, '.git'))
-  if (_backupEnabled) {
-    _lastBackup = readLastBackupTime()
-  }
+  _lastBackup = _backupEnabled ? readLastBackupTime() : null
 }
 
 export function isVaultInitialized(): boolean {
@@ -569,20 +567,49 @@ export function stopEventDrivenBackup(): void {
 // ─── Background Backup Timer ────────────────────────────────
 
 let _backupTimer: ReturnType<typeof setInterval> | null = null
+let _backupInFlight: Promise<ToolResult> | null = null
+
+/** True when no backup exists yet, or the last one is older than the interval. */
+export function backupIsDue(lastBackup: string | null, intervalMinutes: number, now: number): boolean {
+  if (!lastBackup) return true
+  const last = Date.parse(lastBackup)
+  if (Number.isNaN(last)) return true
+  return now - last >= intervalMinutes * 60_000
+}
 
 /**
- * Start periodic background backups (every N minutes).
- * Non-blocking — runs after the current event loop tick.
+ * Back up when due. Returns null when skipped: backup not initialized, not due
+ * yet, or another backup already running in this process.
+ */
+export async function runAutoBackupIfDue(intervalMinutes: number): Promise<ToolResult | null> {
+  if (!_backupEnabled || _backupInFlight) return null
+  if (!backupIsDue(_lastBackup, intervalMinutes, Date.now())) return null
+  _backupInFlight = performBackup('auto-backup')
+  try {
+    return await _backupInFlight
+  } finally {
+    _backupInFlight = null
+  }
+}
+
+/**
+ * Start periodic background backups (every N minutes) and catch up right away
+ * when the last backup is already older than the interval. Only for
+ * long-lived processes (TUI, MCP server): killing a one-shot command
+ * mid-commit would leave a stale git lock. The timer never keeps the process alive.
  */
 export function startAutoBackup(intervalMinutes: number = 30): void {
   stopAutoBackup()
   if (!_backupEnabled) return
 
-  _backupTimer = setInterval(() => {
-    performBackup('auto-backup').catch(() => {
-      // Silent failure — don't crash the TUI
+  const tick = (): void => {
+    runAutoBackupIfDue(intervalMinutes).catch(() => {
+      // performBackup already reports failures through the event bus
     })
-  }, intervalMinutes * 60 * 1000)
+  }
+  _backupTimer = setInterval(tick, intervalMinutes * 60_000)
+  _backupTimer.unref?.()
+  setTimeout(tick, 0).unref?.()
 }
 
 export function stopAutoBackup(): void {
@@ -590,6 +617,10 @@ export function stopAutoBackup(): void {
     clearInterval(_backupTimer)
     _backupTimer = null
   }
+}
+
+export function isAutoBackupRunning(): boolean {
+  return _backupTimer !== null
 }
 
 export function getBackupDir(): string {

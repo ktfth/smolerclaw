@@ -1,4 +1,4 @@
-import { initVault, initShadowBackup, startAutoBackup } from '../vault'
+import { initVault } from '../vault'
 import { initPeople } from '../people'
 import { initNotes } from '../notes'
 import { initFinance } from '../finance'

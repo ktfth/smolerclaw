@@ -11,7 +11,7 @@ import { stopTasks } from '../tasks'
 import { stopPomodoroTimer } from '../pomodoro'
 import { stopAllMonitors } from '../monitor'
 import { stopScheduler } from '../scheduler'
-import { stopAutoBackup } from '../vault'
+import { startAutoBackup, stopAutoBackup } from '../vault'
 import { shutdownPluginSystem } from '../plugin-system'
 import { isFirstRunToday, markMorningDone, generateMorningBriefing } from '../morning'
 import { getVersion } from '../cli'
@@ -49,6 +49,7 @@ export async function runInteractive(
 
   // Initialize people, task, memo, and material systems
   initAllModules(config.dataDir, tui)
+  startAutoBackup()
 
   // Initialize Time & Load Balancer — detect persona based on day/workload
   let timeContext: TimeContext | null = null

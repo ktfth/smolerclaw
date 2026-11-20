@@ -133,7 +133,14 @@ export async function runEngineMode(argv: string[], io: EngineIO = DEFAULT_IO): 
 
       case 'mcp': {
         const { serveMcpStdio } = await import('../mcp/server')
-        await serveMcpStdio(runtime.engine, getVersion())
+        const { startAutoBackup, stopAutoBackup } = await import('../vault')
+        // Long-lived process: the only engine command allowed to back up in the background.
+        startAutoBackup()
+        try {
+          await serveMcpStdio(runtime.engine, getVersion())
+        } finally {
+          stopAutoBackup()
+        }
         return 0
       }
 

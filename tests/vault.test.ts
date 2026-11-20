@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 import {
   initVault, isVaultInitialized, atomicWriteFile, writeJson, readJson,
   getVaultStatus, formatVaultStatus, initShadowBackup, performBackup,
-  getBackupDir,
+  getBackupDir, backupIsDue, runAutoBackupIfDue, startAutoBackup, stopAutoBackup, isAutoBackupRunning,
 } from '../src/vault'
 
 const TEST_DIR = join(tmpdir(), `smolerclaw-vault-test-${Date.now()}`)
@@ -262,5 +262,69 @@ describe('Vault — Shadow Backup', () => {
     const status = getVaultStatus()
     expect(status.backupEnabled).toBe(true)
     expect(status.lastBackup).toBeTruthy()
+  })
+})
+
+describe('Vault — Auto Backup', () => {
+  const HOUR = 60 * 60 * 1000
+
+  beforeEach(() => {
+    cleanup()
+    mkdirSync(TEST_DIR, { recursive: true })
+    mkdirSync(CONFIG_DIR, { recursive: true })
+    initVault(TEST_DIR, CONFIG_DIR)
+  })
+
+  afterEach(() => {
+    stopAutoBackup()
+    cleanup()
+  })
+
+  test('backupIsDue is true when there has never been a backup', () => {
+    expect(backupIsDue(null, 30, Date.now())).toBe(true)
+  })
+
+  test('backupIsDue compares the last backup against the interval', () => {
+    const now = Date.parse('2026-11-20T12:00:00Z')
+    expect(backupIsDue(new Date(now - 2 * HOUR).toISOString(), 30, now)).toBe(true)
+    expect(backupIsDue(new Date(now - 10 * 60 * 1000).toISOString(), 30, now)).toBe(false)
+  })
+
+  test('backupIsDue treats an unreadable timestamp as due', () => {
+    expect(backupIsDue('not-a-date', 30, Date.now())).toBe(true)
+  })
+
+  test('runAutoBackupIfDue does nothing while backup is not initialized', async () => {
+    expect(await runAutoBackupIfDue(30)).toBeNull()
+  })
+
+  test('runAutoBackupIfDue backs up when due and skips right after', async () => {
+    await initShadowBackup()
+    atomicWriteFile(join(TEST_DIR, 'tasks.json'), '[]')
+
+    const first = await runAutoBackupIfDue(30)
+    expect(first?.ok).toBe(true)
+    expect(await runAutoBackupIfDue(30)).toBeNull()
+  })
+
+  test('concurrent runAutoBackupIfDue calls run a single backup', async () => {
+    await initShadowBackup()
+    atomicWriteFile(join(TEST_DIR, 'tasks.json'), '[]')
+
+    const results = await Promise.all([runAutoBackupIfDue(30), runAutoBackupIfDue(30)])
+    expect(results.filter((r) => r !== null)).toHaveLength(1)
+  })
+
+  test('startAutoBackup stays off without an initialized backup', () => {
+    startAutoBackup(30)
+    expect(isAutoBackupRunning()).toBe(false)
+  })
+
+  test('startAutoBackup runs once backup is initialized', async () => {
+    await initShadowBackup()
+    startAutoBackup(30)
+    expect(isAutoBackupRunning()).toBe(true)
+    stopAutoBackup()
+    expect(isAutoBackupRunning()).toBe(false)
   })
 })
