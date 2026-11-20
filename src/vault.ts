@@ -60,16 +60,19 @@ const CHECKSUM_FILE = 'vault-checksums.json'
 const BACKUP_BRANCH = 'smolerclaw-backup'
 
 // Files to track checksums for (relative to dataDir)
+/**
+ * JSON files in the data dir. Tasks and notes live in SQLite and config in the
+ * config dir; performBackup snapshots or copies those separately.
+ */
 const TRACKED_FILES = [
-  'config.json',
   'decisions.json',
-  'tasks.json',
   'finance.json',
   'people.json',
   'projects.json',
   'work-sessions.json',
   'opportunities.json',
   'workflows.json',
+  'scheduler.json',
 ]
 
 // ─── Singleton State ────────────────────────────────────────
@@ -89,6 +92,7 @@ export function initVault(dataDir: string, configDir: string): void {
   _configDir = configDir
   _backupDir = join(dataDir, '.backup')
   loadChecksums()
+  adoptUnrecordedFiles()
   _initialized = true
 
   // Check if backup repo exists
@@ -198,6 +202,31 @@ function updateChecksum(relFile: string, content: string): void {
     ..._checksums.filter((c) => c.file !== relFile),
     { file: relFile, sha256: hash, size, updatedAt: now },
   ]
+  saveChecksums()
+}
+
+/**
+ * A tracked file with no checksum record was written before the vault knew
+ * about it; its current content becomes the baseline. Changes after that are
+ * caught, earlier ones cannot be known either way.
+ */
+function adoptUnrecordedFiles(): void {
+  const recorded = new Set(_checksums.map((c) => c.file))
+  const now = new Date().toISOString()
+  const adopted: ChecksumRecord[] = []
+  for (const rel of TRACKED_FILES) {
+    if (recorded.has(rel)) continue
+    const file = join(_dataDir, rel)
+    if (!existsSync(file)) continue
+    try {
+      const content = readFileSync(file, 'utf-8')
+      adopted.push({ file: rel, sha256: sha256(content), size: Buffer.byteLength(content, 'utf-8'), updatedAt: now })
+    } catch {
+      // Unreadable now: stays unrecorded and shows as such in the status.
+    }
+  }
+  if (adopted.length === 0) return
+  _checksums = [..._checksums, ...adopted]
   saveChecksums()
 }
 
