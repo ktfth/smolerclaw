@@ -41,6 +41,14 @@ export interface WorkSession {
   endedAt: string | null
   durationMinutes: number
   notes: string
+  /** Set when the session ran past MAX_SESSION_MINUTES and was closed at the cap. */
+  capped?: boolean
+}
+
+export interface OpenSessionStatus extends WorkSession {
+  elapsedMinutes: number
+  /** Open longer than MAX_SESSION_MINUTES: probably forgotten. */
+  stale: boolean
 }
 
 export interface Opportunity {
@@ -248,17 +256,20 @@ export function clearActiveProject(): void {
 
 // ─── Work Sessions ──────────────────────────────────────────
 
-export function startSession(projectId: string, notes: string = ''): WorkSession | null {
+/** No real work session lasts longer than this; beyond it the timer was forgotten. */
+export const MAX_SESSION_MINUTES = 12 * 60
+
+export function startSession(projectId: string, notes: string = '', now: Date = new Date()): WorkSession | null {
   const project = _projects.find((p) => p.id === projectId)
   if (!project) return null
 
   // Close any open session for this project
-  endOpenSessions(projectId)
+  endOpenSessions(projectId, now)
 
   const session: WorkSession = {
     id: genId(),
     projectId,
-    startedAt: new Date().toISOString(),
+    startedAt: now.toISOString(),
     endedAt: null,
     durationMinutes: 0,
     notes: notes.trim(),
@@ -268,38 +279,58 @@ export function startSession(projectId: string, notes: string = ''): WorkSession
   return session
 }
 
-export function endSession(sessionId: string, notes?: string): WorkSession | null {
+export function endSession(sessionId: string, notes?: string, now: Date = new Date()): WorkSession | null {
   const found = _sessions.find((s) => s.id === sessionId)
   if (!found || found.endedAt) return null
 
-  const now = new Date()
-  const start = new Date(found.startedAt)
-  const duration = Math.round((now.getTime() - start.getTime()) / 60_000)
-
-  _sessions = _sessions.map((s) =>
-    s.id === sessionId
-      ? {
-          ...s,
-          endedAt: now.toISOString(),
-          durationMinutes: duration,
-          notes: notes ? `${s.notes}\n${notes}`.trim() : s.notes,
-        }
-      : s,
-  )
+  const closed = closeSession(found, now)
+  const ended = notes ? { ...closed, notes: `${closed.notes}
+${notes}`.trim() } : closed
+  _sessions = _sessions.map((s) => (s.id === sessionId ? ended : s))
   saveSessions()
-  return _sessions.find((s) => s.id === sessionId) || null
+  return ended
 }
 
-function endOpenSessions(projectId: string): void {
-  const now = new Date()
-  _sessions = _sessions.map((s) => {
-    if (s.projectId === projectId && !s.endedAt) {
-      const start = new Date(s.startedAt)
-      const duration = Math.round((now.getTime() - start.getTime()) / 60_000)
-      return { ...s, endedAt: now.toISOString(), durationMinutes: duration }
-    }
-    return s
-  })
+/** Elapsed time of an open session, without changing it. */
+export function openSessionStatus(session: WorkSession, now: Date = new Date()): OpenSessionStatus {
+  const elapsedMinutes = minutesBetween(session.startedAt, now)
+  return { ...session, elapsedMinutes, stale: elapsedMinutes > MAX_SESSION_MINUTES }
+}
+
+function minutesBetween(startedAt: string, now: Date): number {
+  return Math.max(0, Math.round((now.getTime() - new Date(startedAt).getTime()) / 60_000))
+}
+
+/**
+ * Close a session at `now`, or at the cap when it ran longer than
+ * MAX_SESSION_MINUTES. A capped session keeps a note with the real span, so
+ * reports never count a forgotten timer as days of work.
+ */
+function closeSession(session: WorkSession, now: Date): WorkSession {
+  const elapsed = minutesBetween(session.startedAt, now)
+  if (elapsed <= MAX_SESSION_MINUTES) {
+    return { ...session, endedAt: now.toISOString(), durationMinutes: elapsed }
+  }
+  const capEnd = new Date(new Date(session.startedAt).getTime() + MAX_SESSION_MINUTES * 60_000)
+  const note = `[encerrada no teto de ${MAX_SESSION_MINUTES / 60}h: ficou aberta ${formatSpan(elapsed)}]`
+  return {
+    ...session,
+    endedAt: capEnd.toISOString(),
+    durationMinutes: MAX_SESSION_MINUTES,
+    capped: true,
+    notes: `${session.notes}
+${note}`.trim(),
+  }
+}
+
+function formatSpan(minutes: number): string {
+  const days = Math.floor(minutes / (24 * 60))
+  if (days >= 1) return `${days} ${days === 1 ? 'dia' : 'dias'}`
+  return `${Math.floor(minutes / 60)}h`
+}
+
+function endOpenSessions(projectId: string, now: Date): void {
+  _sessions = _sessions.map((s) => (s.projectId === projectId && !s.endedAt ? closeSession(s, now) : s))
   saveSessions()
 }
 

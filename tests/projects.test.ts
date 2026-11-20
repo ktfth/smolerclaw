@@ -6,6 +6,7 @@ import {
   initProjects, addProject, getProject, listProjects, updateProject, removeProject,
   setActiveProject, getActiveProject, clearActiveProject,
   startSession, endSession, getOpenSession, getSessionsForPeriod,
+  openSessionStatus, MAX_SESSION_MINUTES,
   addOpportunity, updateOpportunityStatus, listOpportunities, removeOpportunity,
   generateWorkReport, autoDetectProject, getProjectBriefingSummary,
   formatProjectList, formatProjectDetail, formatOpportunityList,
@@ -484,5 +485,67 @@ describe('Project Management', () => {
     addOpportunity('New opp', 'desc', 'src')
     const summary = getProjectBriefingSummary()
     expect(summary).toContain('1 oportunidade')
+  })
+})
+
+describe('Work sessions — duration cap', () => {
+  const MIN = 60_000
+
+  beforeEach(() => {
+    cleanup()
+    mkdirSync(TEST_DIR, { recursive: true })
+    initProjects(TEST_DIR)
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  test('MAX_SESSION_MINUTES is 12 hours', () => {
+    expect(MAX_SESSION_MINUTES).toBe(12 * 60)
+  })
+
+  test('endSession keeps the real duration under the cap', () => {
+    const p = addProject('cap', '/cap')
+    const s = startSession(p.id)!
+    const now = new Date(Date.parse(s.startedAt) + 90 * MIN)
+    const ended = endSession(s.id, undefined, now)!
+    expect(ended.durationMinutes).toBe(90)
+    expect(ended.capped).toBeUndefined()
+    expect(ended.endedAt).toBe(now.toISOString())
+  })
+
+  test('endSession caps a session left open for days', () => {
+    const p = addProject('cap', '/cap')
+    const s = startSession(p.id, 'reunião')!
+    const start = Date.parse(s.startedAt)
+    const ended = endSession(s.id, undefined, new Date(start + 3 * 24 * 60 * MIN))!
+    expect(ended.durationMinutes).toBe(MAX_SESSION_MINUTES)
+    expect(ended.capped).toBe(true)
+    expect(ended.endedAt).toBe(new Date(start + MAX_SESSION_MINUTES * MIN).toISOString())
+    expect(ended.notes).toContain('reunião')
+    expect(ended.notes).toContain('3 dias')
+  })
+
+  test('starting a new session caps the stale one it closes', () => {
+    const p = addProject('cap', '/cap')
+    const old = startSession(p.id)!
+    const later = new Date(Date.parse(old.startedAt) + 30 * 60 * MIN)
+    startSession(p.id, 'nova', later)
+    const closed = getSessionsForPeriod(p.id, new Date(0), new Date(later.getTime() + MIN)).find((x) => x.id === old.id)!
+    expect(closed.durationMinutes).toBe(MAX_SESSION_MINUTES)
+    expect(closed.capped).toBe(true)
+  })
+
+  test('openSessionStatus reports elapsed minutes and staleness', () => {
+    const p = addProject('cap', '/cap')
+    const s = startSession(p.id)!
+    const start = Date.parse(s.startedAt)
+    const fresh = openSessionStatus(s, new Date(start + 45 * MIN))
+    expect(fresh.elapsedMinutes).toBe(45)
+    expect(fresh.stale).toBe(false)
+    const stale = openSessionStatus(s, new Date(start + 13 * 60 * MIN))
+    expect(stale.elapsedMinutes).toBe(13 * 60)
+    expect(stale.stale).toBe(true)
   })
 })

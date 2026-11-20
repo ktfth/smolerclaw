@@ -1,7 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import {
   setActiveProject, getActiveProject, addProject, listProjects,
-  startSession, endSession, getOpenSession,
+  startSession, endSession, getOpenSession, openSessionStatus, MAX_SESSION_MINUTES,
   addOpportunity, updateOpportunityStatus, listOpportunities,
   generateWorkReport, autoDetectProject, checkProjectPath,
   formatProjectList, formatOpportunityList,
@@ -148,14 +148,15 @@ function workSession(action: unknown, notes: string): ToolResult {
       if (!open) return fail('Nenhuma sessão aberta para este projeto.')
       const ended = endSession(open.id, notes)
       if (!ended) return fail('Erro ao encerrar sessão.')
-      return ok(`Sessão encerrada: ${ended.durationMinutes} minutos trabalhados em "${active.name}".`, ended)
+      const capNote = ended.capped ? ` A sessão ficou aberta além de ${MAX_SESSION_MINUTES / 60}h e foi registrada no teto.` : ''
+      return ok(`Sessão encerrada: ${ended.durationMinutes} minutos trabalhados em "${active.name}".${capNote}`, ended)
     }
     case 'status': {
       const open = getOpenSession(active.id)
       if (!open) return ok(`Nenhuma sessão aberta para "${active.name}".`, null)
-      const started = new Date(open.startedAt)
-      const elapsed = Math.round((Date.now() - started.getTime()) / 60_000)
-      return ok(`Sessão aberta: "${active.name}" — ${elapsed} minutos (desde ${clock(started)})`, open)
+      const status = openSessionStatus(open)
+      const staleNote = status.stale ? ` Aberta há mais de ${MAX_SESSION_MINUTES / 60}h: provavelmente esquecida; ao encerrar, conta ${MAX_SESSION_MINUTES / 60}h.` : ''
+      return ok(`Sessão aberta: "${active.name}" — ${status.elapsedMinutes} minutos (desde ${clock(new Date(open.startedAt))}).${staleNote}`, status)
     }
     default:
       return fail('action must be start, stop, or status.')
