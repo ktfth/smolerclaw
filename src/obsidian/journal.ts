@@ -46,16 +46,21 @@ export function createJournalSink(
       const vr = vault()
       if (!vr) return
       if (record.decision === 'executed' && record.ok && isReadOnly(record.tool)) return
-      try {
-        const stamped = new Date(record.ts)
-        const when = Number.isNaN(stamped.getTime()) ? new Date() : stamped
-        const file = ownedPath(vr, `${JOURNAL_DIR}/${localDate(when)}.md`)
-        const header = existsSync(file) ? '' : `# Diário smolerclaw — ${localDate(when)}\n\n`
-        appendFileSync(file, header + journalLine(record, when))
-      } catch (err) {
-        process.stderr.write(`smolerclaw: journal write failed: ${err instanceof Error ? err.message : String(err)}\n`)
-      }
+      const stamped = new Date(record.ts)
+      const when = Number.isNaN(stamped.getTime()) ? new Date() : stamped
+      appendJournal(vr, when, journalLine(record, when))
     },
+  }
+}
+
+/** Append one line to the day's journal file, creating it with a header. Never throws. */
+export function appendJournal(vr: VaultRoot, when: Date, line: string): void {
+  try {
+    const file = ownedPath(vr, `${JOURNAL_DIR}/${localDate(when)}.md`)
+    const header = existsSync(file) ? '' : `# Diário smolerclaw — ${localDate(when)}\n\n`
+    appendFileSync(file, header + line)
+  } catch (err) {
+    process.stderr.write(`smolerclaw: journal write failed: ${err instanceof Error ? err.message : String(err)}\n`)
   }
 }
 

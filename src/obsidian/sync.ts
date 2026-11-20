@@ -27,6 +27,16 @@ export const INBOX_SETTLE_MS = 30_000
 interface ManifestEntry {
   path: string
   hash: string
+  /** mtime when recorded: an unchanged mtime means unchanged content, no read needed. */
+  mtime?: number
+}
+
+function entryFor(abs: string, rel: string, hash: string): ManifestEntry {
+  try {
+    return { path: rel, hash, mtime: statSync(abs).mtimeMs }
+  } catch {
+    return { path: rel, hash }
+  }
 }
 
 /** Keys: `note:<id>`, `tasks`, `panel`. Hash = sha256 of the content smolerclaw last wrote. */
@@ -179,12 +189,12 @@ export function push(vr: VaultRoot, now = new Date()): PushReport {
           return
         }
         if (actual === wanted) {
-          files[key] = { path: rel, hash: wanted }
+          files[key] = entryFor(abs, rel, wanted)
           return
         }
       }
       writeAtomic(abs, content)
-      files[key] = { path: rel, hash: wanted }
+      files[key] = entryFor(abs, rel, wanted)
       report.written.push(rel)
     } catch (err) {
       report.errors.push(`${rel}: ${errorText(err)}`)
@@ -279,7 +289,7 @@ function pullNotes(vr: VaultRoot, files: Record<string, ManifestEntry>, report: 
       const note = getNote(id)
       if (!note) continue
       if (!files[key] && text === renderNote(note)) {
-        files[key] = { path: rel, hash: sha(text) }
+        files[key] = entryFor(abs, rel, sha(text))
         continue
       }
 
@@ -301,7 +311,7 @@ function pullNotes(vr: VaultRoot, files: Record<string, ManifestEntry>, report: 
         }
       }
       // Mark the file as ours again so push rewrites it in canonical form.
-      files[key] = { path: rel, hash: sha(text) }
+      files[key] = entryFor(abs, rel, sha(text))
     } catch (err) {
       report.errors.push(`${rel}: ${errorText(err)}`)
     }
@@ -407,7 +417,7 @@ function pullTasks(vr: VaultRoot, files: Record<string, ManifestEntry>, report: 
       report.errors.push(`${rel}: ${errorText(err)}`)
     }
   }
-  files.tasks = { path: rel, hash: sha(text) }
+  files.tasks = entryFor(ownedPath(vr, rel), rel, sha(text))
 }
 
 export function pull(vr: VaultRoot, options: PullOptions = {}): PullReport {
@@ -433,17 +443,38 @@ export function sync(vr: VaultRoot, options: PullOptions = {}): { pull: PullRepo
 
 // ─── Status ─────────────────────────────────────────────────
 
+export interface PendingChanges {
+  edits: string[]
+  inbox: string[]
+}
+
+/**
+ * What changed in Obsidian since the last sync. Cheap enough to run every
+ * round: a file is read only when its mtime differs from the recorded one.
+ */
+export function pendingChanges(vr: VaultRoot, errors: string[] = []): PendingChanges {
+  const edits = Object.values(loadManifest(vr)).flatMap((entry) => {
+    const abs = join(vr.root, ...entry.path.split('/'))
+    let mtime: number
+    try {
+      mtime = statSync(abs).mtimeMs
+    } catch {
+      return [] // missing: push recreates it, nothing to pull
+    }
+    if (entry.mtime === mtime) return []
+    const text = readText(abs)
+    return text !== null && sha(text) !== entry.hash ? [entry.path] : []
+  })
+  return { edits, inbox: listMarkdown(vr, INBOX_DIR, { recursive: false }, errors) }
+}
+
 export function status(vr: VaultRoot): VaultStatus & { errors: string[] } {
   const errors: string[] = []
   const files = loadManifest(vr)
-  const pendingEdits = Object.values(files).flatMap((entry) => {
-    const text = readText(join(vr.root, ...entry.path.split('/')))
-    return text !== null && sha(text) !== entry.hash ? [entry.path] : []
-  })
+  const { edits: pendingEdits, inbox } = pendingChanges(vr, errors)
   const conflicts = [
     ...listMarkdown(vr, NOTES_DIR, { recursive: true, conflicts: true }, errors),
     ...listMarkdown(vr, '.', { recursive: false, conflicts: true }, errors).map((p) => p.replace(/^\.\//, '')),
   ]
-  const inbox = listMarkdown(vr, INBOX_DIR, { recursive: false }, errors)
   return { root: vr.root, tracked: Object.keys(files).length, pendingEdits, inbox, conflicts, errors }
 }

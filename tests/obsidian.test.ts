@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { initNotes, closeNotes, addNote, getNote, updateNote, deleteNote, type Note } from '../src/notes'
 import { initTasks, addTask, listTasks } from '../src/tasks'
 import { resolveVault, ownedPath, type VaultRoot } from '../src/obsidian/paths'
-import { push, pull, status } from '../src/obsidian/sync'
+import { push, pull, status, pendingChanges } from '../src/obsidian/sync'
 import { slugify, parseFile, renderNote, renderTasks, parseTasks, defaultNotePath } from '../src/obsidian/markdown'
 import { createJournalSink, journalLine, teeAudit } from '../src/obsidian/journal'
 import { initObsidian } from '../src/obsidian'
@@ -352,5 +352,77 @@ describe('tools', () => {
     const synced = await executeToolResult('obsidian_sync', {})
     expect(synced.text).toContain('Notas criadas pela Inbox (1)')
     expect((await executeToolResult('obsidian_status', {})).ok).toBe(true)
+  })
+})
+
+describe('pull mode', () => {
+  /** Vault with one exported note whose file was then edited in "Obsidian". */
+  async function editedVault(): Promise<{ vault: string; root: string; note: Note }> {
+    const vault = makeVault()
+    initObsidian(vault)
+    const saved = await executeToolResult('save_note', { kind: 'memo', body: 'versão do banco' })
+    const note = saved.data as Note
+    const root = join(vault, 'smolerclaw')
+    const file = join(root, ...defaultNotePath(note).split('/'))
+    writeFileSync(file, readFileSync(file, 'utf-8').replace('versão do banco', 'versão do obsidian'))
+    return { vault, root, note }
+  }
+
+  test('starts off: nothing is reported or pulled', async () => {
+    const { note } = await editedVault()
+    const listed = await executeToolResult('list_notes', {})
+    expect(listed.text).not.toContain('[obsidian]')
+    expect(getNote(note.id)?.body).toBe('versão do banco')
+    expect((await executeToolResult('obsidian_mode', {})).text).toContain('off')
+  })
+
+  test('ask: the round reports unsynced edits once and changes nothing', async () => {
+    const { note } = await editedVault()
+    expect((await executeToolResult('obsidian_mode', { pull: 'ask' })).ok).toBe(true)
+
+    const first = await executeToolResult('list_notes', {})
+    expect(first.text).toContain('[obsidian] 1 alteração no vault ainda não sincronizada')
+    expect(first.text).toContain('obsidian_sync')
+    expect((await executeToolResult('list_notes', {})).text).not.toContain('[obsidian]')
+    expect(getNote(note.id)?.body).toBe('versão do banco')
+
+    await executeToolResult('obsidian_sync', {})
+    expect(getNote(note.id)?.body).toBe('versão do obsidian')
+    expect((await executeToolResult('list_notes', {})).text).not.toContain('[obsidian]')
+  })
+
+  test('auto: the round pulls before the tool runs and journals it', async () => {
+    const { root } = await editedVault()
+    await executeToolResult('obsidian_mode', { pull: 'auto' })
+    await executeToolResult('create_task', { title: 'pagar aluguel' })
+    const tasksFile = join(root, 'Tarefas.md')
+    writeFileSync(tasksFile, readFileSync(tasksFile, 'utf-8').replace('- [ ] pagar', '- [x] pagar'))
+
+    const listed = await executeToolResult('list_tasks', {})
+    expect(listed.text).toContain('Sincronizado automaticamente')
+    expect(listed.text).toContain('1 tarefa concluída')
+    expect(listTasks(false)).toEqual([])
+    const journal = readdirSync(join(root, 'Diário')).map((f) => readFileSync(join(root, 'Diário', f), 'utf-8')).join('')
+    expect(journal).toContain('sync automático do Obsidian')
+  })
+
+  test('SMOLERCLAW_OBSIDIAN_PULL overrides the mode stored in the vault', async () => {
+    const vault = makeVault()
+    initObsidian(vault, 'ask')
+    const result = await executeToolResult('obsidian_mode', { pull: 'off' })
+    expect(result.text).toContain('SMOLERCLAW_OBSIDIAN_PULL')
+    expect((result.data as { mode: string }).mode).toBe('ask')
+    expect((await executeToolResult('obsidian_mode', { pull: 'sempre' })).ok).toBe(false)
+  })
+
+  test('touching a file without changing it is not an edit', () => {
+    const vr = openVault()
+    const note = addNote({ kind: 'memo', body: 'igual' })
+    push(vr, NOW)
+    const later = new Date(Date.now() + 120_000)
+    utimesSync(ownedPath(vr, noteFile(vr, note)), later, later)
+    expect(pendingChanges(vr)).toEqual({ edits: [], inbox: [] })
+    write(vr, noteFile(vr, note), read(vr, noteFile(vr, note)).replace('igual', 'diferente'))
+    expect(pendingChanges(vr).edits).toEqual([noteFile(vr, note)])
   })
 })

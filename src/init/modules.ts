@@ -23,7 +23,7 @@ let _initializedDataDir: string | null = null
  * Safe to call from any mode (TUI, web, engine).
  * Idempotent per dataDir — reinitializes if switched to a different sandbox dir.
  */
-export function initCoreModules(dataDir: string, obsidianVault = ''): void {
+export function initCoreModules(dataDir: string, obsidianVault = '', obsidianPull?: string): void {
   if (_initializedDataDir === dataDir) return
   _initializedDataDir = dataDir
 
@@ -41,7 +41,7 @@ export function initCoreModules(dataDir: string, obsidianVault = ''): void {
   initScheduler(dataDir, undefined, { sync: false })
   initTasks(dataDir, () => {}) // no-op notifier for headless modes; TUI overrides later
   // Last: the mirror projects notes and tasks, so their stores must be open.
-  initObsidian(obsidianVault)
+  initObsidian(obsidianVault, obsidianPull)
 }
 
 /**

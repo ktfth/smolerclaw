@@ -119,6 +119,16 @@ smolerclaw/
 
 SQLite stays the source of truth. Every successful write refreshes the mirror; `obsidian_sync` (`smolerclaw run obsidian_sync`) pulls your edits back first: edited notes, Inbox files, ticked or new tasks. A file you edited is never overwritten. When both sides changed, the database wins and your version is kept as `<note>.conflito.md`. Deleting a file never deletes data; set `deletar: true` in its frontmatter instead. Moving or renaming files is fine: notes are tracked by the `id` in their frontmatter. `obsidian_status` lists pending edits, Inbox files and conflicts.
 
+How your edits come back is a mode, `off` by default. Change it by asking ("sincroniza sempre", "me pergunta antes") or with `obsidian_mode`; it is stored in the vault, so the TUI and the MCP server share it, and `SMOLERCLAW_OBSIDIAN_PULL=off|ask|auto` overrides it.
+
+| Mode | Before every note or task call |
+|---|---|
+| `off` | nothing; edits wait for `obsidian_sync` |
+| `ask` | unsynced edits are appended to the result once, so the agent asks you whether to sync |
+| `auto` | edits are pulled first and the sync is written to the journal |
+
+The check is cheap: a file is read only when its modification time changed.
+
 ## TUI Commands
 
 ```
@@ -272,6 +282,16 @@ smolerclaw/
 ```
 
 O SQLite continua sendo a fonte da verdade. Toda escrita bem-sucedida atualiza o espelho; `obsidian_sync` (`smolerclaw run obsidian_sync`) primeiro traz suas edições de volta: notas editadas, arquivos da Inbox, tarefas marcadas ou novas. Arquivo que você editou nunca é sobrescrito. Quando os dois lados mudaram, o banco vence e a sua versão fica como `<nota>.conflito.md`. Apagar um arquivo nunca apaga dados; use `deletar: true` no frontmatter. Mover ou renomear arquivos não tem problema: as notas são rastreadas pelo `id` do frontmatter. `obsidian_status` lista edições pendentes, Inbox e conflitos.
+
+O retorno das suas edições é um modo, `off` por padrão. Troque pedindo ("sincroniza sempre", "me pergunta antes") ou com `obsidian_mode`; ele fica gravado no vault, então vale para a TUI e para o MCP, e `SMOLERCLAW_OBSIDIAN_PULL=off|ask|auto` tem prioridade.
+
+| Modo | Antes de cada chamada de notas ou tarefas |
+|---|---|
+| `off` | nada; as edições esperam o `obsidian_sync` |
+| `ask` | as edições não sincronizadas vão uma vez no resultado, para o agente te perguntar se sincroniza |
+| `auto` | as edições são trazidas antes e o sync fica registrado no diário |
+
+A verificação é barata: um arquivo só é lido quando a data de modificação mudou.
 
 ## Comandos na TUI
 

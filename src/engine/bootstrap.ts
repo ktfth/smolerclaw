@@ -60,7 +60,7 @@ export async function bootstrapEngine(
   initI18n(config.language)
 
   await registerToolCatalog(config.dataDir)
-  initCoreModules(config.dataDir, obsidianSetting(effectiveEnv, config))
+  initCoreModules(config.dataDir, obsidianSetting(effectiveEnv, config), effectiveEnv.SMOLERCLAW_OBSIDIAN_PULL)
 
   const policy = policyFromEnv(effectiveEnv)
   const allowedPlugins = new Set(policy.plugins)

@@ -138,7 +138,8 @@ Deterministic engine (no model, no credentials):
               SMOLERCLAW_ALLOW_SEND=1, SMOLERCLAW_PLUGINS=a,b,
               SMOLERCLAW_DATA_DIR=<dir>, SMOLERCLAW_DRY_RUN=1,
               SMOLERCLAW_TIMEOUT_MS=<ms>, SMOLERCLAW_RUN_ID=<id>
-  Obsidian:   SMOLERCLAW_OBSIDIAN_VAULT=<vault> mirrors notes and tasks into <vault>/smolerclaw
+  Obsidian:   SMOLERCLAW_OBSIDIAN_VAULT=<vault> mirrors notes and tasks into <vault>/smolerclaw,
+              SMOLERCLAW_OBSIDIAN_PULL=off|ask|auto sets how vault edits come back
 
 Options:
   -h, --help           Show this help

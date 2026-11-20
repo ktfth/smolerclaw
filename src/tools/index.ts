@@ -14,7 +14,7 @@ import { toChatText, type CatalogEntry, type ToolResult } from '../core/result'
 import { dispatchTool, workstationTools, ENGINE_TOOLS } from './execute'
 import { NOTE_TOOLS } from './domain/notes'
 import { TASK_TOOLS } from './domain/tasks'
-import { refreshObsidian } from '../obsidian'
+import { checkObsidianBeforeTool, refreshObsidian } from '../obsidian'
 
 // Global undo stack shared across file-editing tool calls
 export const undoStack = new UndoStack()
@@ -37,10 +37,10 @@ export function registerPlugins(plugins: Plugin[]): void {
   _plugins = plugins
 }
 
-/** Writes that change what the Obsidian mirror shows (notes, tasks). */
-const MIRRORED_WRITES: ReadonlySet<string> = new Set(
-  [...NOTE_TOOLS, ...TASK_TOOLS].filter((t) => !t.readOnly).map((t) => t.schema.name),
-)
+/** Note and task tools: they read or change what the Obsidian mirror shows. */
+const MIRRORED = [...NOTE_TOOLS, ...TASK_TOOLS]
+const MIRRORED_TOOLS: ReadonlySet<string> = new Set(MIRRORED.map((t) => t.schema.name))
+const MIRRORED_WRITES: ReadonlySet<string> = new Set(MIRRORED.filter((t) => !t.readOnly).map((t) => t.schema.name))
 
 const ENGINE_NAMES: ReadonlySet<string> = new Set(ENGINE_TOOLS.map((t) => t.schema.name))
 
@@ -52,11 +52,16 @@ export function engineCatalog(allowedPlugins: ReadonlySet<string> = new Set()): 
   return TOOLS.filter((t) => ENGINE_NAMES.has(t.name) || (!WORKSTATION_NAMES.has(t.name) && allowedPlugins.has(t.name)))
 }
 
-/** Run a tool and return its structured outcome. Note and task writes refresh the Obsidian mirror. */
+/**
+ * Run a tool and return its structured outcome. Note and task tools first
+ * check the Obsidian mirror for unsynced edits (per its pull mode), and
+ * writes refresh it afterwards.
+ */
 export async function executeToolResult(name: string, input: Record<string, unknown>): Promise<ToolResult> {
+  const notice = MIRRORED_TOOLS.has(name) ? checkObsidianBeforeTool() : null
   const result = await dispatchTool(ENTRIES, name, input, _plugins)
   if (result.ok && MIRRORED_WRITES.has(name)) refreshObsidian()
-  return result
+  return notice ? { ...result, text: `${result.text}\n\n${notice}` } : result
 }
 
 /** Chat-loop entry point: failures are rendered with the "Error:" prefix. */
