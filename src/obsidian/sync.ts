@@ -16,10 +16,10 @@ import { ensureSchema, migrateOnce, store, withWriteLock } from '../core/store'
 import { addNote, deleteNote, getNote, listNotes, updateNote, NOTE_KINDS, type Note, type NotePatch } from '../notes'
 import { addTask, completeTask, listTasks, type Task } from '../tasks'
 import { isInside, ownedPath, type VaultRoot } from './paths'
-import { ensureJournal } from './journal'
+import { ensureJournal, upgradeJournals } from './journal'
 import {
   INBOX_DIR, NOTES_DIR, PANEL_FILE, TASKS_FILE,
-  defaultNotePath, fieldFlag, fieldTags, fieldText, localDate, normalizeBody, parseFile, parseTasks,
+  defaultNotePath, displayTitle, fieldFlag, fieldTags, fieldText, isLegacyNotePath, localDate, noteBody, noteHeading, normalizeBody, parseFile, parseTasks,
   renderNote, renderPanel, renderTasks, type TaskLine,
 } from './markdown'
 
@@ -289,10 +289,31 @@ function pushLocked(vr: VaultRoot, now: Date): PushReport {
     return scanned.get(note.id) ?? known ?? defaultNotePath(note)
   }
 
+  /** Move an untouched file still under an old slug name to the readable default name. */
+  const renameLegacy = (note: Note): void => {
+    const key = `note:${note.id}`
+    const entry = files[key]
+    const target = defaultNotePath(note)
+    if (!entry || entry.path === target || !isLegacyNotePath(entry.path, note)) return
+    try {
+      const from = ownedPath(vr, entry.path)
+      const to = ownedPath(vr, target)
+      const current = readText(from)
+      if (current === null || sha(current) !== entry.hash || existsSync(to)) return
+      renameSync(from, to)
+      files[key] = entryFor(to, target, entry.hash)
+    } catch (err) {
+      report.errors.push(`${entry.path}: ${errorText(err)}`)
+    }
+  }
+
   try {
     const notes = listNotes({ limit: ALL })
     const live = new Set(notes.map((n) => `note:${n.id}`))
-    for (const note of notes) writeOwned(`note:${note.id}`, () => locate(note), renderNote(note))
+    for (const note of notes) {
+      renameLegacy(note)
+      writeOwned(`note:${note.id}`, () => locate(note), renderNote(note))
+    }
 
     for (const [key, entry] of Object.entries(files)) {
       if (!key.startsWith('note:') || live.has(key)) continue
@@ -314,6 +335,7 @@ function pushLocked(vr: VaultRoot, now: Date): PushReport {
     writeOwned('tasks', () => TASKS_FILE, renderTasks(pending))
     const recent = notes.slice(0, 10).map((note) => ({ note, path: files[`note:${note.id}`]?.path ?? defaultNotePath(note) }))
     writeOwned('panel', () => PANEL_FILE, renderPanel({ pending, recent, today: localDate(now) }))
+    report.written.push(...upgradeJournals(vr))
     ensureJournal(vr, now)
   } finally {
     // Whatever was written must be recorded, or the next run mistakes our own files for edits.
@@ -338,11 +360,15 @@ function keepAsConflict(vr: VaultRoot, rel: string, text: string, now: Date, rep
 }
 
 /** Fields the person changed, as a patch. Missing keys keep the stored value; null clears. */
-function notePatch(note: Note, fields: Record<string, unknown>, body: string): NotePatch {
+function notePatch(note: Note, fields: Record<string, unknown>, fileBody: string): NotePatch {
+  const body = noteBody(fileBody)
   const patch: { -readonly [K in keyof NotePatch]: NotePatch[K] } = {}
   if (normalizeBody(body) !== normalizeBody(note.body)) patch.body = body
   const title = fieldText(fields, 'title')
   if ('title' in fields && (title ?? '') !== note.title) patch.title = title ?? ''
+  // Retyping the heading renames the note, unless the title property was edited too.
+  const heading = noteHeading(fileBody)
+  if (patch.title === undefined && heading && heading !== displayTitle(note)) patch.title = heading
   for (const key of ['url', 'category'] as const) {
     if (!(key in fields)) continue
     const value = fieldText(fields, key) ?? ''

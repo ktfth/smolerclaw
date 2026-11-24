@@ -13,6 +13,11 @@ export interface AuditRecord {
   durationMs: number
   dryRun?: boolean
   error?: string
+  /**
+   * Readable sentence for the vault journal (titles and names only). Never
+   * written to the file audit log, which stays free of argument-derived text.
+   */
+  summary?: string
 }
 
 export interface AuditSink {
@@ -30,7 +35,8 @@ export function createFileAuditSink(dir: string): AuditSink {
       try {
         if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
         const file = join(dir, `engine-${record.ts.slice(0, 10)}.jsonl`)
-        appendFileSync(file, JSON.stringify(record) + '\n')
+        const { summary: _summary, ...stored } = record
+        appendFileSync(file, JSON.stringify(stored) + '\n')
       } catch (err) {
         // Auditing must never break tool execution; report and continue.
         process.stderr.write(`smolerclaw: audit write failed: ${err instanceof Error ? err.message : String(err)}\n`)

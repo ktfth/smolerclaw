@@ -11,6 +11,7 @@ import { closeStore } from '../core/store'
 import { createEngine, type Engine } from './engine'
 import { policyFromEnv, type EnginePolicy } from './policy'
 import { createFileAuditSink, type AuditSink } from './audit'
+import { describeCall } from '../obsidian/describe'
 import { createJournalSink, obsidianSetting, obsidianVault, teeAudit } from '../obsidian'
 
 const DEFAULT_TIMEOUT_MS = 60_000
@@ -85,6 +86,7 @@ export async function bootstrapEngine(
     dryRun,
     timeoutMs,
     checkRateLimit,
+    describe: describeCall,
   })
 
   return {

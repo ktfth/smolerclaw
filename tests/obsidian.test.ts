@@ -6,7 +6,8 @@ import { initNotes, closeNotes, addNote, getNote, updateNote, deleteNote, type N
 import { initTasks, addTask, listTasks } from '../src/tasks'
 import { resolveVault, ownedPath, type VaultRoot } from '../src/obsidian/paths'
 import { push, pull, status, pendingChanges } from '../src/obsidian/sync'
-import { slugify, parseFile, renderNote, renderTasks, parseTasks, defaultNotePath } from '../src/obsidian/markdown'
+import { slugify, parseFile, renderNote, renderTasks, parseTasks, defaultNotePath, noteBody, displayTitle, CONTENT_MARK } from '../src/obsidian/markdown'
+import { describeCall } from '../src/obsidian/describe'
 import { appendJournal, createJournalSink, journalLine, teeAudit } from '../src/obsidian/journal'
 import { initObsidian } from '../src/obsidian'
 import { executeToolResult } from '../src/tools'
@@ -29,6 +30,11 @@ function openVault(): VaultRoot {
 const read = (vr: VaultRoot, rel: string): string => readFileSync(join(vr.root, ...rel.split('/')), 'utf-8')
 const write = (vr: VaultRoot, rel: string, text: string): void => writeFileSync(ownedPath(vr, rel), text)
 const noteFile = (vr: VaultRoot, note: Note): string => defaultNotePath(note)
+/** Edit the note's own text, below the generated header, as a person would. */
+const editText = (file: string, from: string, to: string): string => {
+  const at = file.indexOf(CONTENT_MARK)
+  return file.slice(0, at) + file.slice(at).replace(from, to)
+}
 
 /** Directory junction on Windows (fs.symlinkSync 'junction' panics on Bun 1.2.15), symlink elsewhere. */
 function linkDir(target: string, link: string): void {
@@ -60,7 +66,41 @@ describe('markdown', () => {
     const note = addNote({ kind: 'link', url: 'https://bun.sh', title: 'Bun "rápido"', body: 'runtime\n\nsegunda linha #dev' })
     const parsed = parseFile(renderNote(note))
     expect(parsed?.fields).toMatchObject({ id: note.id, kind: 'link', url: 'https://bun.sh', title: 'Bun "rápido"', tags: ['dev'] })
-    expect(parsed?.body).toBe(note.body)
+    expect(noteBody(parsed?.body ?? '')).toBe(note.body)
+  })
+
+  test('a note reads as a document: title, what it is, when, and a clickable link', () => {
+    const note = addNote({ kind: 'link', url: 'https://bun.sh/docs', title: 'Docs [Bun]', body: '' })
+    const text = renderNote(note)
+    expect(text).toContain('# Docs \\[Bun\\]')
+    expect(text).toMatch(/> 🔗 link · criada em \d{1,2} de \w+ de \d{4} às \d{2}:\d{2}/u)
+    expect(text).toContain('> Abrir: [Docs \\[Bun\\]](<https://bun.sh/docs>)')
+    // Empty optional fields stay out of the properties.
+    expect(text).not.toContain('category:')
+    expect(text).not.toContain('null')
+  })
+
+  test('titles drop inline tags and are cut at a word, file names read like the title', () => {
+    const note = addNote({ kind: 'memo', body: 'Matheus vai trabalhar no restante do SO -> WO #SO #WO #Matheus' })
+    expect(displayTitle(note)).toBe('Matheus vai trabalhar no restante do SO -> WO')
+    expect(defaultNotePath(note)).toBe(`Notas/memo/Matheus vai trabalhar no restante do SO - WO (${note.id}).md`)
+    const long = addNote({ kind: 'memo', body: 'palavra '.repeat(30) })
+    expect(displayTitle(long).endsWith('palavra…')).toBe(true)
+  })
+
+  test('a note that opens with its own heading is not given a second one', () => {
+    const note = addNote({ kind: 'memo', body: '# Plano de estudos\n\n- capítulo 1' })
+    expect(renderNote(note).match(/^# Plano de estudos$/gm)).toHaveLength(1)
+  })
+
+  test('a colon in the title becomes a dash in the file name', () => {
+    const note = addNote({ kind: 'memo', body: 'Bug encontrado: data errada' })
+    expect(defaultNotePath(note)).toBe(`Notas/memo/Bug encontrado - data errada (${note.id}).md`)
+  })
+
+  test('a non-web url is shown, never linked', () => {
+    const note = addNote({ kind: 'link', url: 'javascript:alert(1)', title: 'x', body: '' })
+    expect(renderNote(note)).not.toContain('](<javascript')
   })
 
   test('frontmatter edge cases', () => {
@@ -225,7 +265,7 @@ describe('pull', () => {
     expect(report.created).toHaveLength(2)
     expect(existsSync(ownedPath(vr, 'Inbox/rascunho.md'))).toBe(true)
     expect(existsSync(ownedPath(vr, 'Inbox/Ideia de projeto.md'))).toBe(false)
-    expect(push(vr, NOW).written.some((p) => p.startsWith('Notas/memo/ideia-de-projeto-'))).toBe(true)
+    expect(push(vr, NOW).written.some((p) => p.startsWith('Notas/memo/Ideia de projeto ('))).toBe(true)
   })
 
   test('ticked lines complete tasks and new lines create them', () => {
@@ -272,7 +312,7 @@ describe('pull', () => {
     const note = addNote({ kind: 'memo', body: 'antes' })
     push(vr, NOW)
     const rel = noteFile(vr, note)
-    write(vr, rel, '﻿' + read(vr, rel).replace('antes', 'depois'))
+    write(vr, rel, '﻿' + editText(read(vr, rel), 'antes', 'depois'))
     expect(pull(vr, { now: NOW, inboxSettleMs: 0 }).updated).toEqual([rel])
     expect(getNote(note.id)?.body).toBe('depois')
   })
@@ -291,6 +331,34 @@ describe('pull', () => {
     expect(report.written).toContain(rel)
   })
 
+  test('the generated header never leaks into the note text; retyping the heading renames it', () => {
+    const vr = openVault()
+    const note = addNote({ kind: 'memo', body: 'corpo original' })
+    push(vr, NOW)
+    const rel = noteFile(vr, note)
+    write(vr, rel, read(vr, rel).replace('# corpo original', '# Título novo'))
+
+    expect(pull(vr, { now: NOW, inboxSettleMs: 0 }).updated).toEqual([rel])
+    expect(getNote(note.id)).toMatchObject({ title: 'Título novo', body: 'corpo original' })
+  })
+
+  test('an untouched file under an old slug name moves to the readable name', () => {
+    const vr = openVault()
+    const note = addNote({ kind: 'memo', body: 'nota antiga' })
+    push(vr, NOW)
+    const legacy = `Notas/memo/nota-antiga-${note.id}.md`
+    renameSync(ownedPath(vr, noteFile(vr, note)), ownedPath(vr, legacy))
+    // Point the manifest at the legacy path, as an older version would have left it.
+    push(vr, NOW)
+    expect(existsSync(ownedPath(vr, legacy))).toBe(true)
+    updateNote(note.id, { body: 'nota antiga editada' })
+
+    push(vr, NOW)
+    expect(existsSync(ownedPath(vr, legacy))).toBe(false)
+    const renamed = getNote(note.id)
+    expect(renamed && read(vr, noteFile(vr, renamed))).toContain('nota antiga editada')
+  })
+
   test('Inbox files still being written wait for the settle time', () => {
     const vr = openVault()
     write(vr, 'Inbox/digitando.md', 'meio texto')
@@ -305,13 +373,56 @@ describe('journal', () => {
     risk: 'moderate', ok: true, durationMs: 3, ...over,
   })
 
+  test('lines say what happened in words, with the tool name hidden in a comment', () => {
+    expect(journalLine(record({ summary: 'Concluiu a tarefa “[P0] backup”' }), NOW))
+      .toBe('- **15:00** Concluiu a tarefa “\\[P0\\] backup” %%save_note%%\n')
+    // Without a sentence from the call, a generic one; without that, the tool name.
+    expect(journalLine(record({}), NOW)).toBe('- **15:00** Salvou uma nota %%save_note%%\n')
+    expect(journalLine(record({ tool: 'plugin_x' }), NOW)).toBe('- **15:00** Executou `plugin_x` %%plugin_x%%\n')
+    expect(journalLine(record({ summary: '![[evil]] `x`' }), NOW)).not.toMatch(/!\[\[|`x`/)
+  })
+
+  test('describer uses titles and names, never bodies, amounts or recipients', () => {
+    expect(describeCall('complete_task', { reference: 'abc' }, { title: 'pagar aluguel' })).toBe('Concluiu a tarefa “pagar aluguel”')
+    const note = addNote({ kind: 'memo', body: 'ligar pro banco #urgente' })
+    expect(describeCall('save_note', {}, note)).toBe('Salvou a nota “ligar pro banco”')
+    expect(describeCall('manage_work_session', { action: 'stop' }, { durationMinutes: 42 })).toBe('Encerrou a sessão de trabalho (42 min)')
+    const money = describeCall('record_transaction', { type: 'saida', amount: 1234.5, category: 'mercado', description: 'segredo' }, null)
+    expect(money).toBe('Registrou uma despesa em “mercado”')
+    expect(describeCall('m365_send_email', { to: 'a@b.com', subject: 'confidencial', body: 'x' }, null)).not.toMatch(/a@b|confidencial/)
+    expect(describeCall('list_notes', {}, null)).toBeNull()
+  })
+
   test('lines carry the outcome but never the input', () => {
-    expect(journalLine(record({}), NOW)).toBe('- 15:00:00 · `save_note` · ok\n')
-    expect(journalLine(record({ decision: 'denied', ok: false }), NOW)).toContain('negado pela política')
+    expect(journalLine(record({ decision: 'denied', ok: false }), NOW)).toContain('Bloqueado pela política')
     expect(journalLine(record({ ok: false, error: 'segredo@exemplo.com' }), NOW)).not.toContain('segredo')
     // Caller-controlled names and engine text cannot inject Markdown.
-    expect(journalLine(record({ tool: 'x\n![[evil]]', decision: 'unknown', ok: false }), NOW)).toContain('(desconhecido)')
+    expect(journalLine(record({ tool: 'x\n![[evil]]', decision: 'unknown', ok: false }), NOW)).not.toContain('evil')
     expect(journalLine(record({ decision: 'invalid', ok: false, error: 'bad `code` [[link]]' }), NOW)).not.toMatch(/[`[\]]{2}|`code`/)
+  })
+
+  test('journals in the old terse format are rewritten as sentences on push', () => {
+    const vr = openVault()
+    mkdirSync(join(vr.root, 'Diário'), { recursive: true })
+    write(vr, 'Diário/2026-11-19.md', [
+      '# Diário smolerclaw — 2026-11-19', '',
+      '- 19:38:03 · `complete_task` · ok',
+      '- 19:40:00 · `m365_send_email` · negado pela política',
+      '- 19:41:00 · sync automático do Obsidian · 1 tarefa concluída',
+      'linha escrita à mão', '',
+    ].join('\n'))
+
+    expect(push(vr, NOW).written).toContain('Diário/2026-11-19.md')
+    expect(read(vr, 'Diário/2026-11-19.md')).toBe([
+      '# Diário — quinta-feira, 19 de novembro de 2026', '',
+      '> O que o smolerclaw fez neste dia: o que foi criado, concluído ou alterado, e o que falhou. Consultas não aparecem.', '',
+      '- **19:38** Concluiu uma tarefa %%complete_task%%',
+      '- **19:40** 🚫 Bloqueado pela política: `m365_send_email` %%m365_send_email%%',
+      '- **19:41** Trouxe edições do Obsidian: 1 tarefa concluída %%sync-automatico%%',
+      'linha escrita à mão', '',
+    ].join('\n'))
+    // Already upgraded: the next push leaves it alone.
+    expect(push(vr, NOW).written).not.toContain('Diário/2026-11-19.md')
   })
 
   test('appends writes and failures to the day file, skips successful reads', () => {
@@ -324,7 +435,7 @@ describe('journal', () => {
     const day = readdirSync(join(vr.root, 'Diário'))
     expect(day).toHaveLength(1)
     const text = read(vr, `Diário/${day[0]}`)
-    expect(text.startsWith('# Diário smolerclaw')).toBe(true)
+    expect(text.startsWith('# Diário — ')).toBe(true)
     expect(text).toContain('save_note')
     expect(text).toContain('m365_send_email')
     expect(text).not.toContain('list_notes')
@@ -364,7 +475,7 @@ describe('pull mode', () => {
     const note = saved.data as Note
     const root = join(vault, 'smolerclaw')
     const file = join(root, ...defaultNotePath(note).split('/'))
-    writeFileSync(file, readFileSync(file, 'utf-8').replace('versão do banco', 'versão do obsidian'))
+    writeFileSync(file, editText(readFileSync(file, 'utf-8'), 'versão do banco', 'versão do obsidian'))
     return { vault, root, note }
   }
 
@@ -403,7 +514,7 @@ describe('pull mode', () => {
     expect(listed.text).toContain('1 tarefa concluída')
     expect(listTasks(false)).toEqual([])
     const journal = readdirSync(join(root, 'Diário')).map((f) => readFileSync(join(root, 'Diário', f), 'utf-8')).join('')
-    expect(journal).toContain('sync automático do Obsidian')
+    expect(journal).toContain('Trouxe edições do Obsidian: 1 tarefa concluída')
   })
 
   test('SMOLERCLAW_OBSIDIAN_PULL overrides the mode stored in the vault', async () => {
@@ -428,7 +539,8 @@ describe('pull mode', () => {
 })
 
 describe('panel journal embed', () => {
-  const HEADER = '# Diário smolerclaw — 2026-11-20\n\n'
+  const HEADER = '# Diário — sexta-feira, 20 de novembro de 2026\n\n'
+    + '> O que o smolerclaw fez neste dia: o que foi criado, concluído ou alterado, e o que falhou. Consultas não aparecem.\n\n'
 
   test('push creates the day journal so the panel embed is never broken', () => {
     const vr = openVault()

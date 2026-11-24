@@ -102,7 +102,7 @@ function autoPull(vr: VaultRoot): string | null {
   const applied = describePull(report)
   if (!applied.length) return null
   const summary = applied.join(', ')
-  appendJournal(vr, now, `- ${localTime(now)} · sync automático do Obsidian · ${summary}\n`)
+  appendJournal(vr, now, `- **${localTime(now).slice(0, 5)}** Trouxe edições do Obsidian: ${summary} %%sync-automatico%%\n`)
   return `[obsidian] Sincronizado automaticamente antes desta chamada: ${summary}.`
 }
 

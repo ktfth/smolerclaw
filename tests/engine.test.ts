@@ -3,7 +3,10 @@ import { canonicalJson, canonicalHash } from '../src/engine/canonical'
 import { InputValidator } from '../src/engine/validate'
 import { decide, decideWorkflowStep, isListed, policyFromEnv, capturePolicyEnv, DEFAULT_POLICY, type EnginePolicy } from '../src/engine/policy'
 import { createEngine, type CatalogTool } from '../src/engine/engine'
-import type { AuditRecord } from '../src/engine/audit'
+import { createFileAuditSink, type AuditRecord } from '../src/engine/audit'
+import { mkdtempSync, readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { exitCodeFor, isEngineCommand, parseEngineArgs, splitEngineArgs } from '../src/modes/engine-mode'
 import { selfCommand } from '../src/engine/self-command'
 import { assessToolRisk } from '../src/tool-safety'
@@ -336,5 +339,43 @@ describe('PowerShell quoting', () => {
     const { psSingleQuoteEscape } = await import('../src/utils/windows-executor')
     expect(psSingleQuoteEscape("a'b")).toBe("a''b")
     expect(psSingleQuoteEscape('x’; evil; ‘')).toBe('x’’; evil; ‘‘')
+  })
+})
+
+describe('call summaries', () => {
+  const policy: EnginePolicy = { ...DEFAULT_POLICY, allow: ['create_task'] }
+
+  test('a successful call carries the describer sentence; failures and dry runs do not', async () => {
+    const records: AuditRecord[] = []
+    const engine = createEngine({
+      catalog: () => CATALOG,
+      execute: async (_name, input) => (input.title === 'falha' ? fail('nope') : ok('feito', { title: input.title })),
+      policy,
+      audit: { write: (r) => records.push(r) },
+      describe: (_name, _input, data) => `Criou “${(data as { title: string }).title}”`,
+    })
+    await engine.invoke('create_task', { title: 'pão' })
+    await engine.invoke('create_task', { title: 'falha' })
+    await engine.invoke('create_task', { title: 'pão' }, { dryRun: true })
+    expect(records.map((r) => r.summary)).toEqual(['Criou “pão”', undefined, undefined])
+  })
+
+  test('a throwing describer never breaks the call', async () => {
+    const engine = createEngine({
+      catalog: () => CATALOG, execute: async () => ok('feito'), policy, audit: { write: () => {} },
+      describe: () => { throw new Error('boom') },
+    })
+    expect((await engine.invoke('create_task', { title: 'x' })).ok).toBe(true)
+  })
+
+  test('the file audit log never stores the summary', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'smolerclaw-audit-'))
+    createFileAuditSink(dir).write({
+      ts: '2026-11-18T12:00:00.000Z', tool: 'create_task', inputHash: 'h', decision: 'executed',
+      risk: 'safe', ok: true, durationMs: 1, summary: 'Criou “segredo”',
+    })
+    const text = readFileSync(join(dir, readdirSync(dir)[0]), 'utf-8')
+    expect(text).toContain('create_task')
+    expect(text).not.toContain('segredo')
   })
 })

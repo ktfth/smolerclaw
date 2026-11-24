@@ -65,6 +65,8 @@ export interface EngineDeps {
   timeoutMs?: number
   /** Optional rate-limit check; returning false denies the invocation. */
   checkRateLimit?: (name: string) => boolean
+  /** Readable sentence for a successful call, attached to its audit record as `summary`. */
+  describe?: (name: string, input: Record<string, unknown>, data: unknown) => string | null
 }
 
 export interface Engine {
@@ -80,6 +82,14 @@ export interface Engine {
 export function createEngine(deps: EngineDeps): Engine {
   const validator = new InputValidator()
   const clock = deps.clock ?? (() => new Date())
+
+  function describeSafely(name: string, input: Record<string, unknown>, data: unknown): string | null {
+    try {
+      return deps.describe?.(name, input, data) ?? null
+    } catch {
+      return null
+    }
+  }
 
   function findTool(name: string): CatalogTool | undefined {
     return deps.catalog().find((t) => t.name === name)
@@ -121,6 +131,7 @@ export function createEngine(deps: EngineDeps): Engine {
       data?: unknown,
     ): InvokeResult => {
       const durationMs = Math.max(0, clock().getTime() - startedAt.getTime())
+      const summary = decision === 'executed' && ok ? describeSafely(name, input, data) : null
       deps.audit.write({
         ts: startedAt.toISOString(),
         ...(deps.runId ? { runId: deps.runId } : {}),
@@ -135,6 +146,7 @@ export function createEngine(deps: EngineDeps): Engine {
         // Only engine-generated messages are logged: tool output and policy
         // reasons can echo raw arguments, which the audit must never store.
         ...(!ok && (decision === 'invalid' || decision === 'unknown') ? { error: output.slice(0, 500) } : {}),
+        ...(summary ? { summary } : {}),
       })
       return {
         ok, tool: name, decision, risk, output,
