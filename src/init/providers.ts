@@ -2,6 +2,7 @@ import { ClaudeProvider } from '../claude'
 import { CodexProvider } from '../codex-provider'
 import { OpenAIAgentsProvider } from '../openai-agents-provider'
 import { OpenAICompatProvider } from '../openai-provider'
+import { ManualProvider } from '../manual-provider'
 import { refreshAuthForProvider, resolveAuthForModel, type AuthResult } from '../auth'
 import { assistantNameForProvider, parseModelString, type ProviderType } from '../providers'
 import type { ApprovalCallback } from '../approval'
@@ -125,6 +126,10 @@ export class ProviderManager implements AnyProvider {
     this.authHolder.auth = auth
 
     const { provider: providerType, model: providerModel } = parseModelString(model)
+
+    if (providerType === 'manual') {
+      return { provider: new ManualProvider(), providerType }
+    }
 
     if (providerType === 'ollama') {
       return {

@@ -17,8 +17,8 @@ export function humanizeError(err: unknown): string {
         return `Bad request: ${extractDetail(msg)}`
 
       case 401:
-        return 'Authentication failed. Your subscription token may be expired.\n' +
-          'Try: Run `claude` to refresh subscription credentials.'
+        return 'Authentication failed: the API key was rejected.\n' +
+          'Check ANTHROPIC_API_KEY (console.anthropic.com), or open without a key for manual mode.'
 
       case 403:
         return 'Access denied. Your subscription may not have permission for this model.\n' +

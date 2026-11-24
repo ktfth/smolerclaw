@@ -47,6 +47,8 @@ export function resolveAuthForProvider(provider: ProviderType): AuthResult | nul
         label: 'local:ollama',
         source: 'http://localhost:11434',
       }
+    case 'manual':
+      return { provider: 'manual', kind: 'local', expiresAt: null, label: 'manual', source: 'sem modelo' }
   }
 }
 

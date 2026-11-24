@@ -3,6 +3,7 @@ import { parseArgs, printHelp, getVersion } from './cli'
 import { loadConfig } from './config'
 import { resolveAuthForModel } from './auth'
 import { resolveModel } from './models'
+import { MANUAL_MODEL } from './providers'
 import { initProvider, type AuthHolder } from './init/providers'
 import { initSession } from './init/session'
 import { runPrintMode } from './modes/print-mode'
@@ -56,8 +57,16 @@ async function main(): Promise<void> {
   try {
     authResult = resolveAuthForModel(config.model)
   } catch (err) {
-    console.error('smolerclaw:', err instanceof Error ? err.message : err)
-    process.exit(1)
+    const reason = err instanceof Error ? err.message : String(err)
+    // A person at a terminal can still administer by hand; pipes and --print need a model.
+    const canGoManual = cliArgs.uiMode === 'tui' && !cliArgs.print && process.stdin.isTTY && process.stdout.isTTY
+    if (!canGoManual) {
+      console.error('smolerclaw:', reason)
+      process.exit(1)
+    }
+    console.error(`smolerclaw: ${reason.split('\n')[0]} Abrindo em modo manual (sem modelo).`)
+    config.model = MANUAL_MODEL
+    authResult = resolveAuthForModel(config.model)
   }
 
   // Mutable auth holder shared between provider and interactive mode
@@ -65,6 +74,12 @@ async function main(): Promise<void> {
 
   // Initialize provider based on model string
   const provider = initProvider(authHolder, config.model, config.maxTokens, config.toolApproval)
+
+  // Initialize core data modules (vault, tasks, memory, etc.)
+  // This makes all tools functional in every mode (TUI, web, print).
+  // TUI-specific modules (pomodoro notifications, etc.) init later in interactive mode.
+  // Before the session: building the system prompt reads notes from the shared store.
+  initCoreModules(config.dataDir, obsidianSetting(process.env, config), process.env.SMOLERCLAW_OBSIDIAN_PULL)
 
   // Initialize session, skills, plugins
   const {
@@ -75,11 +90,6 @@ async function main(): Promise<void> {
     enableTools,
     plugins,
   } = await initSession(config, cliArgs.session, cliArgs.noTools)
-
-  // Initialize core data modules (vault, tasks, memory, etc.)
-  // This makes all tools functional in every mode (TUI, web, print).
-  // TUI-specific modules (pomodoro notifications, etc.) init later in interactive mode.
-  initCoreModules(config.dataDir, obsidianSetting(process.env, config), process.env.SMOLERCLAW_OBSIDIAN_PULL)
 
   // ── Web UI mode ─────────────────────────────────────────
   if (cliArgs.uiMode === 'web') {

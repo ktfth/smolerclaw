@@ -15,7 +15,7 @@ import { formatPluginList } from '../plugins'
 import { formatPluginRegistry, disablePlugin, enablePlugin, getPlugin, installPlugin, uninstallPlugin, listInstalledPlugins } from '../plugin-system'
 import { formatApprovalPrompt, formatEditDiff } from '../approval'
 import { generateBriefing, getTimeContext, type TimeContext } from '../briefing'
-import { stopTasks, addTask, completeTask, removeTask, listTasks, formatTaskList, parseTime, type Task } from '../tasks'
+import { stopTasks, removeTask, listTasks, formatTaskList, parseTime, type Task } from '../tasks'
 import { addPerson, findPerson, listPeople, logInteraction, delegateTask, getDelegations, getPendingFollowUps, markFollowUpDone, formatPeopleList, formatPersonDetail, formatDelegationList, formatFollowUps, generatePeopleDashboard, type PersonGroup } from '../people'
 import { addNote, getNote, deleteNote, listNotes, searchNotes, noteCategories, formatNoteList, formatNoteDetail, formatNoteTags } from '../notes'
 import { isFirstRunToday, markMorningDone, generateMorningBriefing } from '../morning'
@@ -52,6 +52,7 @@ import type { SessionManager } from '../session'
 import { initProvider, type AnyProvider } from '../init/providers'
 import type { loadPlugins } from '../plugins'
 import { loginWithProvider, type LoginProvider } from '../login'
+import { formatRunResult, formatToolList, invokeEngineTool, listEngineTools, parseRunArgs, readDayJournal } from './engine-commands'
 
 /** Show a structured tool outcome: failures render as errors. */
 function showResult(tui: TUI, result: ToolResult): void {
@@ -659,6 +660,12 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
           '  /tasks /tarefas         Listar pendentes (/tarefas all p/ todas)',
           '  /done /feito            Marcar como concluida',
           '  /rmtask /rmtarefa       Remover tarefa',
+          '',
+          'Motor / Engine (funciona sem chave, no modo manual):',
+          '  /tools [filtro]         Listar ferramentas do motor',
+          '  /run <tool> {json}      Executar pelo motor (auditado, vai para o Diário e o vault)',
+          '  /simular <tool> {json}  Validar entrada e política sem executar',
+          '  /diario [AAAA-MM-DD]    O que foi criado ou alterado no dia',
           '',
           'Projetos / Projects:',
           '  /project /projeto         Definir/ver projeto ativo',
@@ -1631,9 +1638,9 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
         ctx.tui.showSystem(formatNoteList(listNotes({ kind: 'memo' })))
         break
       }
-      const memo = addNote({ kind: 'memo', body: text })
-      const tagStr = memo.tags.length > 0 ? ` [${memo.tags.map((t) => '#' + t).join(' ')}]` : ''
-      ctx.tui.showSystem(`Memo salvo${tagStr}  {${memo.id}}`)
+      const saved = await invokeEngineTool(ctx.config.dataDir, 'save_note', { kind: 'memo', body: text })
+      if (saved.ok) ctx.tui.showSystem(saved.output)
+      else ctx.tui.showError(saved.output)
       break
     }
 
@@ -2075,11 +2082,11 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
       // If title became empty, use the original text
       if (!title) title = text
 
-      const task = addTask(title, dueTime || undefined)
-      const dueStr = dueTime
-        ? ` — lembrete: ${dueTime.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
-        : ''
-      ctx.tui.showSystem(`Tarefa criada: "${task.title}"${dueStr}  [${task.id}]`)
+      // Through the engine, so it is audited and reaches the vault and its journal.
+      // The tool parses the same full text the time was found in.
+      const created = await invokeEngineTool(ctx.config.dataDir, 'create_task', { title, ...(dueTime ? { time: text } : {}) })
+      if (created.ok) ctx.tui.showSystem(created.output)
+      else ctx.tui.showError(created.output)
       break
     }
 
@@ -2099,12 +2106,37 @@ export async function handleCommand(input: string, ctx: CommandContext): Promise
         ctx.tui.showError('Uso: /done <id ou parte do titulo>')
         break
       }
-      const task = completeTask(ref)
-      if (task) {
-        ctx.tui.showSystem(`Concluida: "${task.title}"`)
-      } else {
-        ctx.tui.showError(`Tarefa nao encontrada: "${ref}"`)
+      const done = await invokeEngineTool(ctx.config.dataDir, 'complete_task', { reference: ref })
+      if (done.ok) ctx.tui.showSystem(done.output)
+      else ctx.tui.showError(done.output)
+      break
+    }
+
+    case 'tools':
+    case 'ferramentas': {
+      ctx.tui.showSystem(formatToolList(listEngineTools(ctx.config.dataDir), args.join(' ')))
+      break
+    }
+
+    case 'run':
+    case 'rodar':
+    case 'simular':
+    case 'dry': {
+      const request = parseRunArgs(args.join(' '))
+      if (!request.ok) {
+        ctx.tui.showError(request.error)
+        break
       }
+      const dryRun = cmd === 'simular' || cmd === 'dry'
+      const result = await invokeEngineTool(ctx.config.dataDir, request.tool, request.input, dryRun)
+      if (result.ok) ctx.tui.showSystem(formatRunResult(result))
+      else ctx.tui.showError(formatRunResult(result))
+      break
+    }
+
+    case 'diario':
+    case 'journal': {
+      ctx.tui.showSystem(readDayJournal(ctx.config.dataDir, args[0] ?? ''))
       break
     }
 

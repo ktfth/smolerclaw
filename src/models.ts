@@ -1,7 +1,7 @@
 /**
  * Model registry with aliases and metadata.
  */
-import { parseModelString, type ProviderType } from './providers'
+import { MANUAL_MODEL, parseModelString, type ProviderType } from './providers'
 
 export interface ModelInfo {
   id: string
@@ -94,6 +94,7 @@ export function resolveModel(input: string): string {
   const lower = input.toLowerCase()
   const byAlias = MODELS.find((m) => m.alias === lower)
   if (byAlias) return byAlias.id
+  if (lower === MANUAL_MODEL) return MANUAL_MODEL
 
   // Provider-prefixed models and raw OpenAI/Ollama IDs should pass through untouched.
   if (input.includes(':')) {
@@ -144,6 +145,8 @@ export function defaultModelForProvider(provider: ProviderType): string {
       return 'openai:gpt-5.4'
     case 'ollama':
       return 'ollama:llama3'
+    case 'manual':
+      return 'manual'
   }
 }
 

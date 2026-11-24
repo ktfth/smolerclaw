@@ -22,6 +22,7 @@ import type { AnyProvider, AuthHolder } from '../init/providers'
 import type { SessionManager } from '../session'
 import type { loadPlugins } from '../plugins'
 import type { Message, ToolCall } from '../types'
+import { MANUAL_GUIDE } from '../manual-provider'
 
 export async function runInteractive(
   provider: AnyProvider,
@@ -353,6 +354,10 @@ function formatStartupAuthInfo(auth: AuthResult | null, assistantLabel: string):
 
   if (auth.provider === 'openai') {
     return 'Authenticated via OPENAI_API_KEY.'
+  }
+
+  if (auth.provider === 'manual') {
+    return MANUAL_GUIDE
   }
 
   return `${assistantLabel} ready (local provider).`

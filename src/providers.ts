@@ -1,7 +1,10 @@
 import type { ChatEvent, Message, ToolApprovalMode } from './types'
 import type { ApprovalCallback } from './approval'
 
-export type ProviderType = 'anthropic' | 'openai' | 'ollama' | 'codex'
+export type ProviderType = 'anthropic' | 'openai' | 'ollama' | 'codex' | 'manual'
+
+/** Model string for the manual mode: no model and no credentials; commands only. */
+export const MANUAL_MODEL = 'manual'
 
 /**
  * Abstract provider interface.
@@ -30,6 +33,7 @@ export function parseModelString(input: string): { provider: ProviderType; model
 
   // Auto-detect from model name
   const lower = input.toLowerCase()
+  if (lower === MANUAL_MODEL) return { provider: 'manual', model: MANUAL_MODEL }
   if (lower.startsWith('gpt-') || lower.startsWith('o1') || lower.startsWith('o3')) {
     return { provider: 'openai', model: input }
   }
@@ -64,6 +68,11 @@ export const PROVIDER_INFO: Record<ProviderType, { name: string; authHint: strin
     authHint: 'local',
     description: 'Local models via Ollama (no API key needed)',
   },
+  manual: {
+    name: 'Manual',
+    authHint: '',
+    description: 'Sem modelo: administração manual por comandos (/tools, /run, /diario)',
+  },
 }
 
 export function formatProviderList(): string {
@@ -87,12 +96,14 @@ export function assistantNameForProvider(provider: ProviderType): string {
       return 'OpenAI'
     case 'ollama':
       return 'Ollama'
+    case 'manual':
+      return 'Manual'
   }
 }
 
 function normalizeProvider(input: string): ProviderType {
   const lower = input.toLowerCase()
-  if (lower === 'anthropic' || lower === 'openai' || lower === 'ollama' || lower === 'codex') {
+  if (lower === 'anthropic' || lower === 'openai' || lower === 'ollama' || lower === 'codex' || lower === 'manual') {
     return lower
   }
   throw new Error(`Unsupported provider: ${input}`)

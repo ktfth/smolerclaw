@@ -62,16 +62,28 @@ export async function bootstrapEngine(
 
   await registerToolCatalog(config.dataDir)
   initCoreModules(config.dataDir, obsidianSetting(effectiveEnv, config), effectiveEnv.SMOLERCLAW_OBSIDIAN_PULL)
+  return wireEngine(config.dataDir, effectiveEnv, opts)
+}
 
-  const policy = policyFromEnv(effectiveEnv)
+/**
+ * The engine over an already-initialised catalog and data modules: audit to
+ * file and vault journal, static policy from the environment. Surfaces that
+ * initialise modules themselves (the TUI) call this directly.
+ */
+export function wireEngine(
+  dataDir: string,
+  env: Record<string, string | undefined> = process.env,
+  opts: Omit<BootstrapOptions, 'env' | 'dataDir'> = {},
+): EngineRuntime {
+  const policy = policyFromEnv(env)
   const allowedPlugins = new Set(policy.plugins)
   const audit = teeAudit(
-    createFileAuditSink(join(config.dataDir, 'audit')),
+    createFileAuditSink(join(dataDir, 'audit')),
     createJournalSink(obsidianVault, (name) => READ_ONLY_TOOL_NAMES.has(name)),
   )
-  const runId = opts.runId ?? effectiveEnv.SMOLERCLAW_RUN_ID?.trim() ?? randomUUID().slice(0, 12)
-  const dryRun = opts.dryRun ?? effectiveEnv.SMOLERCLAW_DRY_RUN === '1'
-  const timeoutMs = resolveTimeoutMs(opts.timeoutMs, effectiveEnv.SMOLERCLAW_TIMEOUT_MS)
+  const runId = opts.runId ?? env.SMOLERCLAW_RUN_ID?.trim() ?? randomUUID().slice(0, 12)
+  const dryRun = opts.dryRun ?? env.SMOLERCLAW_DRY_RUN === '1'
+  const timeoutMs = resolveTimeoutMs(opts.timeoutMs, env.SMOLERCLAW_TIMEOUT_MS)
 
   const engine = createEngine({
     catalog: () => engineCatalog(allowedPlugins),
@@ -93,7 +105,7 @@ export async function bootstrapEngine(
     engine,
     policy,
     audit,
-    dataDir: config.dataDir,
+    dataDir,
     runId,
     caller: opts.caller,
     dryRun,

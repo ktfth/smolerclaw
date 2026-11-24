@@ -2,7 +2,7 @@ import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 import { resolveAuthForProvider } from './auth'
 import { defaultModelForProvider } from './models'
-import { parseModelString, assistantNameForProvider, type ProviderType } from './providers'
+import { MANUAL_MODEL, parseModelString, assistantNameForProvider, type ProviderType } from './providers'
 
 export type LoginProvider = Extract<ProviderType, 'anthropic' | 'codex'>
 
@@ -19,6 +19,7 @@ export async function promptStartupProviderSelection(currentModel: string): Prom
   output.write(`1. Continuar atual\n`)
   output.write(`2. Claude via API key (ANTHROPIC_API_KEY) [${getProviderStatusLabel('anthropic')}]\n`)
   output.write(`3. Entrar/usar Codex [${getProviderStatusLabel('codex')}]\n`)
+  output.write(`4. Modo manual (sem modelo, sem chave): comandos, /run e /diario\n`)
   output.write('   Assinatura Claude: use o Claude Code com o MCP (smolerclaw mcp).\n')
 
   const rl = createInterface({ input, output })
@@ -28,6 +29,7 @@ export async function promptStartupProviderSelection(currentModel: string): Prom
     // A failed login explains why and asks again instead of crashing the process.
     for (;;) {
       const answer = (await Promise.race([rl.question('Escolha [Enter=atual]: '), closed])).trim().toLowerCase()
+      if (answer === '4' || answer === MANUAL_MODEL) return MANUAL_MODEL
       const provider = STARTUP_CHOICES[answer]
       if (!provider) return currentModel
       try {
