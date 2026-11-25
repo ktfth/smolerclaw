@@ -154,10 +154,11 @@ export function getMonthSummary(year?: number, month?: number): string {
   return lines.join('\n')
 }
 
+/** Newest first. A tie on the millisecond timestamp goes to the later insert. */
 export function getRecentTransactions(limit = 10): string {
-  const recent = listTransactions()
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    .slice(0, limit)
+  const recent = (store().query(
+    'SELECT * FROM transactions ORDER BY date DESC, rowid DESC LIMIT ?',
+  ).all(limit) as TransactionRow[]).map(toTransaction)
 
   if (recent.length === 0) return 'Nenhuma transacao registrada.'
 

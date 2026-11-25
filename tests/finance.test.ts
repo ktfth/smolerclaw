@@ -6,7 +6,7 @@ import {
   initFinance, addTransaction, removeTransaction, getMonthSummary, getRecentTransactions,
   listTransactions, exportFinanceSnapshot,
 } from '../src/finance'
-import { closeStore } from '../src/core/store'
+import { closeStore, store } from '../src/core/store'
 
 describe('finance', () => {
   let dir: string
@@ -56,6 +56,17 @@ describe('finance', () => {
   test('getRecentTransactions lists newest first', () => {
     addTransaction('saida', 1, 'primeira', '')
     addTransaction('saida', 2, 'segunda', '')
+    const text = getRecentTransactions()
+    expect(text.indexOf('segunda')).toBeLessThan(text.indexOf('primeira'))
+  })
+
+  test('getRecentTransactions breaks a shared timestamp with the later insert', () => {
+    const stamp = '2026-11-20T15:00:00.000Z'
+    const insert = store().query(
+      'INSERT INTO transactions (id, type, amount_cents, category, description, date) VALUES (?, ?, ?, ?, ?, ?)',
+    )
+    insert.run('oldrow01', 'saida', 100, 'primeira', '', stamp)
+    insert.run('newrow02', 'saida', 200, 'segunda', '', stamp)
     const text = getRecentTransactions()
     expect(text.indexOf('segunda')).toBeLessThan(text.indexOf('primeira'))
   })
