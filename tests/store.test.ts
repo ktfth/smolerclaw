@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
@@ -82,17 +82,52 @@ describe('store', () => {
       url TEXT, category TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
     for (let i = 0; i < 200; i++) old.query("INSERT INTO notes VALUES (?, 'memo', '', 'x', NULL, NULL, '2026-01-01', '2026-01-01')").run(`n${i}`)
     old.close()
+    const gate = join(data, 'gate')
     const script = join(data, 'adopt.ts')
+    // Spawn staggers startup enough to hide the race. Each process waits until
+    // all six are blocked, then they enter initNotes together.
     writeFileSync(script, [
+      `import { closeSync, openSync, existsSync } from 'node:fs'`,
       `import { initNotes, listNotes } from ${JSON.stringify(pathToFileURL(join(SRC, 'notes.ts')).href)}`,
+      `closeSync(openSync(process.argv[3] + '.' + process.pid, 'w'))`,
+      `while (!existsSync(process.argv[3])) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5)`,
       'initNotes(process.argv[2])',
       'console.log(listNotes({ limit: 1000 }).length)',
       'process.exit(0)',
     ].join('\n'))
-    const procs = [0, 1, 2, 3, 4, 5].map(() => Bun.spawn([process.execPath, script, data], { stdout: 'pipe', stderr: 'pipe' }))
-    const outs = await Promise.all(procs.map(async (p) => ({ code: await p.exited, out: (await new Response(p.stdout).text()).trim() })))
-    expect(outs).toEqual([0, 1, 2, 3, 4, 5].map(() => ({ code: 0, out: '200' })))
-    expect(readdirSync(data).some((f) => f.includes('.adopting-'))).toBe(false)
+    const procs = [0, 1, 2, 3, 4, 5].map(() => Bun.spawn([process.execPath, script, data, gate], { stdout: 'pipe', stderr: 'pipe' }))
+    try {
+      const readyBy = Date.now() + 5_000
+      while (readdirSync(data).filter((f) => f.startsWith('gate.')).length < 6) {
+        if (Date.now() > readyBy) throw new Error('adopters did not start')
+        await Bun.sleep(5)
+      }
+      writeFileSync(gate, '')
+      const outs = await Promise.all(procs.map(async (p) => ({ code: await p.exited, out: (await new Response(p.stdout).text()).trim() })))
+      expect(outs).toEqual([0, 1, 2, 3, 4, 5].map(() => ({ code: 0, out: '200' })))
+      expect(readdirSync(data).some((f) => f.includes('.adopting-'))).toBe(false)
+    } finally {
+      // A readiness timeout used to leave the children blocked on the gate.
+      writeFileSync(gate, '')
+      for (const proc of procs) {
+        try { proc.kill() } catch { /* already exited */ }
+      }
+      await Promise.all(procs.map((proc) => proc.exited))
+    }
+  })
+
+  test('adopting notes.db leaves an existing archive untouched', () => {
+    writeFileSync(join(data, 'notes.migrated.db'), 'arquivo anterior')
+    const old = new Database(join(data, 'notes.db'), { create: true })
+    old.exec(`CREATE TABLE notes (id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '',
+      url TEXT, category TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+    old.query("INSERT INTO notes VALUES ('n1', 'memo', '', 'nova', NULL, NULL, '2026-01-01', '2026-01-01')").run()
+    old.close()
+
+    initNotes(data)
+    expect(readFileSync(join(data, 'notes.migrated.db'), 'utf-8')).toBe('arquivo anterior')
+    expect(getNote('n1')?.body).toBe('nova')
+    expect(existsSync(join(data, 'notes.db'))).toBe(true)
   })
 
   test('busy errors are recognised and get a readable message', () => {

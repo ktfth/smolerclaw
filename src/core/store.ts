@@ -6,7 +6,7 @@
  * busy_timeout makes a second writer wait its turn instead of failing.
  */
 import { Database } from 'bun:sqlite'
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs'
+import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { logger } from './logger'
 
@@ -34,7 +34,9 @@ export function openStore(dataDir: string): Database {
   const db = new Database(path, { create: true, strict: true })
   try {
     db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS};`)
-    db.exec('PRAGMA journal_mode = WAL;')
+    // journal_mode does not wait on busy_timeout: a second process opening the
+    // store gets SQLITE_BUSY immediately unless this is retried.
+    setJournalModeWal(db)
     db.exec('PRAGMA foreign_keys = ON;')
     db.exec('CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL);')
   } catch (err) {
@@ -161,48 +163,142 @@ export function isBusyError(err: unknown): boolean {
 
 export const BUSY_MESSAGE = 'Outro processo do smolerclaw está gravando (provavelmente sincronizando o Obsidian). Tente de novo em instantes.'
 
+/** Wait out a lock SQLite reports immediately instead of honouring busy_timeout. */
+function pause(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+/**
+ * Switching to WAL takes an exclusive lock and, unlike ordinary writes, fails
+ * at once when another process holds the file. Retry that lock. A result that
+ * is not WAL, with no error, means this storage cannot use WAL; keep the mode
+ * SQLite left in place instead of treating it as contention.
+ */
+function setJournalModeWal(db: Database): void {
+  const deadline = Date.now() + BUSY_TIMEOUT_MS
+  let last: unknown
+  for (;;) {
+    try {
+      // Success with a non-WAL mode means this filesystem cannot switch.
+      db.query('PRAGMA journal_mode = WAL').get()
+      return
+    } catch (err) {
+      if (!isBusyError(err)) throw err
+      last = err
+    }
+    if (Date.now() >= deadline) throw last
+    pause(20)
+  }
+}
+
+function discard(file: string): void {
+  try { unlinkSync(file) } catch { /* never created or already gone */ }
+}
+
+/**
+ * Publish a finished copy. A hard link fails if the destination exists, so a
+ * second process cannot replace a store the winner already opened. rename()
+ * on Linux would. Filesystems without hard links fall back to rename, and
+ * only when the destination is still absent.
+ */
+function publishCopy(temp: string, path: string): boolean {
+  try {
+    linkSync(temp, path)
+    discard(temp)
+    return true
+  } catch (err) {
+    const code = (err as { code?: string }).code
+    if (code === 'EEXIST' || existsSync(path)) {
+      discard(temp)
+      return false
+    }
+    if (code === 'ENOTSUP' || code === 'EPERM' || code === 'EXDEV' || code === 'ENOSYS') {
+      if (existsSync(path)) {
+        discard(temp)
+        return false
+      }
+      try {
+        renameSync(temp, path)
+        return true
+      } catch (renameErr) {
+        discard(temp)
+        if (existsSync(path)) return false
+        throw renameErr
+      }
+    }
+    discard(temp)
+    throw err
+  }
+}
+
 /**
  * Carry an existing notes.db over to smolerclaw.db, keeping the original as
- * notes.migrated.db. The copy is built under a temporary name and renamed into
- * place, so a crash or a second process starting together never leaves a
- * half-written smolerclaw.db behind.
+ * notes.migrated.db. The copy is built under a temporary name. It is linked
+ * into place, not renamed: rename replaces an existing file on Linux, so a
+ * second process would overwrite a store the winner may already have open.
+ * A crash or a second process starting together never leaves a half-written
+ * smolerclaw.db behind. The copy waits on the source lock instead of failing
+ * the process, and a loser opens the winner's store.
  */
 function adoptLegacyDb(dataDir: string, path: string): void {
   const legacy = join(dataDir, LEGACY_DB_FILE)
   if (existsSync(path) || !existsSync(legacy)) return
   removeStaleCopies(dataDir)
   const temp = `${path}${ADOPTING}${process.pid}`
-  try {
-    const source = new Database(legacy, { readonly: true })
-    try {
-      // A consistent copy even if another process still has the old file open.
-      source.query('VACUUM INTO ?').run(temp)
-    } finally {
-      source.close()
-    }
-  } catch (err) {
-    try { unlinkSync(temp) } catch { /* never created */ }
-    // Losing the race (the winner already moved notes.db away) is fine; anything else is not.
+  const deadline = Date.now() + BUSY_TIMEOUT_MS
+  for (;;) {
     if (existsSync(path)) return
-    throw err
-  }
-  try {
-    if (existsSync(path)) throw new Error('adopted by another process')
-    renameSync(temp, path)
-  } catch {
-    // Another process won the race: its copy is the store; drop ours.
-    try { unlinkSync(temp) } catch { /* already gone */ }
+    if (!existsSync(legacy)) {
+      if (waitForFile(path, deadline)) return
+      throw new Error('notes.db disappeared before smolerclaw.db was published')
+    }
+    discard(temp)
+    try {
+      const source = new Database(legacy, { readonly: true })
+      try {
+        // A consistent copy even if another process still has the old file open.
+        const remaining = Math.max(1, deadline - Date.now())
+        source.exec(`PRAGMA busy_timeout = ${remaining};`)
+        source.query('VACUUM INTO ?').run(temp)
+      } finally {
+        source.close()
+      }
+    } catch (err) {
+      discard(temp)
+      if (existsSync(path)) return
+      // The winner may still be copying, or it moved notes.db before we opened it.
+      if (Date.now() < deadline && (isBusyError(err) || !existsSync(legacy))) {
+        pause(20)
+        continue
+      }
+      throw err
+    }
+    if (!publishCopy(temp, path)) return
+    // rename() on Linux would replace an archive already sitting beside this
+    // store. Leave notes.db in place instead of destroying that archive.
+    if (existsSync(join(dataDir, 'notes.migrated.db'))) {
+      logger.warn('Left the old notes database in place; an archive already exists', { file: legacy })
+      return
+    }
+    // The old file and its sidecars move together, so a stale -wal is never replayed onto a new notes.db.
+    for (const suffix of ['', '-wal', '-shm']) {
+      const file = legacy + suffix
+      if (!existsSync(file)) continue
+      try {
+        renameSync(file, join(dataDir, `notes.migrated.db${suffix}`))
+      } catch (err) {
+        // The copy is complete; a locked original only stays in place, unused.
+        logger.warn('Could not rename the old notes database', { file, error: err })
+      }
+    }
     return
   }
-  // The old file and its sidecars move together, so a stale -wal is never replayed onto a new notes.db.
-  for (const suffix of ['', '-wal', '-shm']) {
-    const file = legacy + suffix
-    if (!existsSync(file)) continue
-    try {
-      renameSync(file, join(dataDir, `notes.migrated.db${suffix}`))
-    } catch (err) {
-      // The copy is complete; a locked original only stays in place, unused.
-      logger.warn('Could not rename the old notes database', { file, error: err })
-    }
+}
+
+function waitForFile(path: string, deadline: number): boolean {
+  while (!existsSync(path)) {
+    if (Date.now() >= deadline) return false
+    pause(20)
   }
+  return true
 }

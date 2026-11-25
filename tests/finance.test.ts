@@ -6,7 +6,7 @@ import {
   initFinance, addTransaction, removeTransaction, getMonthSummary, getRecentTransactions,
   listTransactions, exportFinanceSnapshot,
 } from '../src/finance'
-import { closeStore } from '../src/core/store'
+import { closeStore, store } from '../src/core/store'
 
 describe('finance', () => {
   let dir: string
@@ -57,7 +57,35 @@ describe('finance', () => {
     addTransaction('saida', 1, 'primeira', '')
     addTransaction('saida', 2, 'segunda', '')
     const text = getRecentTransactions()
+    expect(text).toContain('segunda')
+    expect(text).toContain('primeira')
     expect(text.indexOf('segunda')).toBeLessThan(text.indexOf('primeira'))
+  })
+
+  test('getRecentTransactions breaks a shared timestamp with the later insert', () => {
+    const stamp = '2026-11-20T15:00:00.000Z'
+    const insert = store().query(
+      'INSERT INTO transactions (id, type, amount_cents, category, description, date) VALUES (?, ?, ?, ?, ?, ?)',
+    )
+    insert.run('oldrow01', 'saida', 100, 'primeira', '', stamp)
+    insert.run('newrow02', 'saida', 200, 'segunda', '', stamp)
+    const text = getRecentTransactions()
+    expect(text).toContain('segunda')
+    expect(text).toContain('primeira')
+    expect(text.indexOf('segunda')).toBeLessThan(text.indexOf('primeira'))
+  })
+
+  test('getRecentTransactions orders the instant, not the stored text', () => {
+    const insert = store().query(
+      'INSERT INTO transactions (id, type, amount_cents, category, description, date) VALUES (?, ?, ?, ?, ?, ?)',
+    )
+    // 16:00 at UTC-3 is 19:00Z, later than 18:00Z, but the text sorts the other way.
+    insert.run('lateroff', 'saida', 100, 'depois', '', '2026-11-20T16:00:00-03:00')
+    insert.run('earlierz', 'saida', 100, 'antes', '', '2026-11-20T18:00:00Z')
+    const text = getRecentTransactions()
+    expect(text).toContain('depois')
+    expect(text).toContain('antes')
+    expect(text.indexOf('depois')).toBeLessThan(text.indexOf('antes'))
   })
 
   test('exportFinanceSnapshot returns every transaction as JSON', () => {
