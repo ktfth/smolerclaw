@@ -154,11 +154,21 @@ export function getMonthSummary(year?: number, month?: number): string {
   return lines.join('\n')
 }
 
-/** Newest first. A tie on the millisecond timestamp goes to the later insert. */
+/**
+ * Newest first. Dates are compared as instants, then a tie — the clock only
+ * has millisecond resolution — goes to the later insert. `slice` keeps the
+ * previous limit rules, including a fractional or negative count.
+ */
 export function getRecentTransactions(limit = 10): string {
-  const recent = (store().query(
-    'SELECT * FROM transactions ORDER BY date DESC, rowid DESC LIMIT ?',
-  ).all(limit) as TransactionRow[]).map(toTransaction)
+  const rows = store().query('SELECT rowid AS ord, * FROM transactions').all() as (TransactionRow & { ord: number })[]
+  const recent = rows
+    .sort((a, b) => {
+      const byDate = new Date(b.date).getTime() - new Date(a.date).getTime()
+      if (byDate !== 0) return byDate
+      return b.ord - a.ord
+    })
+    .slice(0, limit)
+    .map(toTransaction)
 
   if (recent.length === 0) return 'Nenhuma transacao registrada.'
 

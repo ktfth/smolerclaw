@@ -170,17 +170,18 @@ function pause(ms: number): void {
 
 /**
  * Switching to WAL takes an exclusive lock and, unlike ordinary writes, fails
- * at once when another process holds the file. Retry until it sticks or the
- * busy timeout runs out.
+ * at once when another process holds the file. Retry that lock. A result that
+ * is not WAL, with no error, means this storage cannot use WAL; keep the mode
+ * SQLite left in place instead of treating it as contention.
  */
 function setJournalModeWal(db: Database): void {
   const deadline = Date.now() + BUSY_TIMEOUT_MS
   let last: unknown
   for (;;) {
     try {
-      const row = db.query('PRAGMA journal_mode = WAL').get() as { journal_mode: string } | null
-      if (row?.journal_mode?.toLowerCase() === 'wal') return
-      last = new Error('database is locked')
+      // Success with a non-WAL mode means this filesystem cannot switch.
+      db.query('PRAGMA journal_mode = WAL').get()
+      return
     } catch (err) {
       if (!isBusyError(err)) throw err
       last = err
@@ -192,6 +193,42 @@ function setJournalModeWal(db: Database): void {
 
 function discard(file: string): void {
   try { unlinkSync(file) } catch { /* never created or already gone */ }
+}
+
+/**
+ * Publish a finished copy. A hard link fails if the destination exists, so a
+ * second process cannot replace a store the winner already opened. rename()
+ * on Linux would. Filesystems without hard links fall back to rename, and
+ * only when the destination is still absent.
+ */
+function publishCopy(temp: string, path: string): boolean {
+  try {
+    linkSync(temp, path)
+    discard(temp)
+    return true
+  } catch (err) {
+    const code = (err as { code?: string }).code
+    if (code === 'EEXIST' || existsSync(path)) {
+      discard(temp)
+      return false
+    }
+    if (code === 'ENOTSUP' || code === 'EPERM' || code === 'EXDEV' || code === 'ENOSYS') {
+      if (existsSync(path)) {
+        discard(temp)
+        return false
+      }
+      try {
+        renameSync(temp, path)
+        return true
+      } catch (renameErr) {
+        discard(temp)
+        if (existsSync(path)) return false
+        throw renameErr
+      }
+    }
+    discard(temp)
+    throw err
+  }
 }
 
 /**
@@ -236,14 +273,13 @@ function adoptLegacyDb(dataDir: string, path: string): void {
       }
       throw err
     }
-    try {
-      linkSync(temp, path)
-    } catch (err) {
-      discard(temp)
-      if (existsSync(path)) return
-      throw err
+    if (!publishCopy(temp, path)) return
+    // rename() on Linux would replace an archive already sitting beside this
+    // store. Leave notes.db in place instead of destroying that archive.
+    if (existsSync(join(dataDir, 'notes.migrated.db'))) {
+      logger.warn('Left the old notes database in place; an archive already exists', { file: legacy })
+      return
     }
-    discard(temp)
     // The old file and its sidecars move together, so a stale -wal is never replayed onto a new notes.db.
     for (const suffix of ['', '-wal', '-shm']) {
       const file = legacy + suffix
